@@ -3,11 +3,18 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";  // npm i remark-breaks nếu chưa
 
-export default function ChatArea({ selectedSources }) {
+export default function ChatArea({ selectedSources, sources = [] }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
+
+  // Check xem có source nào trong selectedSources đang ở status index_ready không
+  const hasIndexReadySources = selectedSources?.length > 0 && sources.some(
+    (src) => 
+      src.status === "index_ready" && 
+      selectedSources.includes(src.video_stem || src.video)
+  );
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
@@ -30,12 +37,27 @@ export default function ChatArea({ selectedSources }) {
         }),
       });
 
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
+      }
+
       const data = await res.json();
-      const aiMsg = { role: "ai", content: data.answer || "⚠️ No response" };
+      
+      // Nếu có processing_message, thêm vào content
+      let aiContent = data.answer || "⚠️ No response";
+      if (data.processing_message) {
+        aiContent = `${data.processing_message}\n\n${aiContent}`;
+      }
+      
+      const aiMsg = { role: "ai", content: aiContent };
       setMessages((prev) => [...prev, aiMsg]);
     } catch (err) {
-      console.error(err);
-      setMessages((prev) => [...prev, { role: "ai", content: "⚠️ Lỗi khi gọi AI." }]);
+      console.error("Query error:", err);
+      const errorMsg = err.message?.includes("gặp lỗi")
+        ? err.message
+        : "⚠️ Lỗi khi gọi AI. Vui lòng thử lại.";
+      setMessages((prev) => [...prev, { role: "ai", content: errorMsg }]);
     }
     setLoading(false);
   };
@@ -61,6 +83,12 @@ export default function ChatArea({ selectedSources }) {
             ? `Đang dùng ${selectedSources.length} nguồn`
             : "Hỏi tự do hoặc chọn nguồn ở panel bên trái"}
         </p>
+        {/* Note khi có index_ready sources */}
+        {hasIndexReadySources && (
+          <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800">
+            💡 Một số tài liệu đang được hoàn thiện, câu trả lời có thể chưa đầy đủ.
+          </div>
+        )}
       </div>
 
       {/* Messages */}

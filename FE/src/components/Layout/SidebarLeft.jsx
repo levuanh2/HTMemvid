@@ -1,49 +1,265 @@
 import { useState, useEffect, useRef } from "react";
-import { FiMoreVertical } from "react-icons/fi";
+import { FiMoreVertical, FiAlertCircle } from "react-icons/fi";
 
-export default function SidebarLeft({ selectedSources, setSelectedSources }) {
+const API_BASE = "http://localhost:5000";
+
+// ============================================
+// Helper functions: Status → UI mapping
+// ============================================
+
+/**
+ * Get UI config cho một status
+ * @param {string} status - "processing" | "index_ready" | "ready" | "error"
+ * @param {string} substatus - Optional substatus
+ * @returns {object} UI config
+ */
+const getStatusConfig = (status, substatus) => {
+  switch (status) {
+    case "processing":
+      return {
+        mainText: "Đang phân tích tài liệu…",
+        showProgress: true,
+        checkboxEnabled: false,
+        badge: null,
+        borderColor: "",
+        bgColor: "",
+      };
+    
+    case "index_ready":
+      return {
+        mainText: "Có thể sử dụng",
+        subText: substatus === "building_memory_tree" 
+          ? "Đang tối ưu thêm nội dung" 
+          : "Đang tối ưu thêm nội dung",
+        badge: "Sẵn sàng tra cứu",
+        showProgress: true,
+        checkboxEnabled: true,
+        borderColor: "",
+        bgColor: "",
+      };
+    
+    case "ready":
+      return {
+        mainText: "Sẵn sàng",
+        badge: "Hoàn tất",
+        showProgress: false,
+        checkboxEnabled: true,
+        borderColor: "",
+        bgColor: "",
+      };
+    
+    case "error":
+      return {
+        mainText: "Lỗi xử lý tài liệu",
+        showProgress: false,
+        checkboxEnabled: false,
+        badge: null,
+        borderColor: "border-red-300",
+        bgColor: "bg-red-50",
+        showErrorIcon: true,
+      };
+    
+    default:
+      return {
+        mainText: "Không xác định",
+        showProgress: false,
+        checkboxEnabled: false,
+        badge: null,
+        borderColor: "",
+        bgColor: "",
+      };
+  }
+};
+
+export default function SidebarLeft({ selectedSources, setSelectedSources, onSourcesChange }) {
+  // Source state: { source_id, filename, status, progress, video_stem?, substatus?, capabilities?, error? }
   const [sources, setSources] = useState([]);
   const [menuOpen, setMenuOpen] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [deletingFile, setDeletingFile] = useState(null);
   const fileInputRef = useRef(null);
+  const pollingIntervalsRef = useRef({}); // Track polling intervals per source_id
 
-  const fetchSources = () => {
-    fetch("http://localhost:5000/list-indexed")
+  // Poll status cho một source
+  const pollSourceStatus = (sourceId) => {
+    if (pollingIntervalsRef.current[sourceId]) {
+      return; // Already polling
+    }
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/sources/${sourceId}/status`);
+        if (!res.ok) {
+          // Source not found hoặc error -> stop polling
+          stopPolling(sourceId);
+          return;
+        }
+        const data = await res.json();
+        
+        // Update source với tất cả fields từ API: status, progress, substatus, capabilities, error
+        setSources((prev) =>
+          prev.map((s) =>
+            s.source_id === sourceId
+              ? { 
+                  ...s, 
+                  status: data.status, 
+                  progress: data.progress ?? s.progress, // Giữ progress cũ nếu không có
+                  substatus: data.substatus,
+                  capabilities: data.capabilities,
+                  error: data.error 
+                }
+              : s
+          )
+        );
+
+        // Stop polling nếu ready hoặc error
+        // index_ready: tiếp tục poll để chờ ready (Memory Tree đang build)
+        if (data.status === "ready" || data.status === "error") {
+          stopPolling(sourceId);
+          // Nếu ready, refresh sources từ backend để sync
+          if (data.status === "ready") {
+            setTimeout(() => fetchSourcesFromBackend(), 500);
+          }
+        }
+        // index_ready: không stop polling, tiếp tục poll để chờ ready
+      } catch (err) {
+        console.error(`Error polling status for ${sourceId}:`, err);
+        stopPolling(sourceId);
+      }
+    };
+
+    // Poll ngay lập tức, sau đó mỗi 1.5s
+    poll();
+    pollingIntervalsRef.current[sourceId] = setInterval(poll, 1500);
+  };
+
+  const stopPolling = (sourceId) => {
+    if (pollingIntervalsRef.current[sourceId]) {
+      clearInterval(pollingIntervalsRef.current[sourceId]);
+      delete pollingIntervalsRef.current[sourceId];
+    }
+  };
+
+  // Fetch sources từ backend (legacy sources đã ready)
+  const fetchSourcesFromBackend = () => {
+    fetch(`${API_BASE}/list-indexed`)
       .then((res) => res.json())
       .then((data) => {
-        const newSources = data.sources || [];
-        setSources(newSources);
+        const backendSources = data.sources || [];
+        
+        // Merge với sources đang processing/index_ready
+        setSources((prev) => {
+          const activeSources = prev.filter((s) => 
+            s.status === "processing" || s.status === "index_ready"
+          );
+          const readySources = backendSources.map((s) => ({
+            source_id: null, // Legacy source không có source_id
+            filename: formatFileName(s.video),
+            video_stem: s.video,
+            status: "ready",
+            progress: 1.0,
+            substatus: "memory_tree_ready",
+            capabilities: { chunk_query: true, memory_query: true },
+            num_chunks: s.num_chunks,
+          }));
+          
+          // Combine: active sources (processing/index_ready) + ready sources (loại bỏ duplicate)
+          const combined = [...activeSources];
+          readySources.forEach((rs) => {
+            const exists = combined.some(
+              (ps) => ps.video_stem === rs.video_stem || ps.filename === rs.filename
+            );
+            if (!exists) {
+              combined.push(rs);
+            }
+          });
+          
+          return combined;
+        });
+
+        // Clean up selected sources nếu không còn tồn tại
         setSelectedSources((prev) =>
-          prev.filter((p) => newSources.some((s) => s.video === p))
+          prev.filter((p) => {
+            const exists = backendSources.some((s) => s.video === p);
+            return exists;
+          })
         );
       })
-      .catch((err) => console.error(err));
+      .catch((err) => console.error("Error fetching sources:", err));
   };
 
   useEffect(() => {
-    fetchSources();
+    fetchSourcesFromBackend();
+  }, []);
+
+  // Notify parent component khi sources thay đổi
+  useEffect(() => {
+    if (onSourcesChange) {
+      onSourcesChange(sources);
+    }
+  }, [sources, onSourcesChange]);
+
+  // Cleanup polling intervals khi unmount
+  useEffect(() => {
+    return () => {
+      Object.values(pollingIntervalsRef.current).forEach((interval) =>
+        clearInterval(interval)
+      );
+    };
   }, []);
 
   const handleAddFiles = async (e) => {
     const files = e.target.files;
     if (!files.length) return;
 
-    const formData = new FormData();
+    setUploading(true);
+    const uploadedSources = [];
+
+    // Upload từng file (optimistic UI)
     for (let file of files) {
-      formData.append("files", file);
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const res = await fetch(`${API_BASE}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          throw new Error(`Upload failed for ${file.name}`);
+        }
+
+        const data = await res.json();
+        const newSource = {
+          source_id: data.source_id,
+          filename: data.filename,
+          status: data.status || "processing",
+          progress: 0.0,
+        };
+
+        // Optimistic UI: Thêm vào list ngay
+        setSources((prev) => [...prev, newSource]);
+        uploadedSources.push(data.source_id);
+
+        // Bắt đầu polling status
+        pollSourceStatus(data.source_id);
+      } catch (err) {
+        console.error(`Error uploading ${file.name}:`, err);
+        // Thêm source với status error
+        setSources((prev) => [
+          ...prev,
+          {
+            source_id: null,
+            filename: file.name,
+            status: "error",
+            progress: 0.0,
+            error: err.message,
+          },
+        ]);
+      }
     }
 
-    setUploading(true);
-    try {
-      await fetch("http://localhost:5000/upload-multiple", {
-        method: "POST",
-        body: formData,
-      });
-      fetchSources();
-    } catch (err) {
-      console.error(err);
-    }
     setUploading(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -52,36 +268,61 @@ export default function SidebarLeft({ selectedSources, setSelectedSources }) {
 
   const handleSelectAll = (checked) => {
     if (checked) {
-      setSelectedSources(sources.map((s) => s.video));
+      // Chọn sources đã index_ready hoặc ready
+      const readySources = sources
+        .filter((s) => (s.status === "ready" || s.status === "index_ready") && s.video_stem)
+        .map((s) => s.video_stem);
+      setSelectedSources(readySources);
     } else {
       setSelectedSources([]);
     }
   };
 
-  const toggleSelect = (video) => {
+  const toggleSelect = (source) => {
+    // Cho phép select sources đã index_ready hoặc ready
+    if ((source.status !== "ready" && source.status !== "index_ready") || !source.video_stem) {
+      return;
+    }
+
     setSelectedSources((prev) =>
-      prev.includes(video) ? prev.filter((v) => v !== video) : [...prev, video]
+      prev.includes(source.video_stem)
+        ? prev.filter((v) => v !== source.video_stem)
+        : [...prev, source.video_stem]
     );
   };
 
-  const handleDeleteSource = async (video) => {
-    setDeletingFile(video);
+  const handleDeleteSource = async (source) => {
+    const videoStem = source.video_stem || source.video;
+    if (!videoStem) return;
+
+    setDeletingFile(videoStem);
     setMenuOpen(null);
+
+    // Stop polling nếu đang processing
+    if (source.source_id) {
+      stopPolling(source.source_id);
+    }
+
     try {
-      await fetch("http://localhost:5000/delete-source", {
+      await fetch(`${API_BASE}/delete-source`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video }),
+        body: JSON.stringify({ video: videoStem }),
       });
-      fetchSources();
+      
+      // Remove từ local state
+      setSources((prev) => prev.filter((s) => s.video_stem !== videoStem));
+      setSelectedSources((prev) => prev.filter((v) => v !== videoStem));
     } catch (err) {
-      console.error(err);
+      console.error("Error deleting source:", err);
     }
+    
     setDeletingFile(null);
   };
 
   // 👉 helper format tên file
   const formatFileName = (videoPath) => {
+    if (!videoPath) return "";
     const rawName = videoPath.split("/").pop().replace(/\.mp4$/, "");
     const parts = rawName.split("_");
 
@@ -155,75 +396,142 @@ export default function SidebarLeft({ selectedSources, setSelectedSources }) {
       {/* Sources list */}
       <div className="flex-1 overflow-auto space-y-2">
         {sources.map((src, idx) => {
-          const displayName = formatFileName(src.video);
-          const isDeleting = deletingFile === src.video;
+          const displayName = src.filename || formatFileName(src.video || "");
+          const isDeleting = deletingFile === (src.video_stem || src.video);
+          const isSelected = selectedSources.includes(src.video_stem || src.video);
+          
+          // Get UI config từ status
+          const statusConfig = getStatusConfig(src.status, src.substatus);
+          const showProgress = statusConfig.showProgress && src.status !== "ready";
+          const checkboxEnabled = statusConfig.checkboxEnabled && !isDeleting;
 
           return (
             <div
-              key={idx}
-              className={`p-2 border rounded flex justify-between items-center hover:bg-gray-100 transition ${isDeleting ? "opacity-50" : ""
-                }`}
+              key={src.source_id || src.video_stem || idx}
+              className={`p-2 border rounded flex flex-col hover:bg-gray-50 transition ${
+                isDeleting ? "opacity-50" : ""
+              } ${statusConfig.borderColor} ${statusConfig.bgColor}`}
             >
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={selectedSources.includes(src.video)}
-                  onChange={() => toggleSelect(src.video)}
-                  disabled={isDeleting}
-                />
-                <div className="max-w-[120px] truncate" title={displayName}>
-                  {displayName}
-                  <div className="text-xs text-gray-500">
-                    {src.num_chunks} chunks
-                  </div>
-                </div>
-              </div>
-
-              {/* Menu */}
-              <div className="relative">
-                {isDeleting ? (
-                  <svg
-                    className="animate-spin h-5 w-5 text-gray-500"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                      fill="none"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8v8z"
-                    />
-                  </svg>
-                ) : (
-                  <>
-                    <button
-                      onClick={() =>
-                        setMenuOpen(menuOpen === idx ? null : idx)
-                      }
-                      className="p-1 hover:bg-gray-200 rounded"
-                    >
-                      <FiMoreVertical />
-                    </button>
-
-                    {menuOpen === idx && (
-                      <div className="absolute right-0 top-6 bg-white border rounded shadow text-sm z-10">
-                        <button
-                          onClick={() => handleDeleteSource(src.video)}
-                          className="block px-4 py-2 hover:bg-red-100 text-red-500 w-full text-left"
-                        >
-                          Delete
-                        </button>
+              <div className="flex justify-between items-start">
+                <div className="flex items-start space-x-2 flex-1 min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelect(src)}
+                    disabled={!checkboxEnabled}
+                    className="mt-1"
+                  />
+                  <div className="flex-1 min-w-0">
+                    {/* Filename */}
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="text-sm font-medium truncate"
+                        title={displayName}
+                      >
+                        {displayName}
+                      </div>
+                      {/* Error icon */}
+                      {statusConfig.showErrorIcon && (
+                        <FiAlertCircle className="text-red-500 flex-shrink-0" size={16} />
+                      )}
+                    </div>
+                    
+                    {/* Status text và badge */}
+                    <div className="mt-1 flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-gray-600">
+                        {statusConfig.mainText}
+                      </span>
+                      {statusConfig.badge && (
+                        <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
+                          {statusConfig.badge}
+                        </span>
+                      )}
+                    </div>
+                    
+                    {/* Sub text (cho index_ready) */}
+                    {statusConfig.subText && (
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {statusConfig.subText}
                       </div>
                     )}
-                  </>
-                )}
+                    
+                    {/* Progress bar - chỉ hiển thị khi showProgress = true và status != ready */}
+                    {showProgress && (
+                      <div className="mt-1">
+                        <div className="w-full bg-gray-200 rounded-full h-1">
+                          <div
+                            className="bg-blue-500 h-1 rounded-full transition-all duration-300"
+                            style={{ width: `${(src.progress || 0) * 100}%` }}
+                          />
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          {Math.round((src.progress || 0) * 100)}%
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Ready status với num_chunks */}
+                    {src.status === "ready" && src.num_chunks && (
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {src.num_chunks} chunks
+                      </div>
+                    )}
+                    
+                    {/* Error message */}
+                    {src.status === "error" && src.error && (
+                      <div className="text-xs text-red-600 mt-0.5">
+                        {src.error}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Menu */}
+                <div className="relative ml-2">
+                  {isDeleting ? (
+                    <svg
+                      className="animate-spin h-5 w-5 text-gray-500"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                        fill="none"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8v8z"
+                      />
+                    </svg>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() =>
+                          setMenuOpen(menuOpen === idx ? null : idx)
+                        }
+                        className="p-1 hover:bg-gray-200 rounded"
+                      >
+                        <FiMoreVertical />
+                      </button>
+
+                      {menuOpen === idx && (
+                        <div className="absolute right-0 top-6 bg-white border rounded shadow text-sm z-10">
+                          <button
+                            onClick={() => handleDeleteSource(src)}
+                            className="block px-4 py-2 hover:bg-red-100 text-red-500 w-full text-left"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           );

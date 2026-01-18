@@ -1,7 +1,8 @@
 import os
 import json
 from datetime import datetime
-from typing import List, Dict
+from pathlib import Path
+from typing import List, Dict, Tuple
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
@@ -16,17 +17,44 @@ _model = SentenceTransformer(MODEL_NAME)
 
 
 # ===== Helpers =====
-def _load_meta():
+def _load_meta() -> Dict[str, Dict]:
     if os.path.exists(META_PATH):
         with open(META_PATH, encoding="utf-8") as f:
             return json.load(f)
     return {}
 
 
-def _save_meta(meta: dict):
+def _save_meta(meta: dict) -> None:
+    """
+    Lưu metadata một cách an toàn (ghi ra file tạm rồi replace).
+    """
     os.makedirs(os.path.dirname(META_PATH), exist_ok=True)
-    with open(META_PATH, "w", encoding="utf-8") as f:
+    tmp_path = Path(META_PATH).with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
+    tmp_path.replace(META_PATH)
+
+
+def _normalize_source_id(name: str) -> str:
+    """
+    Chuẩn hóa source_id từ tên video hoặc id do FE truyền vào.
+    Áp dụng logic tương tự _normalize_video_stem ở memory_tree.
+    """
+    from unicodedata import normalize
+    name = (name or "").strip()
+    if not name:
+        return ""
+    # Nếu là path, chỉ lấy tên file
+    if "/" in name or "\\" in name:
+        name = os.path.basename(name)
+    # Bỏ phần mở rộng nếu có
+    if "." in name:
+        name = os.path.splitext(name)[0]
+    cleaned = normalize("NFKD", name).replace("\u00a0", " ")
+    # Bỏ suffix dạng timestamp _YYYYMMDD_HHMMSS nếu có
+    import re
+    cleaned = re.sub(r"_\d{8}_\d{6}$", "", cleaned)
+    return cleaned.strip().lower()
 
 
 def _load_index(dim: int):
@@ -47,12 +75,28 @@ def _load_index(dim: int):
         return faiss.IndexIDMap(base)
 
 # ===== Public API =====
-def append_to_index(chunks: List[str], video_name: str = "", custom_metadata: List[Dict] = None):
+def append_to_index(chunks: List[str], video_name: str = "", custom_metadata: List[Dict] = None, batch_size: int = 32):
+    """
+    Append chunks vào FAISS index với batch embedding để tối ưu tốc độ.
     
+    Args:
+        chunks: List các text chunks
+        video_name: Tên video/source
+        custom_metadata: List metadata tương ứng với từng chunk
+        batch_size: Kích thước batch cho embedding (default: 32)
+    """
     if not chunks:
         return
 
-    embeds = _model.encode(chunks, convert_to_numpy=True).astype("float32")
+    # Batch embedding để tối ưu tốc độ
+    all_embeds = []
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i:i + batch_size]
+        batch_embeds = _model.encode(batch, convert_to_numpy=True, batch_size=len(batch), show_progress_bar=False).astype("float32")
+        all_embeds.append(batch_embeds)
+    
+    # Stack tất cả embeddings
+    embeds = np.vstack(all_embeds) if len(all_embeds) > 1 else all_embeds[0]
     dim = embeds.shape[1]
 
     meta = _load_meta()
@@ -103,25 +147,84 @@ def search_index(query: str, k: int = 5) -> List[str]:
 
 
 def delete_source_from_index(video_name: str):
-    """Xóa tất cả chunks liên quan tới 1 video"""
+    """Xóa tất cả chunks liên quan tới 1 video (theo đúng tên video)."""
     meta = _load_meta()
-    keep_meta = {k: v for k, v in meta.items() if v["video"] != video_name}
+    keep_meta = {k: v for k, v in meta.items() if v.get("video") != video_name}
     _save_meta(keep_meta)
 
     # Rebuild FAISS từ metadata còn lại
-    if not keep_meta:
-        # clear index
+    rebuild_chunk_index(keep_meta)
+
+
+def delete_chunks_by_source(source_id: str) -> int:
+    """
+    Xóa tất cả chunks thuộc về 1 source (source_id là ROOT của 1 file upload).
+    - Dựa trên trường 'video' trong metadata và chuẩn hóa về cùng dạng source_id.
+    - Trả về số chunk bị xóa.
+    """
+    meta = _load_meta()
+    if not meta:
+        return 0
+
+    target = _normalize_source_id(source_id)
+    keep_meta: Dict[str, Dict] = {}
+    deleted = 0
+
+    for k, v in meta.items():
+        video_raw = v.get("video", "")
+        vid_norm = _normalize_source_id(video_raw)
+        if vid_norm == target:
+            deleted += 1
+            continue
+        keep_meta[k] = v
+
+    # Lưu lại meta đã filter
+    _save_meta(keep_meta)
+
+    # Rebuild FAISS từ metadata còn lại
+    rebuild_chunk_index(keep_meta)
+
+    return deleted
+
+
+def rebuild_chunk_index(existing_meta: Dict[str, Dict] | None = None) -> None:
+    """
+    Rebuild toàn bộ index/index.faiss từ metadata hiện có.
+    - Giữ nguyên id của từng chunk (dùng key trong META làm id).
+    - Nếu không còn metadata nào → xóa file index.
+    """
+    meta = existing_meta if existing_meta is not None else _load_meta()
+
+    if not meta:
+        # Không còn metadata -> clear index nếu có
         if os.path.exists(INDEX_PATH):
             os.remove(INDEX_PATH)
         return
 
-    texts = []
-    ids = []
-    for k, v in keep_meta.items():
-        ids.append(int(k))
-        texts.append(v["text"])
+    texts: List[str] = []
+    ids: List[int] = []
+    for k, v in meta.items():
+        try:
+            ids.append(int(k))
+            texts.append(v.get("text", ""))
+        except ValueError:
+            # Bỏ qua key không phải số (phòng trường hợp legacy)
+            continue
 
-    embeds = _model.encode(texts, convert_to_numpy=True).astype("float32")
+    if not texts or not ids:
+        if os.path.exists(INDEX_PATH):
+            os.remove(INDEX_PATH)
+        return
+
+    # Batch embedding để tối ưu tốc độ rebuild
+    batch_size = 32
+    all_embeds = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        batch_embeds = _model.encode(batch, convert_to_numpy=True, batch_size=len(batch), show_progress_bar=False).astype("float32")
+        all_embeds.append(batch_embeds)
+    
+    embeds = np.vstack(all_embeds) if len(all_embeds) > 1 else all_embeds[0]
     dim = embeds.shape[1]
 
     base = faiss.IndexFlatL2(dim)

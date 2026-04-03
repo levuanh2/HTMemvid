@@ -1,0 +1,14 @@
+{
+  "33c65c65-eeaa-4da9-b27a-2b0b0617aa1d": {
+    "filename": "Chuong1.2.docx",
+    "source_stem": "chuong1_2_docx",
+    "status": "ready",
+    "progress": 1.0,
+    "created_at": "2026-04-03T09:07:26.611799+00:00",
+    "substatus": "memory_tree_ready",
+    "capabilities": {
+      "chunk_query": true,
+      "memory_query": true
+    }
+  }
+}

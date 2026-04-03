@@ -1,0 +1,20 @@
+{
+  "index_built_at": "2026-04-03T09:08:31.177409Z",
+  "dim": 384,
+  "nodes": [
+    {
+      "memory_id": "mem_doc_chuong1_2_docx",
+      "tree_id": "memtree_chuong1_2_docx",
+      "type": "document",
+      "title": "Tài liệu: chuong1_2_docx",
+      "source_stem": "chuong1_2_docx"
+    },
+    {
+      "memory_id": "mem_sec_chuong1_2_docx_0",
+      "tree_id": "memtree_chuong1_2_docx",
+      "type": "section",
+      "title": "Tổng quan tài liệu",
+      "source_stem": "chuong1_2_docx"
+    }
+  ]
+}

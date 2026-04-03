@@ -5,22 +5,38 @@ from pathlib import Path
 from typing import List, Dict, Tuple
 import numpy as np
 import faiss
-from sentence_transformers import SentenceTransformer
+from embedding_model import get_sentence_transformer, DEFAULT_MODEL_NAME
 
-# Đường dẫn index và metadata
-INDEX_PATH = "index/index.faiss"
-META_PATH = "index/index.json"
-MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+# Đường dẫn index và metadata (ưu tiên DATA_DIR=/app trong Docker)
+DATA_ROOT = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parent)))
+INDEX_DIR = Path(os.environ.get("INDEX_DIR", str(DATA_ROOT / "index")))
+INDEX_PATH = str(INDEX_DIR / "index.faiss")
+META_PATH = str(INDEX_DIR / "index.json")
+os.makedirs(str(INDEX_DIR), exist_ok=True)
+MODEL_NAME = os.environ.get("EMBEDDING_MODEL_NAME", DEFAULT_MODEL_NAME)
 
-# Load model 1 lần (tối ưu tốc độ)
-_model = SentenceTransformer(MODEL_NAME)
+# Singleton model (được cache trong embedding_model.py)
+_model = get_sentence_transformer(MODEL_NAME)
 
 
 # ===== Helpers =====
 def _load_meta() -> Dict[str, Dict]:
     if os.path.exists(META_PATH):
         with open(META_PATH, encoding="utf-8") as f:
-            return json.load(f)
+            meta = json.load(f)
+            if isinstance(meta, dict) and "__meta__" not in meta:
+                # Backward compatibility: nâng cấp metadata versioning cho index hiện có
+                num_chunks = sum(1 for k in meta.keys() if isinstance(k, str) and k.isdigit())
+                meta["__meta__"] = {
+                    "version": "1.0",
+                    "created_at": datetime.now().isoformat(),
+                    "num_chunks": num_chunks,
+                }
+                try:
+                    _save_meta(meta)
+                except Exception:
+                    pass
+            return meta
     return {}
 
 
@@ -88,21 +104,28 @@ def append_to_index(chunks: List[str], video_name: str = "", custom_metadata: Li
     if not chunks:
         return
 
-    # Batch embedding để tối ưu tốc độ
+    # Batch embedding để tối ưu tốc độ (giữ batch_size cố định)
     all_embeds = []
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i:i + batch_size]
-        batch_embeds = _model.encode(batch, convert_to_numpy=True, batch_size=len(batch), show_progress_bar=False).astype("float32")
+        batch_embeds = _model.encode(
+            batch,
+            convert_to_numpy=True,
+            batch_size=batch_size,
+            show_progress_bar=False
+        ).astype("float32")
         all_embeds.append(batch_embeds)
-    
-    # Stack tất cả embeddings
+
     embeds = np.vstack(all_embeds) if len(all_embeds) > 1 else all_embeds[0]
     dim = embeds.shape[1]
 
     meta = _load_meta()
 
     # Tìm id tiếp theo
-    existing_ids = [int(k) for k in meta.keys()] if meta else []
+    existing_ids: List[int] = []
+    for k in (meta or {}).keys():
+        if isinstance(k, str) and k.isdigit():
+            existing_ids.append(int(k))
     next_id = max(existing_ids) + 1 if existing_ids else 0
     ids = np.arange(next_id, next_id + len(chunks), dtype="int64")
 
@@ -111,7 +134,7 @@ def append_to_index(chunks: List[str], video_name: str = "", custom_metadata: Li
     idx.add_with_ids(embeds, ids)
     faiss.write_index(idx, INDEX_PATH)
 
-    # Cập nhật metadata
+    # Cập nhật metadata (chunk_id -> {text, video, ...})
     now = datetime.now().isoformat()
     for i, chunk in enumerate(chunks):
         meta_entry = {
@@ -123,7 +146,16 @@ def append_to_index(chunks: List[str], video_name: str = "", custom_metadata: Li
             meta_entry.update(custom_metadata[i])  # thêm parent_id, sub_order, etc.
 
         meta[str(int(ids[i]))] = meta_entry
+
+    # Cập nhật metadata versioning để support /stats và tương lai migrations
+    num_chunks = sum(1 for k in meta.keys() if isinstance(k, str) and k.isdigit())
+    meta["__meta__"] = {
+        "version": "1.0",
+        "created_at": meta.get("__meta__", {}).get("created_at") or now,
+        "num_chunks": num_chunks,
+    }
     _save_meta(meta)
+    print(f"[INDEX] added {len(chunks)} chunks video={video_name!r} (total={num_chunks})")
 
 
 def search_index(query: str, k: int = 5) -> List[str]:
@@ -203,8 +235,11 @@ def rebuild_chunk_index(existing_meta: Dict[str, Dict] | None = None) -> None:
 
     texts: List[str] = []
     ids: List[int] = []
+    # Bỏ qua key không phải chunk_id số (vd: "__meta__")
     for k, v in meta.items():
         try:
+            if not isinstance(k, str) or not k.isdigit():
+                continue
             ids.append(int(k))
             texts.append(v.get("text", ""))
         except ValueError:
@@ -214,6 +249,16 @@ def rebuild_chunk_index(existing_meta: Dict[str, Dict] | None = None) -> None:
     if not texts or not ids:
         if os.path.exists(INDEX_PATH):
             os.remove(INDEX_PATH)
+        # Nếu còn meta nhưng không có chunk, vẫn cập nhật __meta__ num_chunks=0
+        try:
+            meta["__meta__"] = {
+                "version": "1.0",
+                "created_at": meta.get("__meta__", {}).get("created_at") or datetime.now().isoformat(),
+                "num_chunks": 0,
+            }
+            _save_meta(meta)
+        except Exception:
+            pass
         return
 
     # Batch embedding để tối ưu tốc độ rebuild
@@ -221,7 +266,12 @@ def rebuild_chunk_index(existing_meta: Dict[str, Dict] | None = None) -> None:
     all_embeds = []
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
-        batch_embeds = _model.encode(batch, convert_to_numpy=True, batch_size=len(batch), show_progress_bar=False).astype("float32")
+        batch_embeds = _model.encode(
+            batch,
+            convert_to_numpy=True,
+            batch_size=batch_size,
+            show_progress_bar=False
+        ).astype("float32")
         all_embeds.append(batch_embeds)
     
     embeds = np.vstack(all_embeds) if len(all_embeds) > 1 else all_embeds[0]
@@ -231,3 +281,13 @@ def rebuild_chunk_index(existing_meta: Dict[str, Dict] | None = None) -> None:
     idx = faiss.IndexIDMap(base)
     idx.add_with_ids(embeds, np.array(ids, dtype="int64"))
     faiss.write_index(idx, INDEX_PATH)
+
+    # Update lại __meta__ (không phá format legacy keys số)
+    num_chunks = len(ids)
+    meta["__meta__"] = {
+        "version": "1.0",
+        "created_at": meta.get("__meta__", {}).get("created_at") or datetime.now().isoformat(),
+        "num_chunks": num_chunks,
+    }
+    _save_meta(meta)
+    print(f"[INDEX] rebuilt FAISS vectors= {num_chunks}")

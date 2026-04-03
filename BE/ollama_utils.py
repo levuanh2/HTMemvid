@@ -1,4 +1,6 @@
 # ollama_utils.py
+import os
+import time
 from ollama import Client
 import traceback
 from typing import List
@@ -6,7 +8,7 @@ from langdetect import detect
 
 # Default SLM model (thay đổi theo model bạn cài trên Ollama)
 SLM_MODEL = 'gemma2:2b'  
-OLLAMA_HOST = "http://localhost:11434"
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 def _safe_chat(messages: list[dict], model: str = None) -> str:
     """
     Hàm gọi Ollama an toàn (low-level).
@@ -15,24 +17,32 @@ def _safe_chat(messages: list[dict], model: str = None) -> str:
     Trả về raw text (hoặc chuỗi lỗi để debug).
     """
     model = model or SLM_MODEL
-    try:
-        cli = Client(host=OLLAMA_HOST)
-        resp = cli.chat(model=model, messages=messages)
-        raw = resp.get("message", {}).get("content", "")
-        if raw is None:
-            raw = ""
-        raw = raw.strip()
+    last_err: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            cli = Client(host=OLLAMA_HOST)
+            resp = cli.chat(model=model, messages=messages)
+            raw = resp.get("message", {}).get("content", "")
+            if raw is None:
+                raw = ""
+            raw = raw.strip()
 
-        print("=== RAW OLLAMA RESPONSE (first 1500 chars) ===")
-        print(raw[:1500])
-        print("=== END RAW ===")
+            # Giảm log noise trong production
+            if attempt == 1:
+                print("=== RAW OLLAMA RESPONSE (first 500 chars) ===")
+                print(raw[:500])
+                print("=== END RAW ===")
 
-        if not raw:
-            return "⚠️ LLM trả về rỗng."
-        return raw
-    except Exception:
-        traceback.print_exc()
-        return "⚠️ Lỗi khi gọi Ollama."
+            if not raw:
+                return "⚠️ LLM trả về rỗng."
+            return raw
+        except Exception as exc:
+            last_err = exc
+            print(f"[OLLAMA] call failed attempt={attempt}/3: {exc}")
+            time.sleep(1.0 * attempt)
+
+    traceback.print_exc()
+    return "⚠️ Lỗi khi gọi Ollama."
 
 
 def run_ollama_chat(system_prompt: str, user_prompt: str, model: str = None) -> str:

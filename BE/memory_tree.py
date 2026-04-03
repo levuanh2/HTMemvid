@@ -9,15 +9,19 @@ from typing import List, Dict, Any, Optional, Tuple
 
 import faiss
 import numpy as np
-from sentence_transformers import SentenceTransformer
+from embedding_model import get_sentence_transformer
 
 from ollama_utils import run_ollama_chat, SLM_MODEL
 from faiss_utils import MODEL_NAME
 
 
 BASE_DIR = Path(__file__).resolve().parent
-MEMORY_DIR = BASE_DIR / "memory"
-INDEX_META_PATH = BASE_DIR / "index" / "index.json"
+# Ưu tiên DATA_DIR=/app trong Docker (volume mount sẽ cung cấp /app/*)
+DATA_DIR_DEFAULT = str(BASE_DIR)
+DATA_DIR = Path(os.environ.get("DATA_DIR", DATA_DIR_DEFAULT))
+MEMORY_DIR = Path(os.environ.get("MEMORY_DIR", str(DATA_DIR / "memory")))
+INDEX_DIR = Path(os.environ.get("INDEX_DIR", str(DATA_DIR / "index")))
+INDEX_META_PATH = INDEX_DIR / "index.json"
 
 MEMORY_TREES_PATH = MEMORY_DIR / "memory_trees.json"
 MEMORY_INDEX_PATH = MEMORY_DIR / "memory_index.faiss"
@@ -25,7 +29,7 @@ MEMORY_INDEX_META_PATH = MEMORY_DIR / "memory_index.json"
 
 os.makedirs(MEMORY_DIR, exist_ok=True)
 
-_mem_model = SentenceTransformer(MODEL_NAME)
+_mem_model = get_sentence_transformer(MODEL_NAME)
 
 
 @dataclass
@@ -78,7 +82,7 @@ def _embed_batch(texts: List[str], batch_size: int = 32) -> List[List[float]]:
         batch_embeds = _mem_model.encode(
             batch, 
             convert_to_numpy=True, 
-            batch_size=len(batch), 
+            batch_size=batch_size,
             show_progress_bar=False
         ).astype("float32")
         all_embeds.extend([vec.tolist() for vec in batch_embeds])
@@ -346,6 +350,8 @@ def build_memory_tree_for_sources(source_stems: List[str]) -> Dict[str, Any]:
     # Gom chunk cho từng source
     chunks_by_src: Dict[str, List[Dict[str, Any]]] = {s: [] for s in norm_sources}
     for key, m in meta.items():
+        if not isinstance(key, str) or not key.isdigit():
+            continue
         video_raw = (m.get("video") or "").strip()
         if not video_raw:
             continue
@@ -903,7 +909,8 @@ def query_with_memory_tree(query: str, selected_sources: Optional[List[str]] = N
             node_map[n["memory_id"]] = n
 
     top_nodes: List[Dict[str, Any]] = []
-    evidence_ids: set[str] = set()
+    evidence_ids: List[str] = []
+    evidence_seen: set[str] = set()
 
     for score, row in top:
         mid = row["memory_id"]
@@ -921,8 +928,15 @@ def query_with_memory_tree(query: str, selected_sources: Optional[List[str]] = N
         }
         top_nodes.append(node_view)
         for cid in node.get("chunk_refs", []):
-            if cid:
-                evidence_ids.add(str(cid))
+            if cid is None:
+                continue
+            cid_str = str(cid)
+            if not cid_str:
+                continue
+            if cid_str in evidence_seen:
+                continue
+            evidence_seen.add(cid_str)
+            evidence_ids.append(cid_str)
 
     if not top_nodes or not evidence_ids:
         return None
@@ -961,7 +975,7 @@ def query_with_memory_tree(query: str, selected_sources: Optional[List[str]] = N
     return {
         "answer": answer,
         "memory_nodes": top_nodes,
-        "evidence_chunk_ids": list(evidence_ids),
+        "evidence_chunk_ids": evidence_ids,
         "query_type": query_type,
     }
 

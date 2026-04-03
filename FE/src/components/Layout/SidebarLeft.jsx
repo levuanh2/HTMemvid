@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { FiMoreVertical, FiAlertCircle } from "react-icons/fi";
 
-const API_BASE = "http://localhost:5000";
-
 // ============================================
 // Helper functions: Status → UI mapping
 // ============================================
@@ -24,12 +22,12 @@ const getStatusConfig = (status, substatus) => {
         borderColor: "",
         bgColor: "",
       };
-    
+
     case "index_ready":
       return {
         mainText: "Có thể sử dụng",
-        subText: substatus === "building_memory_tree" 
-          ? "Đang tối ưu thêm nội dung" 
+        subText: substatus === "building_memory_tree"
+          ? "Đang tối ưu thêm nội dung"
           : "Đang tối ưu thêm nội dung",
         badge: "Sẵn sàng tra cứu",
         showProgress: true,
@@ -37,7 +35,7 @@ const getStatusConfig = (status, substatus) => {
         borderColor: "",
         bgColor: "",
       };
-    
+
     case "ready":
       return {
         mainText: "Sẵn sàng",
@@ -47,7 +45,7 @@ const getStatusConfig = (status, substatus) => {
         borderColor: "",
         bgColor: "",
       };
-    
+
     case "error":
       return {
         mainText: "Lỗi xử lý tài liệu",
@@ -58,7 +56,7 @@ const getStatusConfig = (status, substatus) => {
         bgColor: "bg-red-50",
         showErrorIcon: true,
       };
-    
+
     default:
       return {
         mainText: "Không xác định",
@@ -88,26 +86,26 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
 
     const poll = async () => {
       try {
-        const res = await fetch(`${API_BASE}/sources/${sourceId}/status`);
+        const res = await fetch(`/api/sources/${sourceId}/status`);
         if (!res.ok) {
           // Source not found hoặc error -> stop polling
           stopPolling(sourceId);
           return;
         }
         const data = await res.json();
-        
+
         // Update source với tất cả fields từ API: status, progress, substatus, capabilities, error
         setSources((prev) =>
           prev.map((s) =>
             s.source_id === sourceId
-              ? { 
-                  ...s, 
-                  status: data.status, 
-                  progress: data.progress ?? s.progress, // Giữ progress cũ nếu không có
-                  substatus: data.substatus,
-                  capabilities: data.capabilities,
-                  error: data.error 
-                }
+              ? {
+                ...s,
+                status: data.status,
+                progress: data.progress ?? s.progress, // Giữ progress cũ nếu không có
+                substatus: data.substatus,
+                capabilities: data.capabilities,
+                error: data.error
+              }
               : s
           )
         );
@@ -142,14 +140,14 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
 
   // Fetch sources từ backend (legacy sources đã ready)
   const fetchSourcesFromBackend = () => {
-    fetch(`${API_BASE}/list-indexed`)
+    fetch(`/api/list-indexed`)
       .then((res) => res.json())
       .then((data) => {
         const backendSources = data.sources || [];
-        
+
         // Merge với sources đang processing/index_ready
         setSources((prev) => {
-          const activeSources = prev.filter((s) => 
+          const activeSources = prev.filter((s) =>
             s.status === "processing" || s.status === "index_ready"
           );
           const readySources = backendSources.map((s) => ({
@@ -162,7 +160,7 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
             capabilities: { chunk_query: true, memory_query: true },
             num_chunks: s.num_chunks,
           }));
-          
+
           // Combine: active sources (processing/index_ready) + ready sources (loại bỏ duplicate)
           const combined = [...activeSources];
           readySources.forEach((rs) => {
@@ -173,7 +171,7 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
               combined.push(rs);
             }
           });
-          
+
           return combined;
         });
 
@@ -221,7 +219,7 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
       formData.append("file", file);
 
       try {
-        const res = await fetch(`${API_BASE}/upload`, {
+        const res = await fetch(`/api/upload`, {
           method: "POST",
           body: formData,
         });
@@ -304,19 +302,19 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
     }
 
     try {
-      await fetch(`${API_BASE}/delete-source`, {
+      await fetch(`/api/delete-source`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ video: videoStem }),
       });
-      
+
       // Remove từ local state
       setSources((prev) => prev.filter((s) => s.video_stem !== videoStem));
       setSelectedSources((prev) => prev.filter((v) => v !== videoStem));
     } catch (err) {
       console.error("Error deleting source:", err);
     }
-    
+
     setDeletingFile(null);
   };
 
@@ -336,24 +334,27 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
   };
 
   return (
-    <div className="p-4 flex flex-col h-full relative">
-      <h2 className="text-lg font-semibold mb-4">Sources</h2>
+    <div className="p-4 flex flex-col h-full relative bg-white">
+      <h2 className="text-xl font-bold mb-6 text-gray-800">Tài liệu</h2>
 
       {/* Select all */}
-      <label className="flex items-center space-x-2 mb-2">
+      <label className="flex items-center space-x-3 mb-3 px-2">
         <input
           type="checkbox"
           checked={
             selectedSources.length === sources.length && sources.length > 0
           }
           onChange={(e) => handleSelectAll(e.target.checked)}
+          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
         />
-        <span className="text-sm">Chọn tất cả</span>
+        <span className="text-sm font-medium text-gray-700">Chọn tất cả</span>
       </label>
 
       {/* Add button */}
       <label
-        className={`px-3 py-1 rounded mb-4 text-center cursor-pointer flex items-center justify-center space-x-2 ${uploading ? "bg-gray-400" : "bg-blue-500 text-white"
+        className={`px-4 py-2.5 rounded-lg mb-4 text-center cursor-pointer flex items-center justify-center space-x-2 font-medium transition-all duration-200 ${uploading
+          ? "bg-gray-400 cursor-not-allowed"
+          : "bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-700 hover:to-blue-600 shadow hover:shadow-md"
           }`}
       >
         {uploading ? (
@@ -399,7 +400,7 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
           const displayName = src.filename || formatFileName(src.video || "");
           const isDeleting = deletingFile === (src.video_stem || src.video);
           const isSelected = selectedSources.includes(src.video_stem || src.video);
-          
+
           // Get UI config từ status
           const statusConfig = getStatusConfig(src.status, src.substatus);
           const showProgress = statusConfig.showProgress && src.status !== "ready";
@@ -408,24 +409,29 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
           return (
             <div
               key={src.source_id || src.video_stem || idx}
-              className={`p-2 border rounded flex flex-col hover:bg-gray-50 transition ${
-                isDeleting ? "opacity-50" : ""
-              } ${statusConfig.borderColor} ${statusConfig.bgColor}`}
+              onClick={() => checkboxEnabled && toggleSelect(src)}
+              className={`p-3 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col transition-all duration-200 ${isDeleting ? "opacity-50" : "card-hover"
+                } ${isSelected ? "ring-2 ring-blue-500 border-blue-500 bg-blue-50" : ""
+                } ${statusConfig.borderColor} ${statusConfig.bgColor} ${checkboxEnabled ? "cursor-pointer" : "cursor-default"
+                }`}
             >
               <div className="flex justify-between items-start">
-                <div className="flex items-start space-x-2 flex-1 min-w-0">
+                <div className="flex items-start space-x-3 flex-1 min-w-0">
                   <input
                     type="checkbox"
                     checked={isSelected}
-                    onChange={() => toggleSelect(src)}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      toggleSelect(src);
+                    }}
                     disabled={!checkboxEnabled}
-                    className="mt-1"
+                    className="mt-1 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500 cursor-pointer"
                   />
                   <div className="flex-1 min-w-0">
                     {/* Filename */}
                     <div className="flex items-center gap-2">
                       <div
-                        className="text-sm font-medium truncate"
+                        className="text-sm font-semibold text-gray-800 truncate"
                         title={displayName}
                       >
                         {displayName}
@@ -435,51 +441,53 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
                         <FiAlertCircle className="text-red-500 flex-shrink-0" size={16} />
                       )}
                     </div>
-                    
+
                     {/* Status text và badge */}
-                    <div className="mt-1 flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-gray-600">
+                    <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-gray-600 font-medium">
                         {statusConfig.mainText}
                       </span>
                       {statusConfig.badge && (
-                        <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
+                        <span className="text-xs px-2.5 py-0.5 bg-gradient-to-r from-blue-50 to-blue-100 text-blue-700 rounded-full font-medium">
                           {statusConfig.badge}
                         </span>
                       )}
                     </div>
-                    
+
                     {/* Sub text (cho index_ready) */}
                     {statusConfig.subText && (
-                      <div className="text-xs text-gray-500 mt-0.5">
+                      <div className="text-xs text-gray-500 mt-1">
                         {statusConfig.subText}
                       </div>
                     )}
-                    
+
                     {/* Progress bar - chỉ hiển thị khi showProgress = true và status != ready */}
                     {showProgress && (
-                      <div className="mt-1">
-                        <div className="w-full bg-gray-200 rounded-full h-1">
+                      <div className="mt-2">
+                        <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
                           <div
-                            className="bg-blue-500 h-1 rounded-full transition-all duration-300"
+                            className="bg-gradient-to-r from-blue-500 to-blue-600 h-1.5 rounded-full transition-all duration-500 ease-out relative"
                             style={{ width: `${(src.progress || 0) * 100}%` }}
-                          />
+                          >
+                            <div className="absolute inset-0 bg-white/30 animate-pulse"></div>
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-500 mt-0.5">
+                        <div className="text-xs text-gray-600 font-medium mt-1">
                           {Math.round((src.progress || 0) * 100)}%
                         </div>
                       </div>
                     )}
-                    
+
                     {/* Ready status với num_chunks */}
                     {src.status === "ready" && src.num_chunks && (
-                      <div className="text-xs text-gray-500 mt-0.5">
-                        {src.num_chunks} chunks
+                      <div className="text-xs text-gray-500 mt-1 font-medium">
+                        📄 {src.num_chunks} chunks
                       </div>
                     )}
-                    
+
                     {/* Error message */}
                     {src.status === "error" && src.error && (
-                      <div className="text-xs text-red-600 mt-0.5">
+                      <div className="text-xs text-red-600 mt-1 bg-red-50 p-2 rounded">
                         {src.error}
                       </div>
                     )}
@@ -487,10 +495,10 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
                 </div>
 
                 {/* Menu */}
-                <div className="relative ml-2">
+                <div className="relative ml-2" onClick={(e) => e.stopPropagation()}>
                   {isDeleting ? (
                     <svg
-                      className="animate-spin h-5 w-5 text-gray-500"
+                      className="animate-spin h-5 w-5 text-gray-400"
                       viewBox="0 0 24 24"
                     >
                       <circle
@@ -514,18 +522,18 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
                         onClick={() =>
                           setMenuOpen(menuOpen === idx ? null : idx)
                         }
-                        className="p-1 hover:bg-gray-200 rounded"
+                        className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors duration-150"
                       >
-                        <FiMoreVertical />
+                        <FiMoreVertical className="text-gray-600" />
                       </button>
 
                       {menuOpen === idx && (
-                        <div className="absolute right-0 top-6 bg-white border rounded shadow text-sm z-10">
+                        <div className="absolute right-0 top-8 bg-white border border-gray-200 rounded-lg shadow-lg text-sm z-10 min-w-[120px]">
                           <button
                             onClick={() => handleDeleteSource(src)}
-                            className="block px-4 py-2 hover:bg-red-100 text-red-500 w-full text-left"
+                            className="block px-4 py-2 hover:bg-red-50 text-red-600 w-full text-left rounded-lg transition-colors duration-150 font-medium"
                           >
-                            Delete
+                            Xóa
                           </button>
                         </div>
                       )}

@@ -18,18 +18,22 @@ from video_utils import save_qr_frames_to_video  # giữ nguyên hàm cũ để 
 # Ngưỡng an toàn cho QR code (version 40, error correction L)
 MAX_QR_BYTES = 2953  # tối đa byte
 MAX_QR_CHARS = 2300  # ước lượng an toàn cho tiếng Việt/Anh (khoảng 80-85% capacity)
-# Giới hạn thực tế khi đã có prefix metadata (trừ đi ~300-500 chars cho metadata)
-SAFE_CHUNK_CHARS = 1800  # Đảm bảo sau khi thêm prefix vẫn < MAX_QR_CHARS
+# Giới hạn thực tế khi đã có prefix metadata (đã trừ buffer cho metadata + checksum)
+SAFE_CHUNK_CHARS = 1700  # Đảm bảo sau khi thêm prefix vẫn < MAX_QR_CHARS
 
 # Định dạng prefix metadata trong text QR – dễ parse, khó conflict
 QR_METADATA_PREFIX = "[METADATA:"
 QR_METADATA_SUFFIX = "]"
-def _make_metadata_string(parent_id:str,order:int,total:int,video_name:str,timestamp:str)->str:
+def _compute_checksum(text: str) -> str:
+    # CRC-like nhẹ: SHA256 nhưng cắt ngắn để tiết kiệm dung lượng QR
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:16]
+
+def _make_metadata_string(parent_id: str, order: int | str, total: int | str, video_name: str, timestamp: str, checksum: str) -> str:
     """
         Tạo chuỗi metadata chuẩn để nhúng vào đầu text QR
         Ví dụ: [METADATA:parent=1000,order=1/5,video=doc.mp4,ts=2025-12-17T12:34:56]
     """
-    return f"{QR_METADATA_PREFIX}parent={parent_id},order={order},video={video_name},ts={timestamp}"
+    return f"{QR_METADATA_PREFIX}parent={parent_id},order={order},video={video_name},ts={timestamp},checksum={checksum}"
 def _extract_metadata_from_text(text:str)->dict[str, str]|None:
     """
         Parse metadata từ text QR nếu có prefix
@@ -136,8 +140,8 @@ def process_and_store_chunks(chunks:list[str],video_name:str,timestamp:str,max_w
         parent_id_str = str(current_global_id)
 
         # Kiểm tra chunk có cần chia không (tính cả prefix metadata)
-        # Ước lượng độ dài prefix: [METADATA:parent=...,order=...,video=...,ts=...]
-        estimated_prefix_len = 150 + len(video_name) + len(timestamp)  # Ước lượng an toàn
+        # Ước lượng độ dài prefix: [METADATA:parent=...,order=...,video=...,ts=...,checksum=...]
+        estimated_prefix_len = 220 + len(video_name) + len(timestamp)  # Ước lượng an toàn
         
         chunk_bytes = len(chunk.encode('utf-8'))
         estimated_total_bytes = chunk_bytes + estimated_prefix_len
@@ -146,12 +150,14 @@ def process_and_store_chunks(chunks:list[str],video_name:str,timestamp:str,max_w
         chunk_processed = False
         if estimated_total_bytes <= MAX_QR_CHARS:
             # Chunk bình thường, không chia
+            checksum = _compute_checksum(chunk)
             prefixed_text = _make_metadata_string(
                 parent_id=parent_id_str,
                 order=1,
                 total=1,
                 video_name=video_name,
-                timestamp=timestamp
+                timestamp=timestamp,
+                checksum=checksum
             ) + " " + chunk
 
             # Thêm vào task list để xử lý song song
@@ -174,12 +180,14 @@ def process_and_store_chunks(chunks:list[str],video_name:str,timestamp:str,max_w
             total = len(sub_texts)
 
             for idx, sub_text in enumerate(sub_texts, start=1):
+                checksum = _compute_checksum(sub_text)
                 prefixed_text = _make_metadata_string(
                     parent_id=parent_id_str,
                     order=idx,
                     total=total,
                     video_name=video_name,
-                    timestamp=timestamp
+                    timestamp=timestamp,
+                    checksum=checksum
                 ) + " " + sub_text
 
                 # Kiểm tra độ dài trước khi thêm vào task
@@ -189,12 +197,14 @@ def process_and_store_chunks(chunks:list[str],video_name:str,timestamp:str,max_w
                     print(f"⚠️ Sub-chunk still too long ({prefixed_bytes} bytes), splitting further...")
                     mini_chunks = _split_long_chunk(sub_text, SAFE_CHUNK_CHARS // 2)
                     for mini_idx, mini_text in enumerate(mini_chunks, start=1):
+                        mini_checksum = _compute_checksum(mini_text)
                         mini_prefixed = _make_metadata_string(
                             parent_id=parent_id_str,
                             order=f"{idx}.{mini_idx}",
                             total=f"{total}.{len(mini_chunks)}",
                             video_name=video_name,
-                            timestamp=timestamp
+                            timestamp=timestamp,
+                            checksum=mini_checksum
                         ) + " " + mini_text
                         metadata_entry = {
                             "text": mini_text,

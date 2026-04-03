@@ -4,9 +4,11 @@ import json
 import re
 import uuid
 import threading
+import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
@@ -48,25 +50,257 @@ CORS(
 
 
 BASE_DIR = Path(__file__).resolve().parent
-VIDEOS_DIR = 'videos'
-INPUT_DIR = 'input_docs'
-DATA_DIR = BASE_DIR / 'data'
+
+DATA_DIR_DEFAULT = str(BASE_DIR)
+DATA_DIR = Path(os.environ.get("DATA_DIR", DATA_DIR_DEFAULT))
+VIDEO_DIR = Path(os.environ.get("VIDEO_DIR", str(DATA_DIR / "videos")))
+INPUT_DOCS_DIR = Path(os.environ.get("INPUT_DOCS_DIR", str(DATA_DIR / "input_docs")))
+INDEX_DIR = Path(os.environ.get("INDEX_DIR", str(DATA_DIR / "index")))
+MEMORY_DIR = Path(os.environ.get("MEMORY_DIR", str(DATA_DIR / "memory")))
+
+VIDEOS_DIR = str(VIDEO_DIR)
+INPUT_DIR = str(INPUT_DOCS_DIR)
+INDEX_META_JSON_PATH = INDEX_DIR / "index.json"
+INDEX_FAISS_PATH = INDEX_DIR / "index.faiss"
 
 # Thư mục lưu các artefact trí nhớ tầng cao (mindmap, summary, memory tree, ...)
-MEMORY_DIR = BASE_DIR / 'memory'
 MINDMAPS_PATH = MEMORY_DIR / 'mindmaps.json'
 SUMMARIES_PATH = MEMORY_DIR / 'summaries.json'
-SOURCE_REGISTRY_PATH = DATA_DIR / 'source_registry.json'
+SOURCE_REGISTRY_PATH = INDEX_DIR / "source_registry.json"
 
 os.makedirs(INPUT_DIR, exist_ok=True)
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 os.makedirs(MEMORY_DIR, exist_ok=True)
-os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(INDEX_DIR, exist_ok=True)
+
+# Lightweight in-memory query cache (phù hợp offline, giảm gọi Ollama)
+QUERY_CACHE_MAX_SIZE = int(os.environ.get("QUERY_CACHE_MAX_SIZE", "128"))
+QUERY_CACHE_TTL_SEC = int(os.environ.get("QUERY_CACHE_TTL_SEC", "300"))
+_query_cache: "OrderedDict[str, dict]" = OrderedDict()
+_query_cache_lock = threading.Lock()
+
+# File lock để chặn rebuild đồng thời giữa nhiều gunicorn workers
+REBUILD_LOCK_PATH = INDEX_DIR / ".rebuild.lock"
+
+# In-memory async job manager (giữ offline, nhẹ)
+jobs: Dict[str, Dict[str, Any]] = {}
+jobs_lock = threading.Lock()
+JOB_TTL_MINUTES = int(os.environ.get("JOB_TTL_MINUTES", "30"))
+
+def _cleanup_old_jobs() -> None:
+    # Lazily cleanup on request (per-process, per gunicorn worker)
+    if JOB_TTL_MINUTES <= 0:
+        return
+    cutoff = time.time() - (JOB_TTL_MINUTES * 60)
+    with jobs_lock:
+        expired = [jid for jid, j in jobs.items() if isinstance(j.get("created_at"), (int, float)) and j["created_at"] < cutoff]
+        for jid in expired:
+            jobs.pop(jid, None)
+
+# Query async job store (separate from rebuild jobs)
+query_jobs: Dict[str, Dict[str, Any]] = {}
+query_jobs_lock = threading.Lock()
+QUERY_JOB_TTL_MINUTES = int(os.environ.get("QUERY_JOB_TTL_MINUTES", "30"))
+QUERY_JOB_TIMEOUT_SEC = int(os.environ.get("QUERY_JOB_TIMEOUT_SEC", str(5 * 60)))
+QUERY_MAX_CONCURRENT = int(os.environ.get("QUERY_MAX_CONCURRENT", "4"))
+_query_semaphore = threading.Semaphore(max(1, QUERY_MAX_CONCURRENT))
+
+def _cleanup_old_query_jobs() -> None:
+    if QUERY_JOB_TTL_MINUTES <= 0:
+        return
+    cutoff = time.time() - (QUERY_JOB_TTL_MINUTES * 60)
+    with query_jobs_lock:
+        expired = [
+            jid for jid, j in query_jobs.items()
+            if isinstance(j.get("created_at"), (int, float)) and j["created_at"] < cutoff
+        ]
+        for jid in expired:
+            query_jobs.pop(jid, None)
+
+def _make_query_cache_key(q: str, selected_sources: list, use_memory_tree: bool) -> str:
+    # Normalize list để key ổn định theo thứ tự chọn
+    sources_norm = selected_sources or []
+    sources_norm = [str(s) for s in sources_norm if s is not None]
+    sources_norm = sorted(sources_norm)
+    return json.dumps(
+        {"q": (q or "").strip(), "sources": sources_norm, "use_memory_tree": bool(use_memory_tree)},
+        ensure_ascii=False,
+        sort_keys=True
+    )
+
+def _get_cached_query(cache_key: str) -> Optional[dict]:
+    now = time.time()
+    with _query_cache_lock:
+        entry = _query_cache.get(cache_key)
+        if not entry:
+            return None
+        if now - entry["ts"] > QUERY_CACHE_TTL_SEC:
+            _query_cache.pop(cache_key, None)
+            return None
+        _query_cache.move_to_end(cache_key)
+        return entry["value"]
+
+def _set_cached_query(cache_key: str, value: dict) -> None:
+    with _query_cache_lock:
+        if cache_key in _query_cache:
+            _query_cache.move_to_end(cache_key)
+        _query_cache[cache_key] = {"ts": time.time(), "value": value}
+        while len(_query_cache) > QUERY_CACHE_MAX_SIZE:
+            _query_cache.popitem(last=False)
 
 
 @app.get('/')
 def home():
     return 'MemvidX API is running.'
+
+@app.get('/health')
+def health():
+    return jsonify({"status": "ok"}), 200
+
+@app.get('/stats')
+def stats():
+    # index meta: key là chunk_id (số dạng string). Các key không phải số được coi là metadata nội bộ.
+    num_chunks = 0
+    video_stems: set[str] = set()
+
+    try:
+        if INDEX_META_JSON_PATH.exists():
+            with open(INDEX_META_JSON_PATH, encoding="utf-8") as f:
+                meta = json.load(f)
+        else:
+            meta = {}
+    except Exception as exc:
+        print(f"[STATS] Failed to read index meta: {exc}")
+        meta = {}
+
+    for k, m in (meta or {}).items():
+        if not isinstance(k, str) or not k.isdigit():
+            continue
+        num_chunks += 1
+        video_raw = (m.get("video") or "").strip() if isinstance(m, dict) else ""
+        if video_raw:
+            stem = _normalize_video_stem(video_raw)
+            if stem:
+                video_stems.add(stem)
+
+    try:
+        num_videos = len(list(Path(VIDEOS_DIR).glob("*.mp4")))
+    except Exception:
+        num_videos = 0
+
+    # num_documents ~ số lượng video stems có trong index (tương ứng mỗi source)
+    num_documents = len(video_stems)
+
+    return jsonify({
+        "num_documents": num_documents,
+        "num_chunks": num_chunks,
+        "num_videos": num_videos,
+    }), 200
+
+
+@app.post('/rebuild-index')
+def rebuild_index_from_video():
+    """
+    Rebuild FAISS index ONLY from QR videos asynchronously (video-as-source-of-truth).
+    Returns immediately with a job_id for progress tracking.
+    """
+    _cleanup_old_jobs()
+
+    # Only one rebuild at a time across gunicorn workers (file lock)
+    try:
+        lock_fd = os.open(str(REBUILD_LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(lock_fd, str(os.getpid()).encode("utf-8"))
+        os.close(lock_fd)
+    except FileExistsError:
+        return jsonify({"error": "Rebuild index is already running"}), 409
+    except Exception as exc:
+        return jsonify({"error": f"Cannot create rebuild lock: {str(exc)}"}), 500
+
+    job_id = str(uuid.uuid4())
+    with jobs_lock:
+        jobs[job_id] = {
+            "status": "pending",
+            "progress": 0,
+            "num_videos": 0,
+            "num_chunks": 0,
+            "error": None,
+            "created_at": time.time(),
+        }
+
+    def rebuild_task(jid: str) -> None:
+        try:
+            with jobs_lock:
+                if jid not in jobs:
+                    return
+                jobs[jid]["status"] = "running"
+                jobs[jid]["progress"] = 0
+
+            def progress_cb(progress: int, extra: Optional[Dict[str, Any]] = None) -> None:
+                with jobs_lock:
+                    if jid not in jobs:
+                        return
+                    jobs[jid]["progress"] = progress
+                    if extra:
+                        if "num_videos" in extra and extra["num_videos"] is not None:
+                            jobs[jid]["num_videos"] = int(extra["num_videos"])
+                        if "num_chunks" in extra and extra["num_chunks"] is not None:
+                            jobs[jid]["num_chunks"] = int(extra["num_chunks"])
+
+            from rebuild_index_from_video import rebuild_faiss_index_from_videos
+
+            result = rebuild_faiss_index_from_videos(progress_cb=progress_cb)
+            with jobs_lock:
+                if jid in jobs:
+                    jobs[jid]["status"] = "done"
+                    jobs[jid]["progress"] = 100
+                    jobs[jid]["num_chunks"] = int(result.get("num_chunks") or 0)
+                    jobs[jid]["num_videos"] = int(result.get("num_videos") or jobs[jid].get("num_videos") or 0)
+        except Exception as exc:
+            with jobs_lock:
+                if jid in jobs:
+                    jobs[jid]["status"] = "error"
+                    jobs[jid]["error"] = str(exc)
+            print(f"[REBUILD] job_id={jid} failed: {exc}")
+        finally:
+            # Release file lock best-effort
+            try:
+                if REBUILD_LOCK_PATH.exists():
+                    REBUILD_LOCK_PATH.unlink()
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=rebuild_task, args=(job_id,), daemon=True)
+    try:
+        thread.start()
+    except Exception as exc:
+        # If thread failed to start, cleanup lock and job
+        try:
+            if REBUILD_LOCK_PATH.exists():
+                REBUILD_LOCK_PATH.unlink()
+        except Exception:
+            pass
+        with jobs_lock:
+            jobs.pop(job_id, None)
+        return jsonify({"error": f"Failed to start rebuild job: {str(exc)}"}), 500
+
+    return jsonify({"status": "started", "job_id": job_id}), 202
+
+
+@app.get('/rebuild-status/<job_id>')
+def rebuild_status(job_id: str):
+    _cleanup_old_jobs()
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        # Return only required fields (but include error when exists)
+        return jsonify({
+            "status": job.get("status"),
+            "progress": job.get("progress"),
+            "num_chunks": job.get("num_chunks"),
+            "num_videos": job.get("num_videos"),
+            "error": job.get("error"),
+        }), 200
 
 
 # -------------------------
@@ -346,12 +580,14 @@ def _background_process_source(source_id: str, file_path: str, filename: str):
         text = extract_text(file_path)
         if not text.strip():
             raise ValueError("Cannot read file content")
+        print(f"[INGEST] source={source_id} extracted_chars={len(text)}")
         
         # Step 2: Semantic chunking (progress 0.3)
         _update_source_status(source_id, "processing", progress=0.3)
         chunks = split_text(text)
         if not chunks:
             raise ValueError("No chunks generated")
+        print(f"[INGEST] source={source_id} semantic_chunks={len(chunks)}")
         
         # Step 3: Process chunks và tạo video (progress 0.4)
         _update_source_status(source_id, "processing", progress=0.4)
@@ -362,6 +598,7 @@ def _background_process_source(source_id: str, file_path: str, filename: str):
             video_name=video_name,
             timestamp=timestamp
         )
+        print(f"[INGEST] source={source_id} video={video_path} frames={len(metadata_entries)}")
         
         # Step 4: Embedding + FAISS index (progress 0.5 → 0.7)
         _update_source_status(source_id, "processing", progress=0.5)
@@ -659,7 +896,7 @@ def list_indexed():
     Trả về format mà frontend expect: { video: stem, chunks: [...], num_chunks: N }
     """
     try:
-        with open('index/index.json', encoding='utf-8') as f:
+        with open(INDEX_META_JSON_PATH, encoding='utf-8') as f:
             meta = json.load(f)
 
         video_map = {}
@@ -709,18 +946,22 @@ def _legacy_query_flat_chunks(q: str, selected_sources: list[str] | None = None)
     chunks_with_file: list[str] = []
 
     try:
-        with open('index/index.json', encoding='utf-8') as f:
+        with open(INDEX_META_JSON_PATH, encoding='utf-8') as f:
             meta = json.load(f)
     except Exception as e:
         return {'error': 'No index metadata found', 'detail': str(e)}, 500
 
     meta_norm = {}
     for k, m in meta.items():
+        if not isinstance(k, str) or not k.isdigit():
+            continue
+        if not isinstance(m, dict):
+            continue
         video_raw = m.get('video', '').strip()
         video_name = Path(video_raw).name
         video_stem = unicodedata.normalize('NFKD', Path(video_name).stem).replace('\u00a0', ' ').lower()
         meta_norm[k] = {
-            'text': m['text'],
+            'text': m.get('text', ''),
             'video_stem': video_stem
         }
 
@@ -756,61 +997,158 @@ def _legacy_query_flat_chunks(q: str, selected_sources: list[str] | None = None)
     return {'answer': answer}, 200
 
 
-# -------------------------
-# 🔍 Query (Memory Tree first, fallback chunk)
-# -------------------------
-@app.post('/query')
-def query():
-    data = request.json or {}
-    q = data.get('q') or data.get('question') or ''
-    selected_sources = data.get('sources') or []
-    use_memory_tree = data.get('use_memory_tree', True)
-
-    if not q.strip():
-        return jsonify({'error': 'Missing query'}), 400
+def _run_query_pipeline(q: str, selected_sources: list[str] | None, use_memory_tree: bool) -> tuple[dict, int]:
+    """
+    Giữ nguyên logic /query hiện tại nhưng trả về (payload, status_code).
+    Dùng cho async background job để tránh block request.
+    """
+    selected_sources = selected_sources or []
+    q = (q or "").strip()
+    if not q:
+        return {"error": "Missing query"}, 400
 
     # Check source status nếu có selected_sources
     processing_message = None
     if selected_sources:
         sources_status = _check_sources_status(selected_sources)
-        
+
         # Nếu có source đang error -> trả error message
         error_sources = [s for s, status in sources_status.items() if status == "error"]
         if error_sources:
             error_info = _get_source_status_by_stem(error_sources[0])
             error_msg = error_info.get("error", "Source processing error") if error_info else "Source processing error"
-            return jsonify({
-                'error': f'Một hoặc nhiều tài liệu đã gặp lỗi: {error_msg}',
-                'answer': None
-            }), 400
-        
+            return {
+                "error": f"Một hoặc nhiều tài liệu đã gặp lỗi: {error_msg}",
+                "answer": None
+            }, 400
+
         # Nếu có source đang processing -> cho phép query nhưng thông báo
         processing_sources = [s for s, status in sources_status.items() if status == "processing"]
         if processing_sources:
             processing_message = "Một số tài liệu đang được xử lý, mình sẽ trả lời đầy đủ hơn khi xong."
 
+    cache_key: Optional[str] = None
+    if not processing_message:
+        cache_key = _make_query_cache_key(q, selected_sources, use_memory_tree)
+        cached = _get_cached_query(cache_key)
+        if cached and isinstance(cached, dict) and cached.get("payload"):
+            payload = cached["payload"]
+            status = int(cached.get("status", 200))
+            return payload, status
+
     # 1) Thử query qua Memory Tree trước
     if use_memory_tree:
         try:
+            print(f"[QUERY] q={q!r} use_memory_tree={use_memory_tree} selected_sources={selected_sources}")
             mem_result = query_with_memory_tree(q, selected_sources=selected_sources)
-        except Exception as exc:
-            import traceback; traceback.print_exc()
+        except Exception:
+            import traceback
+            traceback.print_exc()
             mem_result = None
 
         if mem_result and isinstance(mem_result, dict) and mem_result.get("answer"):
-            # Thêm processing message nếu có
             if processing_message:
                 mem_result["processing_message"] = processing_message
-            return jsonify(mem_result)
+            if cache_key:
+                _set_cached_query(cache_key, {"payload": mem_result, "status": 200})
+            return mem_result, 200
 
     # 2) Fallback: logic chunk-level cũ
     payload, status = _legacy_query_flat_chunks(q, selected_sources)
-    
-    # Thêm processing message nếu có
     if processing_message and isinstance(payload, dict):
         payload["processing_message"] = processing_message
-    
-    return jsonify(payload), status
+    if cache_key and isinstance(payload, dict) and payload.get("answer"):
+        _set_cached_query(cache_key, {"payload": payload, "status": status})
+    return payload, status
+
+
+# -------------------------
+# 🔍 Query (Memory Tree first, fallback chunk)
+# -------------------------
+@app.post('/query')
+def query():
+    """
+    Async job-based query:
+    - POST /query returns immediately with job_id
+    - background thread runs the existing pipeline
+    - FE polls GET /query-status/<job_id>
+    """
+    _cleanup_old_query_jobs()
+
+    data = request.json or {}
+    q = data.get('q') or data.get('question') or ''
+    selected_sources = data.get('sources') or []
+    use_memory_tree = data.get('use_memory_tree', True)
+
+    if not (q or "").strip():
+        return jsonify({'error': 'Missing query'}), 400
+
+    # Limit concurrent query threads
+    acquired = _query_semaphore.acquire(blocking=False)
+    if not acquired:
+        return jsonify({"error": "Too many concurrent queries, please retry."}), 429
+
+    job_id = str(uuid.uuid4())
+    with query_jobs_lock:
+        query_jobs[job_id] = {
+            "status": "pending",
+            "result": None,
+            "error": None,
+            "created_at": time.time(),
+        }
+
+    def process_query_job(jid: str, question: str, sources: list, use_mem: bool) -> None:
+        start_ts = time.time()
+        try:
+            with query_jobs_lock:
+                if jid in query_jobs:
+                    query_jobs[jid]["status"] = "running"
+
+            payload, status = _run_query_pipeline(question, sources, use_mem)
+            result_obj = {
+                "payload": payload,
+                "status": status,
+            }
+
+            with query_jobs_lock:
+                if jid in query_jobs:
+                    query_jobs[jid]["status"] = "done"
+                    query_jobs[jid]["result"] = result_obj
+        except Exception as exc:
+            with query_jobs_lock:
+                if jid in query_jobs:
+                    query_jobs[jid]["status"] = "error"
+                    query_jobs[jid]["error"] = str(exc)
+            print(f"[QUERY_JOB] job_id={jid} failed: {exc}")
+        finally:
+            elapsed = time.time() - start_ts
+            if elapsed > QUERY_JOB_TIMEOUT_SEC:
+                print(f"[QUERY_JOB] job_id={jid} exceeded timeout={QUERY_JOB_TIMEOUT_SEC}s (elapsed={elapsed:.1f}s)")
+            _query_semaphore.release()
+
+    thread = threading.Thread(
+        target=process_query_job,
+        args=(job_id, q, selected_sources, use_memory_tree),
+        daemon=True
+    )
+    thread.start()
+
+    # Return immediately (no blocking)
+    return jsonify({"job_id": job_id, "status": "pending"}), 202
+
+
+@app.get('/query-status/<job_id>')
+def query_status(job_id: str):
+    _cleanup_old_query_jobs()
+    with query_jobs_lock:
+        job = query_jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        return jsonify({
+            "status": job.get("status"),
+            "result": job.get("result"),
+            "error": job.get("error"),
+        }), 200
 
 # -------------------------
 # 📝 Summarize file
@@ -854,7 +1192,7 @@ def summarize_documents():
             return jsonify({'error': 'Missing or invalid sources'}), 400
         
         # Lấy text từ các sources đã index
-        with open('index/index.json', encoding='utf-8') as f:
+        with open(INDEX_META_JSON_PATH, encoding='utf-8') as f:
             meta = json.load(f)
         
         # Normalize source names (giống logic trong generate-mindmap)
@@ -1014,7 +1352,7 @@ def delete_source():
     # FE gửi stem -> normalize
     video_stem = unicodedata.normalize('NFKD', video_name.strip()).replace('\u00a0', ' ').replace('.mp4', '').lower()
 
-    meta_path = Path('index/index.json')
+    meta_path = INDEX_META_JSON_PATH
     if not meta_path.exists():
         return jsonify({'error': 'No index metadata found'}), 404
 
@@ -1094,7 +1432,7 @@ def generate_mindmap():
                     preview += f" + {len(display_candidates) - 3} nguồn"
                 root_title = f"Tổng hợp: {preview}"
 
-        with open("index/index.json", encoding="utf-8") as f:
+        with open(INDEX_META_JSON_PATH, encoding="utf-8") as f:
             meta = json.load(f)
 
         # FIX 1: Normalize source linh hoạt hơn - loại timestamp và .mp4
@@ -1355,7 +1693,7 @@ def memory_tree_status():
                 }
         
         # Lấy danh sách tất cả sources từ index
-        with open('index/index.json', encoding='utf-8') as f:
+        with open(INDEX_META_JSON_PATH, encoding='utf-8') as f:
             meta = json.load(f)
         
         all_sources = set()
@@ -1519,7 +1857,7 @@ def _validate_source_exists(source_id: str, source_stem: str) -> Tuple[bool, Opt
         return True, source_info
     
     # Nếu không có trong registry, kiểm tra trong index
-    index_path = BASE_DIR / "index" / "index.json"
+    index_path = INDEX_META_JSON_PATH
     if index_path.exists():
         try:
             with open(index_path, encoding="utf-8") as f:
@@ -1577,14 +1915,14 @@ def delete_source_v2(source_id: str):
     
     # Chuẩn bị backup để rollback nếu lỗi
     backups = []
-    backup_dir = BASE_DIR / "data" / "backups"
+    backup_dir = DATA_DIR / "backups"
     backup_dir.mkdir(exist_ok=True)
     
     try:
         # Backup các file quan trọng
         critical_files = [
-            BASE_DIR / "index" / "index.json",
-            BASE_DIR / "index" / "index.faiss",
+            INDEX_META_JSON_PATH,
+            INDEX_FAISS_PATH,
             MEMORY_DIR / "memory_trees.json",
             MEMORY_DIR / "memory_index.faiss",
             MEMORY_DIR / "memory_index.json",
@@ -1693,4 +2031,6 @@ def get_memory_tree(source_stem: str):
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    debug_env = (os.environ.get("DEBUG", "0") or "").strip().lower()
+    debug = debug_env in {"1", "true", "yes", "y", "on"}
+    app.run(host='0.0.0.0', port=5000, debug=debug, use_reloader=debug)

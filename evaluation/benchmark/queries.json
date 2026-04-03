@@ -1,0 +1,602 @@
+[
+    {
+        "query": "What is deep learning?",
+        "relevant_docs": [
+            "doc1"
+        ]
+    },
+    {
+        "query": "Define CNN",
+        "relevant_docs": [
+            "doc2"
+        ]
+    },
+    {
+        "query": "What are RNNs used for?",
+        "relevant_docs": [
+            "doc3"
+        ]
+    },
+    {
+        "query": "LSTM architecture details",
+        "relevant_docs": [
+            "doc4"
+        ]
+    },
+    {
+        "query": "Explain Transformers in NLP",
+        "relevant_docs": [
+            "doc5"
+        ]
+    },
+    {
+        "query": "What does BERT stand for?",
+        "relevant_docs": [
+            "doc6"
+        ]
+    },
+    {
+        "query": "Who invented GANs?",
+        "relevant_docs": [
+            "doc7"
+        ]
+    },
+    {
+        "query": "Goal of reinforcement learning",
+        "relevant_docs": [
+            "doc8"
+        ]
+    },
+    {
+        "query": "SVM usage",
+        "relevant_docs": [
+            "doc9"
+        ]
+    },
+    {
+        "query": "How does KNN work?",
+        "relevant_docs": [
+            "doc10"
+        ]
+    },
+    {
+        "query": "Decision trees for classification",
+        "relevant_docs": [
+            "doc11"
+        ]
+    },
+    {
+        "query": "What is Random Forest?",
+        "relevant_docs": [
+            "doc12"
+        ]
+    },
+    {
+        "query": "Gradient boosting explained",
+        "relevant_docs": [
+            "doc13"
+        ]
+    },
+    {
+        "query": "Libraries for gradient boosting",
+        "relevant_docs": [
+            "doc14"
+        ]
+    },
+    {
+        "query": "Purpose of PCA",
+        "relevant_docs": [
+            "doc15"
+        ]
+    },
+    {
+        "query": "Definition of clustering",
+        "relevant_docs": [
+            "doc16"
+        ]
+    },
+    {
+        "query": "K-Means algorithm",
+        "relevant_docs": [
+            "doc17"
+        ]
+    },
+    {
+        "query": "Types of hierarchical clustering",
+        "relevant_docs": [
+            "doc18"
+        ]
+    },
+    {
+        "query": "DBSCAN clustering algorithm",
+        "relevant_docs": [
+            "doc19"
+        ]
+    },
+    {
+        "query": "What is NLP?",
+        "relevant_docs": [
+            "doc20"
+        ]
+    },
+    {
+        "query": "Tokenization in text processing",
+        "relevant_docs": [
+            "doc21"
+        ]
+    },
+    {
+        "query": "Stemming meaning",
+        "relevant_docs": [
+            "doc22"
+        ]
+    },
+    {
+        "query": "Lemmatization vs stemming",
+        "relevant_docs": [
+            "doc23"
+        ]
+    },
+    {
+        "query": "Named Entity Recognition task",
+        "relevant_docs": [
+            "doc24"
+        ]
+    },
+    {
+        "query": "POS tagging definition",
+        "relevant_docs": [
+            "doc25"
+        ]
+    },
+    {
+        "query": "Sentiment analysis applications",
+        "relevant_docs": [
+            "doc26"
+        ]
+    },
+    {
+        "query": "Machine translation definition",
+        "relevant_docs": [
+            "doc27"
+        ]
+    },
+    {
+        "query": "Computer vision goals",
+        "relevant_docs": [
+            "doc28"
+        ]
+    },
+    {
+        "query": "Object detection vs recognition",
+        "relevant_docs": [
+            "doc29"
+        ]
+    },
+    {
+        "query": "Image segmentation techniques",
+        "relevant_docs": [
+            "doc30"
+        ]
+    },
+    {
+        "query": "Speech recognition technology",
+        "relevant_docs": [
+            "doc31"
+        ]
+    },
+    {
+        "query": "What is robotics?",
+        "relevant_docs": [
+            "doc32"
+        ]
+    },
+    {
+        "query": "Expert systems function",
+        "relevant_docs": [
+            "doc33"
+        ]
+    },
+    {
+        "query": "Fuzzy logic concept",
+        "relevant_docs": [
+            "doc34"
+        ]
+    },
+    {
+        "query": "Genetic algorithms inspiration",
+        "relevant_docs": [
+            "doc35"
+        ]
+    },
+    {
+        "query": "Big data analytic methods",
+        "relevant_docs": [
+            "doc36"
+        ]
+    },
+    {
+        "query": "Data mining definition",
+        "relevant_docs": [
+            "doc37"
+        ]
+    },
+    {
+        "query": "Cloud computing benefits",
+        "relevant_docs": [
+            "doc38"
+        ]
+    },
+    {
+        "query": "IoT devices and networks",
+        "relevant_docs": [
+            "doc39"
+        ]
+    },
+    {
+        "query": "Cybersecurity best practices",
+        "relevant_docs": [
+            "doc40"
+        ]
+    },
+    {
+        "query": "Blockchain technology explained",
+        "relevant_docs": [
+            "doc41"
+        ]
+    },
+    {
+        "query": "Quantum computing principles",
+        "relevant_docs": [
+            "doc42"
+        ]
+    },
+    {
+        "query": "Edge computing vs cloud computing",
+        "relevant_docs": [
+            "doc43"
+        ]
+    },
+    {
+        "query": "5G network technology",
+        "relevant_docs": [
+            "doc44"
+        ]
+    },
+    {
+        "query": "Augmented reality examples",
+        "relevant_docs": [
+            "doc45"
+        ]
+    },
+    {
+        "query": "Virtual reality applications",
+        "relevant_docs": [
+            "doc46"
+        ]
+    },
+    {
+        "query": "Digital twin concept",
+        "relevant_docs": [
+            "doc47"
+        ]
+    },
+    {
+        "query": "Microservices architecture",
+        "relevant_docs": [
+            "doc48"
+        ]
+    },
+    {
+        "query": "Docker containers usage",
+        "relevant_docs": [
+            "doc49"
+        ]
+    },
+    {
+        "query": "Kubernetes orchestration",
+        "relevant_docs": [
+            "doc50"
+        ]
+    },
+    {
+        "query": "Deep learning vs machine learning",
+        "relevant_docs": [
+            "doc1"
+        ]
+    },
+    {
+        "query": "CNN for image analysis",
+        "relevant_docs": [
+            "doc2"
+        ]
+    },
+    {
+        "query": "Temporal sequences in RNN",
+        "relevant_docs": [
+            "doc3"
+        ]
+    },
+    {
+        "query": "Vanishing gradient in LSTM",
+        "relevant_docs": [
+            "doc4"
+        ]
+    },
+    {
+        "query": "Self-attention mechanism",
+        "relevant_docs": [
+            "doc5"
+        ]
+    },
+    {
+        "query": "Pre-training models NLP",
+        "relevant_docs": [
+            "doc6"
+        ]
+    },
+    {
+        "query": "Adversarial networks game",
+        "relevant_docs": [
+            "doc7"
+        ]
+    },
+    {
+        "query": "Cumulative reward RL",
+        "relevant_docs": [
+            "doc8"
+        ]
+    },
+    {
+        "query": "Supervised learning models",
+        "relevant_docs": [
+            "doc9"
+        ]
+    },
+    {
+        "query": "Non-parametric classification",
+        "relevant_docs": [
+            "doc10"
+        ]
+    },
+    {
+        "query": "Decision rules in trees",
+        "relevant_docs": [
+            "doc11"
+        ]
+    },
+    {
+        "query": "Ensemble learning methods",
+        "relevant_docs": [
+            "doc12"
+        ]
+    },
+    {
+        "query": "Weak prediction models",
+        "relevant_docs": [
+            "doc13"
+        ]
+    },
+    {
+        "query": "XGBoost library features",
+        "relevant_docs": [
+            "doc14"
+        ]
+    },
+    {
+        "query": "Dimensionality reduction PCA",
+        "relevant_docs": [
+            "doc15"
+        ]
+    },
+    {
+        "query": "Grouping similar objects",
+        "relevant_docs": [
+            "doc16"
+        ]
+    },
+    {
+        "query": "Vector quantization K-Means",
+        "relevant_docs": [
+            "doc17"
+        ]
+    },
+    {
+        "query": "Agglomerative clustering",
+        "relevant_docs": [
+            "doc18"
+        ]
+    },
+    {
+        "query": "Density-based clustering",
+        "relevant_docs": [
+            "doc19"
+        ]
+    },
+    {
+        "query": "Human computer interaction language",
+        "relevant_docs": [
+            "doc20"
+        ]
+    },
+    {
+        "query": "Breaking text into tokens",
+        "relevant_docs": [
+            "doc21"
+        ]
+    },
+    {
+        "query": "Word root reduction",
+        "relevant_docs": [
+            "doc22"
+        ]
+    },
+    {
+        "query": "Dictionary form of words",
+        "relevant_docs": [
+            "doc23"
+        ]
+    },
+    {
+        "query": "Extracting person names from text",
+        "relevant_docs": [
+            "doc24"
+        ]
+    },
+    {
+        "query": "Grammatical tagging",
+        "relevant_docs": [
+            "doc25"
+        ]
+    },
+    {
+        "query": "Subjective information extraction",
+        "relevant_docs": [
+            "doc26"
+        ]
+    },
+    {
+        "query": "Automated text translation",
+        "relevant_docs": [
+            "doc27"
+        ]
+    },
+    {
+        "query": "Understanding digital images",
+        "relevant_docs": [
+            "doc28"
+        ]
+    },
+    {
+        "query": "Semantic object detection",
+        "relevant_docs": [
+            "doc29"
+        ]
+    },
+    {
+        "query": "Partitioning digital images",
+        "relevant_docs": [
+            "doc30"
+        ]
+    },
+    {
+        "query": "Spoken language to text",
+        "relevant_docs": [
+            "doc31"
+        ]
+    },
+    {
+        "query": "Robot design and operation",
+        "relevant_docs": [
+            "doc32"
+        ]
+    },
+    {
+        "query": "Emulating human experts",
+        "relevant_docs": [
+            "doc33"
+        ]
+    },
+    {
+        "query": "Many-valued logic",
+        "relevant_docs": [
+            "doc34"
+        ]
+    },
+    {
+        "query": "Natural selection algorithms",
+        "relevant_docs": [
+            "doc35"
+        ]
+    },
+    {
+        "query": "Handling complex data sets",
+        "relevant_docs": [
+            "doc36"
+        ]
+    },
+    {
+        "query": "Discovering patterns in data",
+        "relevant_docs": [
+            "doc37"
+        ]
+    },
+    {
+        "query": "On-demand computing power",
+        "relevant_docs": [
+            "doc38"
+        ]
+    },
+    {
+        "query": "Connected physical objects",
+        "relevant_docs": [
+            "doc39"
+        ]
+    },
+    {
+        "query": "Protecting from cyberattacks",
+        "relevant_docs": [
+            "doc40"
+        ]
+    },
+    {
+        "query": "Immutable ledger technology",
+        "relevant_docs": [
+            "doc41"
+        ]
+    },
+    {
+        "query": "Superposition in computing",
+        "relevant_docs": [
+            "doc42"
+        ]
+    },
+    {
+        "query": "Distributed computing paradigm",
+        "relevant_docs": [
+            "doc43"
+        ]
+    },
+    {
+        "query": "Broadband cellular standards",
+        "relevant_docs": [
+            "doc44"
+        ]
+    },
+    {
+        "query": "Enhanced real-world environment",
+        "relevant_docs": [
+            "doc45"
+        ]
+    },
+    {
+        "query": "Simulated experiences VR",
+        "relevant_docs": [
+            "doc46"
+        ]
+    },
+    {
+        "query": "Virtual counterpart of physical object",
+        "relevant_docs": [
+            "doc47"
+        ]
+    },
+    {
+        "query": "Loosely coupled services",
+        "relevant_docs": [
+            "doc48"
+        ]
+    },
+    {
+        "query": "OS-level virtualization",
+        "relevant_docs": [
+            "doc49"
+        ]
+    },
+    {
+        "query": "Container orchestration",
+        "relevant_docs": [
+            "doc50"
+        ]
+    }
+]

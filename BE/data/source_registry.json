@@ -50,5 +50,29 @@
       "chunk_query": true,
       "memory_query": true
     }
+  },
+  "75e22391-23b5-48cf-ab7b-25e0c459b802": {
+    "filename": "MoTahethong.docx",
+    "source_stem": "motahethong_docx",
+    "status": "ready",
+    "progress": 1.0,
+    "created_at": "2026-02-03T15:00:25.166956+00:00",
+    "substatus": "memory_tree_ready",
+    "capabilities": {
+      "chunk_query": true,
+      "memory_query": true
+    }
+  },
+  "125a9523-f907-43f4-9bbc-584071c07a85": {
+    "filename": "baibaotapchi.docx",
+    "source_stem": "baibaotapchi_docx",
+    "status": "ready",
+    "progress": 1.0,
+    "created_at": "2026-02-03T15:05:13.721421+00:00",
+    "substatus": "memory_tree_ready",
+    "capabilities": {
+      "chunk_query": true,
+      "memory_query": true
+    }
   }
 }

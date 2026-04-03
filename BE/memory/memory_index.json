@@ -1,5 +1,5 @@
 {
-  "index_built_at": "2026-01-18T14:06:21.054220Z",
+  "index_built_at": "2026-02-03T15:06:06.116605Z",
   "dim": 384,
   "nodes": [
     {
@@ -85,6 +85,34 @@
       "type": "section",
       "title": "Section 7",
       "source_stem": "nhom10_bc_final_docx"
+    },
+    {
+      "memory_id": "mem_doc_motahethong_docx",
+      "tree_id": "memtree_motahethong_docx",
+      "type": "document",
+      "title": "Tài liệu: motahethong_docx",
+      "source_stem": "motahethong_docx"
+    },
+    {
+      "memory_id": "mem_sec_motahethong_docx_0",
+      "tree_id": "memtree_motahethong_docx",
+      "type": "section",
+      "title": "Tổng quan tài liệu",
+      "source_stem": "motahethong_docx"
+    },
+    {
+      "memory_id": "mem_doc_baibaotapchi_docx",
+      "tree_id": "memtree_baibaotapchi_docx",
+      "type": "document",
+      "title": "Tài liệu: baibaotapchi_docx",
+      "source_stem": "baibaotapchi_docx"
+    },
+    {
+      "memory_id": "mem_sec_baibaotapchi_docx_0",
+      "tree_id": "memtree_baibaotapchi_docx",
+      "type": "section",
+      "title": "Tổng quan tài liệu",
+      "source_stem": "baibaotapchi_docx"
     }
   ]
 }

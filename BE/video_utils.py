@@ -4,8 +4,14 @@ import qrcode
 import numpy as np
 from typing import List
 from datetime import datetime
+from pathlib import Path
+import hashlib
 
-VIDEOS_DIR = 'videos'
+# DATA_DIR=/app (docker-compose) hoặc mặc định chạy local
+DATA_DIR_DEFAULT = str(Path(__file__).resolve().parent)
+DATA_DIR = Path(os.environ.get("DATA_DIR", DATA_DIR_DEFAULT))
+VIDEO_DIR = Path(os.environ.get("VIDEO_DIR", str(DATA_DIR / "videos")))
+VIDEOS_DIR = str(VIDEO_DIR)
 QR_FRAME_RATE = 1
 
 # Tạo thư mục videos nếu chưa tồn tại
@@ -95,8 +101,30 @@ def save_qr_frames_to_video(frames: List[np.ndarray], prefix: str = 'memory') ->
 def decode_video_qr(path: str) -> List[str]:
     cap = cv2.VideoCapture(path)
     detector = cv2.QRCodeDetector()
-    decoded_texts: set = set()  # Use set to avoid duplicates
+    decoded_texts: set[str] = set()  # Use set to avoid duplicates
     idx = 0
+
+    QR_METADATA_PREFIX = "[METADATA:"
+    QR_METADATA_SUFFIX = "]"
+
+    def _compute_checksum(text: str) -> str:
+        return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:16]
+
+    def _extract_metadata(decoded: str) -> tuple[dict, str] | tuple[None, None]:
+        if not decoded.startswith(QR_METADATA_PREFIX):
+            return None, None
+        end_pos = decoded.find(QR_METADATA_SUFFIX)
+        if end_pos == -1:
+            return None, None
+        meta_str = decoded[len(QR_METADATA_PREFIX):end_pos]
+        parts = meta_str.split(',')
+        meta = {}
+        for part in parts:
+            if '=' in part:
+                k, v = part.split('=', 1)
+                meta[k.strip()] = v.strip()
+        chunk_text = decoded[end_pos + 1:].strip()  # bỏ ']' + khoảng trắng
+        return meta, chunk_text
 
     while True:
         ret, frame = cap.read()
@@ -104,7 +132,16 @@ def decode_video_qr(path: str) -> List[str]:
             break
         text, points, _ = detector.detectAndDecode(frame)
         if text:
-            decoded_texts.add(text)
+            meta, chunk_text = _extract_metadata(text)
+            # Backward compatible: nếu không có metadata checksum thì vẫn chấp nhận
+            if meta is None or meta.get("checksum") is None:
+                decoded_texts.add(text)
+            else:
+                expected = _compute_checksum(chunk_text)
+                if str(meta.get("checksum")) == expected:
+                    decoded_texts.add(text)
+                else:
+                    print(f"[QR] checksum mismatch (skip) expected={expected} got={meta.get('checksum')}")
         idx += 1
 
     cap.release()

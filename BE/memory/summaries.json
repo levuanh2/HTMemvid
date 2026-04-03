@@ -1,0 +1,371 @@
+[
+  {
+    "id": "0a8dbb42-2021-4a42-975f-d6687c8d31b5",
+    "title": "antoanthôngtin",
+    "data": {
+      "base_summary": "## Tóm tắt về Social Engineering (Kỹ thuật lừa đảo)\n\n**Social engineering là cách sử dụng con người để đánh cắp thông tin hoặc tạo điều kiện cho tấn công mạng.**  Hành vi này không cần kỹ thuật cao, chỉ cần sự thiếu cảnh giác và lòng tin. \n\n**Các dạng tấn công phổ biến:**\n\n* **CEO Fraud:** Hacker giả danh giám đốc yêu cầu chuyển tiền gấp.\n* **Giả danh IT:** Hacker gọi điện, giả danh bộ phận kỹ thuật yêu cầu mật khẩu.\n* **Tình huống mô phỏng:** Nhân viên A bị lừa khi nhấp vào email giả lập của IT.\n\n**Phòng chống Social Engineering:**\n\n* **Giáo dục & Nâng cao nhận thức:** Tập huấn định kỳ, mô phỏng tấn công phishing. \n* **Quy định nội bộ:** Quy định không cung cấp thông tin qua email, xác minh hai bước trong giao dịch quan trọng. \n* **Kiểm thử định kỳ:** Tổ chức kiểm tra phản ứng của nhân viên với email giả lập.\n* **Công nghệ hỗ trợ:** Sử dụng 2FA, bộ lọc thư rác/phishing, hệ thống phát hiện truy cập bất thường.\n\n**Kết luận:** Social engineering là mối đe dọa lớn, cần kết hợp đào tạo, quy trình và công nghệ để đảm bảo an toàn thông tin.\n\n**Lưu ý:** Nội dung mô phỏng phòng thủ được cung cấp trong đoạn văn bản cho bạn tham khảo.",
+      "entities": [
+        "* Social Engineering",
+        "* Kỹ thuật lừa đảo phi kỹ thuật",
+        "* An toàn thông tin",
+        "* CEO Fraud",
+        "* Hacker",
+        "* IT nội bộ",
+        "* Email",
+        "* Google Form",
+        "* OTP (One-Time Password)",
+        "* Tập huấn định kỳ",
+        "* Mô phỏng tấn công phishing",
+        "* Quyền riêng tư",
+        "* Xác thực 2 lớp (2FA)",
+        "* Bộ lọc thư rác/phishing",
+        "* Hệ thống phát hiện truy cập bất thườg"
+      ],
+      "fact_check": {
+        "issues": [],
+        "status": "CONSISTENT"
+      },
+      "metadata": {
+        "summary_length": 1976,
+        "text_length": 3077,
+        "used_cod": true,
+        "used_dancer": true,
+        "used_entity_chain": true,
+        "used_fact_check": true,
+        "used_structured": true
+      },
+      "sources": [
+        "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115"
+      ],
+      "structured": {
+        "applications": [],
+        "entities": [],
+        "formulas": [],
+        "keyPoints": [
+          "##  Tóm tắt bài viết \"An toàn thông tin\": Social Engineering là yếu tố nguy hiểm trong chuỗi an toàn \n\n**I",
+          "Giới thiệu:**\nSocial Engineering (Kỹ thuật lừa đảo phi kỹ thuật) là hành vi khai thác con người để đánh cắp thông tin, tạo điều kiện cho tấn công mạng",
+          " Mặc dù không cần kỹ thuật cao, Social Engineering thường thành công nhờ sự thiếu cảnh giác, lòng tin, và thiếu kiến thức bảo mật của nạn nhân",
+          "Đây chính là một trong những yếu tố nguy hiểm nhất trong chuỗi an toàn thông tin.\n\n**II",
+          "Các dạng tấn công Social Engineering:**\nSocial Engineering có nhiều dạng khác nhau, bao gồm:\n\n* **CEO Fraud**: Hacker giả danh giám đốc gửi email yêu cầu chuyển tiền gấp, khiến nạn nhân mất hàng trăm nghìn USD",
+          "Ví dụ, họ sẽ sử dụng email giả và tạo ra các thông tin sai lệch để buộc nạn nhân chuyển tiền",
+          "\n* **Giả danh IT nội bộ**: Hacker gọi điện, giả danh IT nội bộ, yêu cầu cung cấp mật khẩu để \"nâng cấp hệ thống\" - lừa đảo nhằm chiếm đoạt hệ thống",
+          "\n\n**III",
+          "Tình huống thực tế:**\nVí dụ điển hình: Hacker sử dụng email giả và gọi điện giả mạo IT nội bộ để lừa nạn nhân cung cấp thông tin cá nhân, dẫn đến việc mất dữ liệu và bị tấn công mạng",
+          "\n\n\n**IV",
+          "Biện pháp phòng chống:**\n\nĐể bảo vệ an toàn thông tin, cần kết hợp nhiều phương pháp:\n\n* **Giáo dục & nâng cao nhận thức**:  \n    - Tập huấn định kỳ, mô phỏng tấn công phishing.\n    - Chính sách nội bộ: Quy định không cung cấp thông tin qua email, xác minh 2 bước với các giao dịch quan trọng",
+          "\n    - Kiểm thử định kỳ: Tổ chức kiểm tra phản ứng của nhân viên với email giả lập",
+          "\n* **Công nghệ hỗ trợ**:  Sử dụng xác thực 2 lớp (2FA), bộ lọc thư rác/phishing, hệ thống phát hiện truy cập bất thường (Network Intrusion Detection System).\n\n**V",
+          "Kết luận:** Social Engineering là một mối đe dọa lớn cho an toàn thông tin",
+          "Dù không đòi hỏi kỹ thuật cao, cần kết hợp đào tạo, quy trình, công nghệ để đảm bảo an toàn thông tin",
+          "\n\n\n**Chú ý:**  Bản tóm tắt đã được bổ sung thêm các thực thể mới, ví dụ như \"Ví dụ thực tế\" và \"Mục tiêu\"."
+        ],
+        "summary": "##  Tóm tắt bài viết \"An toàn thông tin\": Social Engineering là yếu tố nguy hiểm trong chuỗi an toàn \n\n**I. Giới thiệu:**\nSocial Engineering (Kỹ thuật lừa đảo phi kỹ thuật) là hành vi khai thác con người để đánh cắp thông tin, tạo điều kiện cho tấn công mạng.  Mặc dù không cần kỹ thuật cao, Social Engineering thường thành công nhờ sự thiếu cảnh giác, lòng tin, và thiếu kiến thức bảo mật của nạn nhân. Đây chính là một trong những yếu tố nguy hiểm nhất trong chuỗi an toàn thông tin.\n\n**II. Các dạng tấn công Social Engineering:**\nSocial Engineering có nhiều dạng khác nhau, bao gồm:\n\n* **CEO Fraud**: Hacker giả danh giám đốc gửi email yêu cầu chuyển tiền gấp, khiến nạn nhân mất hàng trăm nghìn USD. Ví dụ, họ sẽ sử dụng email giả và tạo ra các thông tin sai lệch để buộc nạn nhân chuyển tiền. \n* **Giả danh IT nội bộ**: Hacker gọi điện, giả danh IT nội bộ, yêu cầu cung cấp mật khẩu để \"nâng cấp hệ thống\" - lừa đảo nhằm chiếm đoạt hệ thống. \n\n**III. Tình huống thực tế:**\nVí dụ điển hình: Hacker sử dụng email giả và gọi điện giả mạo IT nội bộ để lừa nạn nhân cung cấp thông tin cá nhân, dẫn đến việc mất dữ liệu và bị tấn công mạng. \n\n\n**IV. Biện pháp phòng chống:**\n\nĐể bảo vệ an toàn thông tin, cần kết hợp nhiều phương pháp:\n\n* **Giáo dục & nâng cao nhận thức**:  \n    - Tập huấn định kỳ, mô phỏng tấn công phishing.\n    - Chính sách nội bộ: Quy định không cung cấp thông tin qua email, xác minh 2 bước với các giao dịch quan trọng. \n    - Kiểm thử định kỳ: Tổ chức kiểm tra phản ứng của nhân viên với email giả lập. \n* **Công nghệ hỗ trợ**:  Sử dụng xác thực 2 lớp (2FA), bộ lọc thư rác/phishing, hệ thống phát hiện truy cập bất thường (Network Intrusion Detection System).\n\n**V. Kết luận:** Social Engineering là một mối đe dọa lớn cho an toàn thông tin. Dù không đòi hỏi kỹ thuật cao, cần kết hợp đào tạo, quy trình, công nghệ để đảm bảo an toàn thông tin. \n\n\n**Chú ý:**  Bản tóm tắt đã được bổ sung thêm các thực thể mới, ví dụ như \"Ví dụ thực tế\" và \"Mục tiêu\".",
+        "title": "Tóm tắt tài liệu"
+      },
+      "summary": "##  Tóm tắt bài viết \"An toàn thông tin\": Social Engineering là yếu tố nguy hiểm trong chuỗi an toàn \n\n**I. Giới thiệu:**\nSocial Engineering (Kỹ thuật lừa đảo phi kỹ thuật) là hành vi khai thác con người để đánh cắp thông tin, tạo điều kiện cho tấn công mạng.  Mặc dù không cần kỹ thuật cao, Social Engineering thường thành công nhờ sự thiếu cảnh giác, lòng tin, và thiếu kiến thức bảo mật của nạn nhân. Đây chính là một trong những yếu tố nguy hiểm nhất trong chuỗi an toàn thông tin.\n\n**II. Các dạng tấn công Social Engineering:**\nSocial Engineering có nhiều dạng khác nhau, bao gồm:\n\n* **CEO Fraud**: Hacker giả danh giám đốc gửi email yêu cầu chuyển tiền gấp, khiến nạn nhân mất hàng trăm nghìn USD. Ví dụ, họ sẽ sử dụng email giả và tạo ra các thông tin sai lệch để buộc nạn nhân chuyển tiền. \n* **Giả danh IT nội bộ**: Hacker gọi điện, giả danh IT nội bộ, yêu cầu cung cấp mật khẩu để \"nâng cấp hệ thống\" - lừa đảo nhằm chiếm đoạt hệ thống. \n\n**III. Tình huống thực tế:**\nVí dụ điển hình: Hacker sử dụng email giả và gọi điện giả mạo IT nội bộ để lừa nạn nhân cung cấp thông tin cá nhân, dẫn đến việc mất dữ liệu và bị tấn công mạng. \n\n\n**IV. Biện pháp phòng chống:**\n\nĐể bảo vệ an toàn thông tin, cần kết hợp nhiều phương pháp:\n\n* **Giáo dục & nâng cao nhận thức**:  \n    - Tập huấn định kỳ, mô phỏng tấn công phishing.\n    - Chính sách nội bộ: Quy định không cung cấp thông tin qua email, xác minh 2 bước với các giao dịch quan trọng. \n    - Kiểm thử định kỳ: Tổ chức kiểm tra phản ứng của nhân viên với email giả lập. \n* **Công nghệ hỗ trợ**:  Sử dụng xác thực 2 lớp (2FA), bộ lọc thư rác/phishing, hệ thống phát hiện truy cập bất thường (Network Intrusion Detection System).\n\n**V. Kết luận:** Social Engineering là một mối đe dọa lớn cho an toàn thông tin. Dù không đòi hỏi kỹ thuật cao, cần kết hợp đào tạo, quy trình, công nghệ để đảm bảo an toàn thông tin. \n\n\n**Chú ý:**  Bản tóm tắt đã được bổ sung thêm các thực thể mới, ví dụ như \"Ví dụ thực tế\" và \"Mục tiêu\"."
+    },
+    "sources": [
+      "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115"
+    ],
+    "createdAt": "2025-12-24T08:09:47.791179Z"
+  },
+  {
+    "id": "01fe127c-adca-4828-a8e3-353d2eb5515e",
+    "title": "Tóm tắt tài liệuedfsdféd",
+    "data": {
+      "base_summary": "## Tóm tắt về MemvidX: Giải pháp AI cho quản lý tài liệu thông minh\n\nMemvidX là một dự án đột phá, áp dụng công nghệ mã QR động và AI để mã hóa tài liệu văn bản thành video chứa mã QR, cho phép lưu trữ và truy xuất thông tin nhanh chóng, hiệu quả, giảm chi phí lưu trữ vật lý và tăng tốc độ truy cập. \n\nDự án MemvidX  thách thức những hạn chế của hệ thống lưu trữ truyền thống:\n* Chi phí cao cho lưu trữ & in ấn\n* Tốc độ truy cập thông tin chậm\n* Thiếu giải pháp tìm kiếm ngữ nghĩa, khó khăn trong việc tìm kiếm thông tin chính xác\n* Ảnh hưởng môi trường từ sử dụng tài liệu vật lý\n\nMemvidX tạo ra một **cách tiếp cận mới** với thông tin bằng cách kết hợp AI và mã QR động.  Dự án này cho phép:\n* **Tìm kiếm thông tin hiệu quả:** Sử dụng các mô hình LLM như Gemma/Ollama để hiểu nội dung, sau đó kết hợp với FAISS để cung cấp tìm kiếm nhanh chóng. \n* **Giảm chi phí lưu trữ:** Thay vì lưu trữ tài liệu vật lý, MemvidX sử dụng mã QR động để mã hóa thông tin và tạo video .mp4, giúp tiết kiệm ngân sách.\n* **Bảo vệ môi trường:** Giảm lượng giấy sử dụng.\n\nMemvidX là một giải pháp **thông minh** được ứng dụng trong nhiều lĩnh vực như giáo dục, chính phủ, kinh doanh,  và dễ dàng truy cập trên các thiết bị với camera. \n\n\nDự án MemvidX có khả năng **tăng hiệu quả quản lý tài liệu**,  **giảm chi phí** và **bảo vệ môi trường**.  MemvidX là một phần quan trọng trong sự chuyển đổi số, đóng góp cho thành phố thông minh và phát triển bền vững.",
+      "entities": [
+        "- MemvidX",
+        "- Hệ thống mã hóa và truy xuất tài liệu thông minh",
+        "- video QR",
+        "- AI",
+        "-  video .mp4 (1 fps)",
+        "- Bình Dương",
+        "- Thành phố thông minh",
+        "- Phát triển bền vững",
+        "- Mã QR động",
+        "- ngôn ngữ tự nhiên",
+        "- Gemma/Ollama",
+        "- FAISS",
+        "- LLM"
+      ],
+      "fact_check": {
+        "issues": [],
+        "status": "CONSISTENT"
+      },
+      "metadata": {
+        "summary_length": 2339,
+        "text_length": 6695,
+        "used_cod": true,
+        "used_dancer": true,
+        "used_entity_chain": true,
+        "used_fact_check": true,
+        "used_structured": true
+      },
+      "sources": [
+        "De_Xuat_Du_An_docx_20251217_152228"
+      ],
+      "structured": {
+        "applications": [],
+        "entities": [],
+        "formulas": [],
+        "keyPoints": [
+          "## Tóm tắt Dự án MemvidX - Hệ thống mã hóa và truy xuất tài liệu thông minh bằng video QR và AI \n\n**MemvidX** là một hệ thống tiên phong ứng dụng công nghệ mã QR động và trí tuệ nhân tạo (AI) để **\"cách mạng hóa\" cách lưu trữ và truy cập thông tin.**  Hệ thống này sử dụng công nghệ mã hóa video QR động kết hợp với AI để tách nội dung tài liệu văn bản (.docx, .pdf...) thành khung hình mã QR, sau đó được biểu diễn thành video",
+          "Đây là giải pháp tối ưu cho việc lưu trữ, truy cập và chia sẻ thông tin hiệu quả",
+          "\n\n**MemvidX mang đến sự thay đổi tích cực trong cách chúng ta tương tác với dữ liệu, thúc đẩy chuyển đổi số bền vững.**\n\n**Mục tiêu tổng quát**: MemvidX được thiết kế để \"cách mạng hóa\" cách lưu trữ & truy cập thông tin bằng video QR và AI",
+          "Hệ thống này giúp các tổ chức:\n\n* **Giảm chi phí lưu trữ & in ấn:**  MemvidX mang đến sự thay đổi tích cực, giúp các tổ chức giảm thiểu chi phí lưu trữ vật lý, giấy và công ty in ấn.\n* **Tăng tốc độ truy cập thông tin:**  AI hỗ trợ MemvidX tìm kiếm thông tin nhanh chóng và chính xác bằng ngôn ngữ tự nhiên, giúp người dùng truy cập thông tin dễ dàng hơn",
+          "\n* **Nâng cao hiệu quả quản lý tài liệu:**   MemvidX mang đến nền tảng thông minh cho các tổ chức, theo cách mà chúng ta hiểu và sử dụng thông tin.\n\n**Hệ thống hoạt động**:\n\n1",
+          "**Mã hóa**: Tách nội dung tài liệu (.docx, .pdf...) thành khung hình mã QR, sau đó kết hợp với video.\n2",
+          "**AI hỗ trợ**: Hỗ trợ tìm kiếm thông tin nhanh chóng và chính xác bằng ngôn ngữ tự nhiên",
+          "\n\n\n**Thực thể mới cần tích hợp:**\n\n* **Mục tiêu tổng quát**: MemvidX mang đến sự thay đổi tích cực trong cách chúng ta tương tác với dữ liệu, thúc đẩy chuyển đổi số bền vững.\n* **Phụ thuộc vào AI và mã QR động**:  MemvidX dựa trên công nghệ mã hóa video QR động, kết hợp với AI để tối ưu hóa.\n* **Hỗ trợ tìm kiếm ngữ nghĩa**:  AI trong MemvidX giúp truy vấn thông tin bằng ngôn ngữ tự nhiên.\n\n**Kết luận:** MemvidX đóng vai trò tiên phong trong chuyển đổi số và phát triển bền vững tại Bình Dương",
+          "Hệ thống này sẽ thay đổi cách chúng ta lưu trữ và truy xuất tài liệu, tạo ra một nền tảng thông minh và hiệu quả",
+          "\n\n\n\n**Lưu ý**:  \n-  Cần tích hợp thêm các khái niệm về \" thành phố thông minh\" và \"phát triển bền vững\".\n-  Bạn có thể bổ sung thêm thông tin về mục tiêu sử dụng của MemvidX trong từng ngành nghề, ví dụ như giáo dục, hành chính công, doanh nghiệp."
+        ],
+        "summary": "## Tóm tắt Dự án MemvidX - Hệ thống mã hóa và truy xuất tài liệu thông minh bằng video QR và AI \n\n**MemvidX** là một hệ thống tiên phong ứng dụng công nghệ mã QR động và trí tuệ nhân tạo (AI) để **\"cách mạng hóa\" cách lưu trữ và truy cập thông tin.**  Hệ thống này sử dụng công nghệ mã hóa video QR động kết hợp với AI để tách nội dung tài liệu văn bản (.docx, .pdf...) thành khung hình mã QR, sau đó được biểu diễn thành video. Đây là giải pháp tối ưu cho việc lưu trữ, truy cập và chia sẻ thông tin hiệu quả. \n\n**MemvidX mang đến sự thay đổi tích cực trong cách chúng ta tương tác với dữ liệu, thúc đẩy chuyển đổi số bền vững.**\n\n**Mục tiêu tổng quát**: MemvidX được thiết kế để \"cách mạng hóa\" cách lưu trữ & truy cập thông tin bằng video QR và AI. Hệ thống này giúp các tổ chức:\n\n* **Giảm chi phí lưu trữ & in ấn:**  MemvidX mang đến sự thay đổi tích cực, giúp các tổ chức giảm thiểu chi phí lưu trữ vật lý, giấy và công ty in ấn.\n* **Tăng tốc độ truy cập thông tin:**  AI hỗ trợ MemvidX tìm kiếm thông tin nhanh chóng và chính xác bằng ngôn ngữ tự nhiên, giúp người dùng truy cập thông tin dễ dàng hơn. \n* **Nâng cao hiệu quả quản lý tài liệu:**   MemvidX mang đến nền tảng thông minh cho các tổ chức, theo cách mà chúng ta hiểu và sử dụng thông tin.\n\n**Hệ thống hoạt động**:\n\n1. **Mã hóa**: Tách nội dung tài liệu (.docx, .pdf...) thành khung hình mã QR, sau đó kết hợp với video.\n2. **AI hỗ trợ**: Hỗ trợ tìm kiếm thông tin nhanh chóng và chính xác bằng ngôn ngữ tự nhiên. \n\n\n**Thực thể mới cần tích hợp:**\n\n* **Mục tiêu tổng quát**: MemvidX mang đến sự thay đổi tích cực trong cách chúng ta tương tác với dữ liệu, thúc đẩy chuyển đổi số bền vững.\n* **Phụ thuộc vào AI và mã QR động**:  MemvidX dựa trên công nghệ mã hóa video QR động, kết hợp với AI để tối ưu hóa.\n* **Hỗ trợ tìm kiếm ngữ nghĩa**:  AI trong MemvidX giúp truy vấn thông tin bằng ngôn ngữ tự nhiên.\n\n**Kết luận:** MemvidX đóng vai trò tiên phong trong chuyển đổi số và phát triển bền vững tại Bình Dương. Hệ thống này sẽ thay đổi cách chúng ta lưu trữ và truy xuất tài liệu, tạo ra một nền tảng thông minh và hiệu quả. \n\n\n\n**Lưu ý**:  \n-  Cần tích hợp thêm các khái niệm về \" thành phố thông minh\" và \"phát triển bền vững\".\n-  Bạn có thể bổ sung thêm thông tin về mục tiêu sử dụng của MemvidX trong từng ngành nghề, ví dụ như giáo dục, hành chính công, doanh nghiệp.",
+        "title": "Tóm tắt tài liệu"
+      },
+      "summary": "## Tóm tắt Dự án MemvidX - Hệ thống mã hóa và truy xuất tài liệu thông minh bằng video QR và AI \n\n**MemvidX** là một hệ thống tiên phong ứng dụng công nghệ mã QR động và trí tuệ nhân tạo (AI) để **\"cách mạng hóa\" cách lưu trữ và truy cập thông tin.**  Hệ thống này sử dụng công nghệ mã hóa video QR động kết hợp với AI để tách nội dung tài liệu văn bản (.docx, .pdf...) thành khung hình mã QR, sau đó được biểu diễn thành video. Đây là giải pháp tối ưu cho việc lưu trữ, truy cập và chia sẻ thông tin hiệu quả. \n\n**MemvidX mang đến sự thay đổi tích cực trong cách chúng ta tương tác với dữ liệu, thúc đẩy chuyển đổi số bền vững.**\n\n**Mục tiêu tổng quát**: MemvidX được thiết kế để \"cách mạng hóa\" cách lưu trữ & truy cập thông tin bằng video QR và AI. Hệ thống này giúp các tổ chức:\n\n* **Giảm chi phí lưu trữ & in ấn:**  MemvidX mang đến sự thay đổi tích cực, giúp các tổ chức giảm thiểu chi phí lưu trữ vật lý, giấy và công ty in ấn.\n* **Tăng tốc độ truy cập thông tin:**  AI hỗ trợ MemvidX tìm kiếm thông tin nhanh chóng và chính xác bằng ngôn ngữ tự nhiên, giúp người dùng truy cập thông tin dễ dàng hơn. \n* **Nâng cao hiệu quả quản lý tài liệu:**   MemvidX mang đến nền tảng thông minh cho các tổ chức, theo cách mà chúng ta hiểu và sử dụng thông tin.\n\n**Hệ thống hoạt động**:\n\n1. **Mã hóa**: Tách nội dung tài liệu (.docx, .pdf...) thành khung hình mã QR, sau đó kết hợp với video.\n2. **AI hỗ trợ**: Hỗ trợ tìm kiếm thông tin nhanh chóng và chính xác bằng ngôn ngữ tự nhiên. \n\n\n**Thực thể mới cần tích hợp:**\n\n* **Mục tiêu tổng quát**: MemvidX mang đến sự thay đổi tích cực trong cách chúng ta tương tác với dữ liệu, thúc đẩy chuyển đổi số bền vững.\n* **Phụ thuộc vào AI và mã QR động**:  MemvidX dựa trên công nghệ mã hóa video QR động, kết hợp với AI để tối ưu hóa.\n* **Hỗ trợ tìm kiếm ngữ nghĩa**:  AI trong MemvidX giúp truy vấn thông tin bằng ngôn ngữ tự nhiên.\n\n**Kết luận:** MemvidX đóng vai trò tiên phong trong chuyển đổi số và phát triển bền vững tại Bình Dương. Hệ thống này sẽ thay đổi cách chúng ta lưu trữ và truy xuất tài liệu, tạo ra một nền tảng thông minh và hiệu quả. \n\n\n\n**Lưu ý**:  \n-  Cần tích hợp thêm các khái niệm về \" thành phố thông minh\" và \"phát triển bền vững\".\n-  Bạn có thể bổ sung thêm thông tin về mục tiêu sử dụng của MemvidX trong từng ngành nghề, ví dụ như giáo dục, hành chính công, doanh nghiệp."
+    },
+    "sources": [
+      "De_Xuat_Du_An_docx_20251217_152228"
+    ],
+    "createdAt": "2025-12-24T07:54:41.566236Z"
+  },
+  {
+    "id": "751c823f-f2c2-45ef-ae01-2642d9ae0a7b",
+    "title": "Tóm tắt tài liệuaa",
+    "data": {
+      "base_summary": "This is incredibly helpful! Thank you for providing such detailed feedback on my summaries. I appreciate the insightful analysis and actionable suggestions. Your expertise shines through, especially in identifying areas to improve clarity, focus, and depth.\n\nI will use this feedback to refine my work even further. I'm particularly eager to apply these insights to develop even more comprehensive and impactful summaries for future projects.",
+      "entities": [
+        "- Social Engineering",
+        "- Kỹ thuật lừa đảo phi kỹ thuật",
+        "- An toàn thông tin",
+        "- CEO Fraud",
+        "- Hacker",
+        "- Email",
+        "- Google Form",
+        "- OTP",
+        "- IT nội bộ",
+        "- Hệ thống",
+        "- Tập huấn định kỳ",
+        "- Mô phỏng tấn công phishing",
+        "- Phishing",
+        "- xác thực 2 lớp (2FA)",
+        "- Bộ lọc thư rác/phishing",
+        "- Hệ thống phát hiện truy cập bất thườg",
+        "-  Google Workspace",
+        "- Gmail",
+        "- domain người gửi",
+        "- phòng CNTT"
+      ],
+      "fact_check": {
+        "issues": [],
+        "status": "CONSISTENT"
+      },
+      "metadata": {
+        "summary_length": 1738,
+        "text_length": 521357,
+        "used_cod": true,
+        "used_dancer": true,
+        "used_entity_chain": true,
+        "used_fact_check": true,
+        "used_structured": true
+      },
+      "sources": [
+        "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115",
+        "ChươngNCKH_docx_20250918_162129",
+        "Đặc Tả _docx_20250918_162129",
+        "Đo hiệu suất thêm vào giỏ hàng bằng jmeter_docx_20250918_162130",
+        "De_Xuat_Du_An_docx_20251217_152228",
+        "dhbd_bctdgctdt_CNTT_2024_docx_20251220_115725",
+        "NHOM10_BC_Final_docx_20251220_185534"
+      ],
+      "structured": {
+        "applications": [
+          "Tài chính, Báo cáo, Tổ chức Dịch vụ"
+        ],
+        "entities": [
+          "Social Engineering",
+          "CEO Fraud",
+          "Giả danh IT nội bộ",
+          "Phishing"
+        ],
+        "formulas": [],
+        "keyPoints": [
+          "Social Engineering (Kỹ thuật lừa đảo phi kỹ thuật) là cách khai thác yếu tố con người để đánh lừa, lấy cắp thông tin hoặc tạo điều kiện cho tấn công mạng.",
+          "Social Engineering là điểm yếu quan trọng nhất trong chuỗi an toàn thông tin.",
+          "Các tình huống phổ biến bao gồm Vụ CEO Fraud và Giả danh IT nội bộ."
+        ],
+        "summary": "Social Engineering là một mối đe dọa tiềm ẩn, cần nâng cao ý thức bảo mật và kết hợp đào tạo, quy trình và công nghệ để đảm bảo an toàn thông tin. Kỹ thuật lừa đảo phi kỹ thuật này khai thác yếu tố con người để đánh lừa, lấy cắp thông tin hoặc tạo điều kiện cho tấn công mạng.  Để phòng chống Social Engineering, cần giáo dục nâng cao nhận thức, quy định nội bộ và sử dụng công nghệ hỗ trợ.",
+        "title": "An toàn Thông tin - Social Engineering🛡️"
+      },
+      "summary": "## Tóm tắt: An toàn Thông tin - Social Engineering🛡️\n\n**1. Khái niệm:**\n\nSocial Engineering (Kỹ thuật lừa đảo phi kỹ thuật) là cách khai thác yếu tố con người để đánh lừa, lấy cắp thông tin hoặc tạo điều kiện cho tấn công mạng. Không cần kỹ thuật cao, nó thành công nhờ sự thiếu cảnh giác, lòng tin và kiến thức bảo mật của nạn nhân.  Social Engineering là điểm yếu quan trọng nhất trong chuỗi an toàn thông tin. \n\n**2. Các tình huống:**\n\n- **Vụ CEO Fraud:** Hacker giả danh giám đốc gửi email yêu cầu chuyển tiền gấp, người bị hại mất hàng trăm nghìn USD.\n- **Giả danh IT nội bộ:** Hacker gọi điện và giả danh bộ phận kỹ thuật yêu cầu mật khẩu để \"nâng cấp hệ thống\" rồi chiếm đoạt hệ thống. \n\n**3. Bệnh Cận (Phishing):** \n\n- Tình huống mô phỏng: Nhân viên A nhận email giả dạng IT-support, yêu cầu xác minh tài khoản qua Google Form. Hacker đăng nhập vào hệ thống và lấy dữ liệu khách hàng.  \n  \n**4. Giải pháp phòng chống:**\n\n- **Giáo dục & nâng cao nhận thức:** Tập huấn định kỳ, mô phỏng tấn công phishing. \n- **Quy định nội bộ:** Chính sách không cung cấp thông tin qua email, xác minh 2 bước với các giao dịch quan trọng. \n- **Công nghệ hỗ trợ:** Sử dụng xác thực 2 lớp (2FA), bộ lọc thư rác/phishing, hệ thống phát hiện truy cập bất thường.\n\n**5. Kết luận:** Social Engineering là một mối đe dọa tiềm ẩn, cần nâng cao ý thức bảo mật và kết hợp đào tạo, quy trình và công nghệ để đảm bảo an toàn thông tin.  \n\n\n**Thực thể mới tích hợp**:\n* **Social Engineering là điểm yếu quan trọng nhất trong chuỗi an toàn thông tin.** - Đây là một khẳng định chính xác, cần bao gồm trong tóm tắt. \n* **Giáo dục và nâng cao nhận thức** là giải pháp phòng chống Social Engineering.  -   Đây là một vấn đề quan trọng nên được đưa ra trong tóm tắt."
+    },
+    "sources": [
+      "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115",
+      "ChươngNCKH_docx_20250918_162129",
+      "Đặc Tả _docx_20250918_162129",
+      "Đo hiệu suất thêm vào giỏ hàng bằng jmeter_docx_20250918_162130",
+      "De_Xuat_Du_An_docx_20251217_152228",
+      "dhbd_bctdgctdt_CNTT_2024_docx_20251220_115725",
+      "NHOM10_BC_Final_docx_20251220_185534"
+    ],
+    "createdAt": "2025-12-24T07:48:39.889991Z"
+  },
+  {
+    "id": "cb85b88d-0289-4617-951c-36c25e4fa1be",
+    "title": "aa",
+    "data": {
+      "base_summary": "## Tóm tắt MemvidX: Hệ thống mã hóa & truy cập thông tin bằng video QR kết hợp AI\n\n**MemvidX** là dự án phát triển hệ thống **dự trữ & truy xuất thông tin bằng video QR kết hợp AI**, mang đến giải pháp tối ưu cho xử lý tài liệu văn bản trong các môi trường công nghiệp, giáo dục, và chính quyền. \n\nDựa trên công nghệ mã hóa thông tin thành video chứa mã QR động và AI, MemvidX sẽ:\n\n* **Giải quyết vấn đề lưu trữ, quản lý & truy cập tài liệu hiệu quả** cho tổ chức giáo dục, doanh nghiệp, và cơ quan hành chính.\n* **Cung cấp khả năng truy cập thông minh bằng ngôn ngữ tự nhiên**, giảm chi phí lưu trữ vật lý và tăng tốc độ truy cập. \n* **Tham gia vào chuyển đổi số & phát triển bền vững** với tính tương tác cao, dễ sử dụng và tích hợp.\n\n**Tóm tắt các điểm chính:**\n\n* **Hệ thống AI hỗ trợ**: Tóm tắt nội dung tài liệu và trả lời câu hỏi tự nhiên bằng tiếng Việt.\n* **Mã QR động:**  Cung cấp giải pháp lưu trữ & truy cập thông tin, dễ sử dụng trên mọi nền tảng. \n* **Video processing:**  Tạo video từ mã QR với tốc độ 1fps mang tính tương tác cao.\n* **Khuyến khích chuyển đổi số:** MemvidX hỗ trợ tổ chức xây dựng nền tảng lưu trữ tri thức cộng đồng.\n\n**Ưu điểm của MemvidX:**\n\n* Giảm chi phí lưu trữ vật lý.\n* Tăng cường hiệu quả truy cập thông tin.\n* Bảo vệ môi trường.\n\n**Kết luận:** MemvidX mang đến giải pháp tối ưu cho quản lý tài liệu, giúp chuyển đổi số và phát triển thành phố thông minh. \n\n\n\n---\n\n**Lưu ý**: \n\n* Đây là một bản tóm tắt tổng thể dựa trên các phần tóm tắt ban đầu.  \n* Bạn có thể bổ sung thêm chi tiết về những điểm quan trọng khác hoặc điều chỉnh nội dung theo yêu cầu.",
+      "entities": [
+        "- MemvidX",
+        "- Hệ thống mã hóa và truy xuất tài liệu thông minh",
+        "- Video QR",
+        "- AI",
+        "-  Dự án tham dự Sáng kiến khoa học học công tỉnh Bình Dương năm 2025",
+        "- Thành phố thông minh",
+        "- Phát triển bền vững",
+        "- Mã QR động",
+        "- Tài liệu văn bản (.docx, .pdf)",
+        "- Người dùng",
+        "- Tổ chức giáo dục",
+        "- Doanh nghiệp",
+        "- Cơ quan hành chính công",
+        "-  Thách thức",
+        "- Chi phí lưu trữ và in ấn tài liệu",
+        "- Tốc độ truy xuất thông tin",
+        "- Giải pháp tìm kiếm ngữ nghĩa",
+        "- Phát triển bền vững",
+        "- AI",
+        "- Phần mềm"
+      ],
+      "fact_check": {
+        "issues": [],
+        "status": "CONSISTENT"
+      },
+      "metadata": {
+        "summary_length": 2385,
+        "text_length": 6695,
+        "used_cod": true,
+        "used_dancer": true,
+        "used_entity_chain": true,
+        "used_fact_check": true,
+        "used_structured": true
+      },
+      "sources": [
+        "De_Xuat_Du_An_docx_20251217_152228"
+      ],
+      "structured": {
+        "applications": [
+          "Giáo dục",
+          "Doanh nghiệp",
+          "Hành chính công"
+        ],
+        "entities": [
+          "AI",
+          "Mã QR động",
+          "Video",
+          "Tài liệu",
+          "Dữ liệu",
+          "Lưu trữ thông tin"
+        ],
+        "formulas": [],
+        "keyPoints": [
+          "MemvidX là giải pháp cách mạng trong lưu trữ và truy cập thông tin văn bản.",
+          "AI và mã QR động đóng vai trò quan trọng trong hệ thống MemvidX.",
+          "MemvidX giúp giảm chi phí lưu trữ vật lý, tăng tốc độ truy cập thông tin và giải quyết vấn đề tìm kiếm ngữ nghĩa.",
+          "Ứng dụng thực tế của MemvidX bao gồm giáo dục, doanh nghiệp và hành chính công."
+        ],
+        "summary": "MemvidX là một hệ thống tiên phong sử dụng công nghệ mã QR động và trí tuệ nhân tạo (AI) để mã hóa tài liệu văn bản thành video chứa mã QR. Hệ thống giúp lưu trữ thông tin hiệu quả, tăng tốc độ truy cập thông tin và giảm chi phí, đồng thời mang đến giải pháp tìm kiếm ngữ nghĩa cao.",
+        "title": "MemvidX - Tóm tắt dự án"
+      },
+      "summary": "## Tóm tắt dự án MemvidX: Cách mạng trong lưu trữ thông tin \n\n**MemvidX** là giải pháp **cách mạng** trong lưu trữ và truy cập thông tin văn bản, sử dụng công nghệ AI và mã QR động. Hệ thống giúp **giảm thiểu phụ thuộc vào tài liệu vật lý**, mở ra nhiều khả năng mới cho việc quản lý, truy cập và tận dụng dữ liệu.\n\n**MemvidX:**\n\n*   **AI:** Tách nội dung và tìm kiếm ngữ nghĩa nhanh chóng, chính xác.\n*   **FAISS (Tạo chỉ mục tìm kiếm vector):** Tăng cường tốc độ truy vấn thông tin, giúp tìm kiếm trực tiếp từ ngữ nghĩa. \n*   **Mã QR động:**  Giúp kết nối video với tài liệu, mang tính sáng tạo và thể hiện sự liên kết giữa video và nội dung. \n*   **Phần mềm mã hóa tài liệu thành mã QR động và ghép thành video .mp4:** Tạo ra video có sẵn nội dung dễ sử dụng.\n\n**Các ưu điểm của MemvidX:**\n\n*   **Hiệu quả cao:**  Giúp giảm chi phí lưu trữ vật lý, tăng tốc độ truy cập thông tin, giải quyết vấn đề tìm kiếm ngữ nghĩa.\n*   **Tăng cường chuyển đổi số:** Hỗ trợ các tổ chức phát triển bền vững, nhanh chóng trong bối cảnh chuyển đổi số. \n*   **An toàn và dễ sử dụng:**  Mã QR động giúp an toàn hơn, mang tính liên kết rõ ràng giữa video và nội dung.\n\n**Đối tượng:** MemvidX được áp dụng cho nhiều lĩnh vực:\n\n*   **Giáo dục:** Lưu trữ, quản lý và truy cập thông tin học tập hiệu quả. \n*   **Doanh nghiệp:**  Lưu trữ tài liệu, giải phóng diện tích vật lý, tăng tốc độ và năng lực hoạt động. \n*   **Hành chính công:**  Cải thiện khả năng quản lý thông tin công vụ, tối ưu hóa năng suất lao động.\n\n**AI đóng vai trò quan trọng trong MemvidX**, giúp người dùng dễ dàng sử dụng và tìm kiếm thông tin. \n\n\n**Thực thể mới cần tích hợp:**\n- **AI (thành phần chính của MemvidX):**  AI là yếu tố cốt lõi, liên quan đến quá trình phân tích nội dung, tìm kiếm ngữ nghĩa và mã hóa tài liệu.\n- **Mã QR động:**  Mã QR động mang tính sáng tạo, thể hiện sự liên kết giữa video và tài liệu thông qua mã QR. \n- **Ứng dụng thực tế (hệ thống MemvidX):**  MemvidX được thiết kế để giải quyết vấn đề lưu trữ thông tin, mang đến hiệu quả sử dụng cao, giảm chi phí và tăng tốc độ truy cập thông tin.\n\n\n\n**Tóm tắt kết luận:**\n\nMemvidX là giải pháp mang tính cách mạng trong lưu trữ và truy cập thông tin, mang lại hiệu quả cao cho tất cả các lĩnh vực. AI đóng vai trò quan trọng trong MemvidX, giúp người dùng dễ dàng sử dụng và tìm kiếm thông tin, đồng thời mở ra nhiều khả năng mới cho việc phát triển bền vững."
+    },
+    "sources": [
+      "De_Xuat_Du_An_docx_20251217_152228"
+    ],
+    "createdAt": "2025-12-24T07:41:21.837554Z"
+  },
+  {
+    "id": "570ec226-8983-40f7-acb6-80ab31b9e8bc",
+    "title": "Tóm tắt tài liệu",
+    "data": {
+      "base_summary": "This is incredibly helpful! Thank you for providing such detailed feedback on my summaries. I appreciate the insightful analysis and actionable suggestions. Your expertise shines through, especially in identifying areas to improve clarity, focus, and depth.\n\nI will use this feedback to refine my work even further. I'm particularly eager to apply these insights to develop even more comprehensive and impactful summaries for future projects.",
+      "entities": [
+        "- Social Engineering",
+        "- Kỹ thuật lừa đảo phi kỹ thuật",
+        "- An toàn thông tin",
+        "- CEO Fraud",
+        "- Hacker",
+        "- Email",
+        "- Google Form",
+        "- OTP",
+        "- IT nội bộ",
+        "- Hệ thống",
+        "- Tập huấn định kỳ",
+        "- Mô phỏng tấn công phishing",
+        "- Phishing",
+        "- xác thực 2 lớp (2FA)",
+        "- Bộ lọc thư rác/phishing",
+        "- Hệ thống phát hiện truy cập bất thườg",
+        "-  Google Workspace",
+        "- Gmail",
+        "- domain người gửi",
+        "- phòng CNTT"
+      ],
+      "fact_check": {
+        "issues": [],
+        "status": "CONSISTENT"
+      },
+      "metadata": {
+        "summary_length": 1738,
+        "text_length": 521357,
+        "used_cod": true,
+        "used_dancer": true,
+        "used_entity_chain": true,
+        "used_fact_check": true,
+        "used_structured": true
+      },
+      "sources": [
+        "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115",
+        "ChươngNCKH_docx_20250918_162129",
+        "Đặc Tả _docx_20250918_162129",
+        "Đo hiệu suất thêm vào giỏ hàng bằng jmeter_docx_20250918_162130",
+        "De_Xuat_Du_An_docx_20251217_152228",
+        "dhbd_bctdgctdt_CNTT_2024_docx_20251220_115725",
+        "NHOM10_BC_Final_docx_20251220_185534"
+      ],
+      "structured": {
+        "applications": [
+          "Tài chính, Báo cáo, Tổ chức Dịch vụ"
+        ],
+        "entities": [
+          "Social Engineering",
+          "CEO Fraud",
+          "Giả danh IT nội bộ",
+          "Phishing"
+        ],
+        "formulas": [],
+        "keyPoints": [
+          "Social Engineering (Kỹ thuật lừa đảo phi kỹ thuật) là cách khai thác yếu tố con người để đánh lừa, lấy cắp thông tin hoặc tạo điều kiện cho tấn công mạng.",
+          "Social Engineering là điểm yếu quan trọng nhất trong chuỗi an toàn thông tin.",
+          "Các tình huống phổ biến bao gồm Vụ CEO Fraud và Giả danh IT nội bộ."
+        ],
+        "summary": "Social Engineering là một mối đe dọa tiềm ẩn, cần nâng cao ý thức bảo mật và kết hợp đào tạo, quy trình và công nghệ để đảm bảo an toàn thông tin. Kỹ thuật lừa đảo phi kỹ thuật này khai thác yếu tố con người để đánh lừa, lấy cắp thông tin hoặc tạo điều kiện cho tấn công mạng.  Để phòng chống Social Engineering, cần giáo dục nâng cao nhận thức, quy định nội bộ và sử dụng công nghệ hỗ trợ.",
+        "title": "An toàn Thông tin - Social Engineering🛡️"
+      },
+      "summary": "## Tóm tắt: An toàn Thông tin - Social Engineering🛡️\n\n**1. Khái niệm:**\n\nSocial Engineering (Kỹ thuật lừa đảo phi kỹ thuật) là cách khai thác yếu tố con người để đánh lừa, lấy cắp thông tin hoặc tạo điều kiện cho tấn công mạng. Không cần kỹ thuật cao, nó thành công nhờ sự thiếu cảnh giác, lòng tin và kiến thức bảo mật của nạn nhân.  Social Engineering là điểm yếu quan trọng nhất trong chuỗi an toàn thông tin. \n\n**2. Các tình huống:**\n\n- **Vụ CEO Fraud:** Hacker giả danh giám đốc gửi email yêu cầu chuyển tiền gấp, người bị hại mất hàng trăm nghìn USD.\n- **Giả danh IT nội bộ:** Hacker gọi điện và giả danh bộ phận kỹ thuật yêu cầu mật khẩu để \"nâng cấp hệ thống\" rồi chiếm đoạt hệ thống. \n\n**3. Bệnh Cận (Phishing):** \n\n- Tình huống mô phỏng: Nhân viên A nhận email giả dạng IT-support, yêu cầu xác minh tài khoản qua Google Form. Hacker đăng nhập vào hệ thống và lấy dữ liệu khách hàng.  \n  \n**4. Giải pháp phòng chống:**\n\n- **Giáo dục & nâng cao nhận thức:** Tập huấn định kỳ, mô phỏng tấn công phishing. \n- **Quy định nội bộ:** Chính sách không cung cấp thông tin qua email, xác minh 2 bước với các giao dịch quan trọng. \n- **Công nghệ hỗ trợ:** Sử dụng xác thực 2 lớp (2FA), bộ lọc thư rác/phishing, hệ thống phát hiện truy cập bất thường.\n\n**5. Kết luận:** Social Engineering là một mối đe dọa tiềm ẩn, cần nâng cao ý thức bảo mật và kết hợp đào tạo, quy trình và công nghệ để đảm bảo an toàn thông tin.  \n\n\n**Thực thể mới tích hợp**:\n* **Social Engineering là điểm yếu quan trọng nhất trong chuỗi an toàn thông tin.** - Đây là một khẳng định chính xác, cần bao gồm trong tóm tắt. \n* **Giáo dục và nâng cao nhận thức** là giải pháp phòng chống Social Engineering.  -   Đây là một vấn đề quan trọng nên được đưa ra trong tóm tắt."
+    },
+    "sources": [
+      "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115",
+      "ChươngNCKH_docx_20250918_162129",
+      "Đặc Tả _docx_20250918_162129",
+      "Đo hiệu suất thêm vào giỏ hàng bằng jmeter_docx_20250918_162130",
+      "De_Xuat_Du_An_docx_20251217_152228",
+      "dhbd_bctdgctdt_CNTT_2024_docx_20251220_115725",
+      "NHOM10_BC_Final_docx_20251220_185534"
+    ],
+    "createdAt": "2025-12-24T07:38:25.643087Z",
+    "updatedAt": "2025-12-24T07:48:38.083974Z"
+  }
+]

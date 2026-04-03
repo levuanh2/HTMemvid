@@ -1,8 +1,12 @@
+import { useState } from "react";
 import SidebarLeft from "./SidebarLeft";
 import ChatArea from "./ChatArea";
 import SidebarRight from "./SidebarRight";
 
 export default function MainLayout({ selectedSources, setSelectedSources }) {
+  // State để lưu sources từ SidebarLeft, truyền xuống ChatArea
+  const [sources, setSources] = useState([]);
+
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Sidebar trái */}
@@ -10,12 +14,13 @@ export default function MainLayout({ selectedSources, setSelectedSources }) {
         <SidebarLeft
           selectedSources={selectedSources}
           setSelectedSources={setSelectedSources}
+          onSourcesChange={setSources}
         />
       </div>
 
       {/* Chat Area */}
       <div className="flex flex-1 flex-col min-h-0">
-        <ChatArea selectedSources={selectedSources} />
+        <ChatArea selectedSources={selectedSources} sources={sources} />
       </div>
 
       {/* Sidebar phải */}

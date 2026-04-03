@@ -1,0 +1,202 @@
+[
+    {
+        "id": "doc1",
+        "text": "Deep learning is a subset of machine learning based on artificial neural networks with representation learning. It can be supervised, semi-supervised or unsupervised."
+    },
+    {
+        "id": "doc2",
+        "text": "Convolutional Neural Networks (CNNs) are a class of deep neural networks, most commonly applied to analyzing visual imagery. They are also known as shift invariant or space invariant artificial neural networks."
+    },
+    {
+        "id": "doc3",
+        "text": "Recurrent Neural Networks (RNNs) are a class of artificial neural networks where connections between nodes form a directed graph along a temporal sequence. This allows it to exhibit temporal dynamic behavior."
+    },
+    {
+        "id": "doc4",
+        "text": "Long Short-Term Memory (LSTM) is an artificial recurrent neural network architecture used in the field of deep learning. Unlike standard feedforward neural networks, LSTM has feedback connections."
+    },
+    {
+        "id": "doc5",
+        "text": "The Transformer is a deep learning model that adopts the mechanism of self-attention, differentially weighting the significance of each part of the input data. It is used primarily in the fields of natural language processing (NLP)."
+    },
+    {
+        "id": "doc6",
+        "text": "BERT (Bidirectional Encoder Representations from Transformers) is a transformer-based machine learning technique for natural language processing pre-training developed by Google."
+    },
+    {
+        "id": "doc7",
+        "text": "Generative Adversarial Networks (GANs) are a class of machine learning frameworks designed by Ian Goodfellow and his colleagues in 2014. Two neural networks contest with each other in a game."
+    },
+    {
+        "id": "doc8",
+        "text": "Reinforcement learning (RL) is an area of machine learning concerned with how intelligent agents ought to take actions in an environment in order to maximize the notion of cumulative reward."
+    },
+    {
+        "id": "doc9",
+        "text": "Support Vector Machines (SVMs) are supervised learning models with associated learning algorithms that analyze data for classification and regression analysis."
+    },
+    {
+        "id": "doc10",
+        "text": "K-Nearest Neighbors (KNN) is a non-parametric method used for classification and regression. In both cases, the input consists of the k closest training examples in the feature space."
+    },
+    {
+        "id": "doc11",
+        "text": "Decision Trees are a non-parametric supervised learning method used for classification and regression. The goal is to create a model that predicts the value of a target variable by learning simple decision rules inferred from the data features."
+    },
+    {
+        "id": "doc12",
+        "text": "Random Forest is an ensemble learning method for classification, regression and other tasks that operates by constructing a multitude of decision trees at training time."
+    },
+    {
+        "id": "doc13",
+        "text": "Gradient Boosting is a machine learning technique for regression and classification problems, which produces a prediction model in the form of an ensemble of weak prediction models, typically decision trees."
+    },
+    {
+        "id": "doc14",
+        "text": "XGBoost is an open-source software library which provides a gradient boosting framework for C++, Java, Python, R, Julia, Perl, and Scala. It works on Linux, Windows, and macOS."
+    },
+    {
+        "id": "doc15",
+        "text": "Principal Component Analysis (PCA) is a statistical procedure that uses an orthogonal transformation to convert a set of observations of possibly correlated variables into a set of values of linearly uncorrelated variables called principal components."
+    },
+    {
+        "id": "doc16",
+        "text": "Clustering is the task of grouping a set of objects in such a way that objects in the same group (called a cluster) are more similar to each other than to those in other groups."
+    },
+    {
+        "id": "doc17",
+        "text": "K-Means clustering is a method of vector quantization, originally from signal processing, that aims to partition n observations into k clusters in which each observation belongs to the cluster with the nearest mean."
+    },
+    {
+        "id": "doc18",
+        "text": "Hierarchical clustering is a method of cluster analysis which seeks to build a hierarchy of clusters. Strategies for hierarchical clustering generally fall into two types: Agglomerative and Divisive."
+    },
+    {
+        "id": "doc19",
+        "text": "DBSCAN (Density-Based Spatial Clustering of Applications with Noise) is a data clustering algorithm proposed by Martin Ester, Hans-Peter Kriegel, Jörg Sander and Xiaowei Xu in 1996."
+    },
+    {
+        "id": "doc20",
+        "text": "Natural Language Processing (NLP) is a subfield of linguistics, computer science, and artificial intelligence concerned with the interactions between computers and human language."
+    },
+    {
+        "id": "doc21",
+        "text": "Tokenization is the process of breaking a stream of text up into words, phrases, symbols, or other meaningful elements called tokens. The list of tokens becomes input for further processing such as parsing or text mining."
+    },
+    {
+        "id": "doc22",
+        "text": "Stemming is the process of reducing inflected (or sometimes derived) words to their word stem, base or root form—generally a written word form."
+    },
+    {
+        "id": "doc23",
+        "text": "Lemmatization in linguistics is the process of grouping together the inflected forms of a word so they can be analyzed as a single item, identified by the word's lemma, or dictionary form."
+    },
+    {
+        "id": "doc24",
+        "text": "Named Entity Recognition (NER) is a subtask of information extraction that seeks to locate and classify named entities mentioned in unstructured text into pre-defined categories such as person names, organizations, locations, etc."
+    },
+    {
+        "id": "doc25",
+        "text": "Part-of-speech tagging (POS tagging) is the process of marking up a word in a text as corresponding to a particular part of speech, based on both its definition and its context."
+    },
+    {
+        "id": "doc26",
+        "text": "Sentiment analysis is the use of natural language processing, text analysis, computational linguistics, and biometrics to systematically identify, extract, quantify, and study affective states and subjective information."
+    },
+    {
+        "id": "doc27",
+        "text": "Machine Translation (MT) is a sub-field of computational linguistics that investigates the use of software to translate text or speech from one language to another."
+    },
+    {
+        "id": "doc28",
+        "text": "Computer Vision is an interdisciplinary scientific field that deals with how computers can be made to gain high-level understanding from digital images or videos."
+    },
+    {
+        "id": "doc29",
+        "text": "Object Detection is a computer technology related to computer vision and image processing that deals with detecting instances of semantic objects of a certain class in digital images and videos."
+    },
+    {
+        "id": "doc30",
+        "text": "Image Segmentation is the process of partitioning a digital image into multiple segments (sets of pixels, also known as super-pixels) to simplify and/or change the representation of an image into something that is more meaningful and easier to analyze."
+    },
+    {
+        "id": "doc31",
+        "text": "Speech Recognition is an interdisciplinary subfield of computer science and computational linguistics that develops methodologies and technologies that enable the recognition and translation of spoken language into text by computers."
+    },
+    {
+        "id": "doc32",
+        "text": "Robotics is an interdisciplinary branch of computer science and engineering. Robotics involves design, construction, operation, and use of robots."
+    },
+    {
+        "id": "doc33",
+        "text": "Expert Systems are computer systems that emulate the decision-making ability of a human expert. Expert systems are designed to solve complex problems by reasoning through bodies of knowledge."
+    },
+    {
+        "id": "doc34",
+        "text": "Fuzzy Logic is a form of many-valued logic in which the truth values of variables may be any real number between 0 and 1. It is employed to handle the concept of partial truth."
+    },
+    {
+        "id": "doc35",
+        "text": "Genetic Algorithms are search heuristics that are inspired by Charles Darwin's theory of natural evolution. This algorithm reflects the process of natural selection where the fittest individuals are selected for reproduction."
+    },
+    {
+        "id": "doc36",
+        "text": "Big Data is a field that treats ways to analyze, systematically extract information from, or otherwise deal with data sets that are too large or complex to be dealt with by traditional data-processing application software."
+    },
+    {
+        "id": "doc37",
+        "text": "Data Mining is the process of discovering patterns in large data sets involving methods at the intersection of machine learning, statistics, and database systems."
+    },
+    {
+        "id": "doc38",
+        "text": "Cloud Computing is the on-demand availability of computer system resources, especially data storage and computing power, without direct active management by the user."
+    },
+    {
+        "id": "doc39",
+        "text": "Internet of Things (IoT) describes the network of physical objects—\"things\"—that are embedded with sensors, software, and other technologies for the purpose of connecting and exchanging data with other devices and systems over the internet."
+    },
+    {
+        "id": "doc40",
+        "text": "Cybersecurity is the practice of protecting systems, networks, and programs from digital attacks. These cyberattacks are usually aimed at accessing, changing, or destroying sensitive information."
+    },
+    {
+        "id": "doc41",
+        "text": "Blockchain is a shared, immutable ledger that facilitates the process of recording transactions and tracking assets in a business network. An asset can be tangible or intangible."
+    },
+    {
+        "id": "doc42",
+        "text": "Quantum Computing is the use of quantum phenomena such as superposition and entanglement to perform computation. Computers that perform quantum computations are known as quantum computers."
+    },
+    {
+        "id": "doc43",
+        "text": "Edge Computing is a distributed computing paradigm that brings computation and data storage closer to the sources of data. This is expected to improve response times and save bandwidth."
+    },
+    {
+        "id": "doc44",
+        "text": "5G is the fifth generation technology standard for broadband cellular networks, which cellular phone companies began deploying worldwide in 2019."
+    },
+    {
+        "id": "doc45",
+        "text": "Augmented Reality (AR) is an interactive experience of a real-world environment where the objects that reside in the real world are enhanced by computer-generated perceptual information."
+    },
+    {
+        "id": "doc46",
+        "text": "Virtual Reality (VR) is a simulated experience that can be similar to or completely different from the real world. Applications of virtual reality can include entertainment and education."
+    },
+    {
+        "id": "doc47",
+        "text": "Digital Twin is a virtual representation that serves as the real-time digital counterpart of a physical object or process. The concept originated at NASA."
+    },
+    {
+        "id": "doc48",
+        "text": "Microservices is a variant of the service-oriented architecture (SOA) structural style – an architectural pattern that arranges an application as a collection of loosely coupled services."
+    },
+    {
+        "id": "doc49",
+        "text": "Docker is a set of platform as a service (PaaS) products that use OS-level virtualization to deliver software in packages called containers."
+    },
+    {
+        "id": "doc50",
+        "text": "Kubernetes is an open-source container-orchestration system for automating computer application deployment, scaling, and management."
+    }
+]

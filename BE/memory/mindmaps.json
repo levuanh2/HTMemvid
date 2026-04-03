@@ -1,0 +1,1155 @@
+[
+  {
+    "id": "c93be487-1882-4542-9bf3-3eb7e99adc1b",
+    "title": "NHOM10_BC_Final_docx_20260118_210038",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "NHOM10_BC_Final_docx_20260118_210038"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "K-Nearest Neighbors (k-NN)"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Hiệu quả của k-NN trong thiết kế biểu đồ trực quan"
+      },
+      {
+        "id": "root-0-0-0",
+        "parent": "root-0-0",
+        "title": "Tối ưu theo nhiệm vụ trong thiết kế biểu đồ trực quan"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Nguyên tắc thiết kế biểu đồ trực quan"
+      },
+      {
+        "id": "root-1",
+        "parent": "root",
+        "title": "Biểu đồ trực quan hiệu quả"
+      },
+      {
+        "id": "root-1-0",
+        "parent": "root-1",
+        "title": "Thiết kế biểu đồ trực quan hiệu quả"
+      },
+      {
+        "id": "root-1-0-0",
+        "parent": "root-1-0",
+        "title": "Hiệu quả theo nhiệm vụ"
+      },
+      {
+        "id": "root-1-1",
+        "parent": "root-1",
+        "title": "Mối liên hệ giữa thiết kế biểu đồ và hiệu quả"
+      },
+      {
+        "id": "root-1-1-0",
+        "parent": "root-1-1",
+        "title": "Hệ thống k-Nearest Neighbors (k-NN)"
+      },
+      {
+        "id": "root-1-1-1",
+        "parent": "root-1-1",
+        "title": "Thiết kế biểu đồ hiệu quả theo Tufte"
+      },
+      {
+        "id": "root-2",
+        "parent": "root",
+        "title": "Thực thi tốt cho học thuật mạng nơ-ron"
+      },
+      {
+        "id": "root-2-0",
+        "parent": "root-2",
+        "title": "Tối ưu theo nhiệm vụ"
+      },
+      {
+        "id": "root-3",
+        "parent": "root",
+        "title": "Phân loại K-Nearest Neighbors"
+      },
+      {
+        "id": "root-3-0",
+        "parent": "root-3",
+        "title": "Nguyên tắc thiết kế biểu đồ hiệu quả"
+      },
+      {
+        "id": "root-3-1",
+        "parent": "root-3",
+        "title": "Kỹ thuật k-NN trong thiết kế biểu đồ"
+      },
+      {
+        "id": "root-4",
+        "parent": "root",
+        "title": "Nguyên tắc thiết kế biểu đồ trực quan hiệu quả"
+      }
+    ],
+    "sources": [
+      "NHOM10_BC_Final_docx_20260118_210038"
+    ],
+    "createdAt": "2026-01-18T14:24:36.448755Z",
+    "strategy": "iterative"
+  },
+  {
+    "id": "5cabaf59-c6c9-4e8d-844e-5a6aef6b4706",
+    "title": "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Lừa đảo tâm lý"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Lừa đảo tâm lý trong công việc"
+      },
+      {
+        "id": "root-0-0-0",
+        "parent": "root-0-0",
+        "title": "Tài khoản bị xâm nhập"
+      },
+      {
+        "id": "root-0-0-1",
+        "parent": "root-0-0",
+        "title": "Lừa đảo tâm lý qua email"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Lập trình tâm lý"
+      },
+      {
+        "id": "root-0-1-0",
+        "parent": "root-0-1",
+        "title": "Lừa đảo email dạng giả lập"
+      },
+      {
+        "id": "root-0-1-0-0",
+        "parent": "root-0-1-0",
+        "title": "Khó khăn trong việc phòng chống"
+      },
+      {
+        "id": "root-1",
+        "parent": "root",
+        "title": "Tấn công email"
+      },
+      {
+        "id": "root-1-0",
+        "parent": "root-1",
+        "title": "Lừa đảo email"
+      },
+      {
+        "id": "root-1-0-0",
+        "parent": "root-1-0",
+        "title": "Phòng thủ email giả lập"
+      },
+      {
+        "id": "root-1-1",
+        "parent": "root-1",
+        "title": "Xác minh 2 bước"
+      },
+      {
+        "id": "root-1-1-0",
+        "parent": "root-1-1",
+        "title": "Email giả lập và tác dụng"
+      },
+      {
+        "id": "root-2",
+        "parent": "root",
+        "title": "Sự nguy hiểm của Social Engineering trong phòng tập học"
+      },
+      {
+        "id": "root-2-0",
+        "parent": "root-2",
+        "title": "Cảnh báo domain email"
+      },
+      {
+        "id": "root-2-0-0",
+        "parent": "root-2-0",
+        "title": "Tạo Google Form và mô phỏng phòng thủ"
+      },
+      {
+        "id": "root-2-1",
+        "parent": "root-2",
+        "title": "Cảnh báo khi biểu mẫu đòi hỏi thông tin"
+      }
+    ],
+    "sources": [
+      "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115"
+    ],
+    "createdAt": "2025-12-24T08:16:35.045963Z",
+    "strategy": "iterative"
+  },
+  {
+    "id": "d49f38ea-66b1-4871-8532-b3b3f383673d",
+    "title": "dhbd_bctdgctdt_CNTT_2024_docx_20251220_115725",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "dhbd_bctdgctdt_CNTT_2024_docx_20251220_115725"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Mục tiêu đào tạo CNTT"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Mục tiêu đào tạo CNTT tại Trường Đại học Bình Dương"
+      },
+      {
+        "id": "root-0-0-0",
+        "parent": "root-0-0",
+        "title": "Điểm mạnh CTĐT ngành CNTT"
+      },
+      {
+        "id": "root-0-0-0-0",
+        "parent": "root-0-0-0",
+        "title": "Mô tả điểm mạnh CTĐT ngành CNTT"
+      },
+      {
+        "id": "root-0-0-0-1",
+        "parent": "root-0-0-0",
+        "title": "Điểm mạnh CĐR trong CTĐT ngành CNTT"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Điểm mạnh CTĐT ngành CNTT"
+      },
+      {
+        "id": "root-0-1-0",
+        "parent": "root-0-1",
+        "title": "Các điểm mạnh về CĐR trong CTĐT ngành CNTT"
+      },
+      {
+        "id": "root-0-2",
+        "parent": "root-0",
+        "title": "Mô tả CTĐT ngành CNTT"
+      },
+      {
+        "id": "root-0-2-0",
+        "parent": "root-0-2",
+        "title": "Điểm mạnh CTĐT ngành CNTT"
+      },
+      {
+        "id": "root-0-3",
+        "parent": "root-0",
+        "title": "Điểm mạnh CĐR của CTĐT ngành CNTT"
+      },
+      {
+        "id": "root-0-3-0",
+        "parent": "root-0-3",
+        "title": "Các điểm mạnh về CĐR trong CTĐT ngành CNTT"
+      }
+    ],
+    "sources": [
+      "dhbd_bctdgctdt_CNTT_2024_docx_20251220_115725"
+    ],
+    "createdAt": "2025-12-21T05:58:11.159962Z",
+    "strategy": "iterative"
+  },
+  {
+    "id": "acb7864f-3c76-42f6-ba05-423c7581dfb4",
+    "title": "NHOM10_BC_Final_docx_20251220_185534",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "NHOM10_BC_Final_docx_20251220_185534"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Lịch sử và phát triển của học máy"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Thế Giới Lịch Sử & Định Nghĩa"
+      },
+      {
+        "id": "root-0-0-0",
+        "parent": "root-0-0",
+        "title": "Các bước tiến bộ từ 1950-1960s, các mô hình đầu tiên"
+      },
+      {
+        "id": "root-0-0-0-0",
+        "parent": "root-0-0-0",
+        "title": "Nearest Neighbor Pattern Classification (kNN) - k-nearest neighbors (kNN)"
+      },
+      {
+        "id": "root-0-0-0-0-0",
+        "parent": "root-0-0-0-0",
+        "title": "Arthur Samuel: AI trong cờ dam - IBM 701"
+      },
+      {
+        "id": "root-0-0-0-0-1",
+        "parent": "root-0-0-0-0",
+        "title": "Perceptron - Frank Rosenblatt"
+      },
+      {
+        "id": "root-0-0-0-1",
+        "parent": "root-0-0-0",
+        "title": "Thomas Cover and Peter Hart - k-nearest neighbors (kNN)"
+      },
+      {
+        "id": "root-0-0-0-1-0",
+        "parent": "root-0-0-0-1",
+        "title": "K-Nearest Neighbors (kNN) và kNN"
+      },
+      {
+        "id": "root-0-0-1",
+        "parent": "root-0-0",
+        "title": "Thế Giới Hiện Đại & Lời Chưa"
+      },
+      {
+        "id": "root-0-0-1-0",
+        "parent": "root-0-0-1",
+        "title": "Ứng dụng học máy"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Loại mô hình học máy"
+      },
+      {
+        "id": "root-0-1-0",
+        "parent": "root-0-1",
+        "title": "Học có giám sát (Supervised learning)"
+      },
+      {
+        "id": "root-0-1-1",
+        "parent": "root-0-1",
+        "title": "Học không giám sát (Unsupervised learning)"
+      },
+      {
+        "id": "root-0-1-1-0",
+        "parent": "root-0-1-1",
+        "title": "Đặc điểm của học không giám sát"
+      }
+    ],
+    "sources": [
+      "NHOM10_BC_Final_docx_20251220_185534"
+    ],
+    "createdAt": "2025-12-21T05:20:14.571182Z",
+    "strategy": "iterative"
+  },
+  {
+    "id": "8843c30c-e8d4-42e3-ab0b-ae6ace0f1d8a",
+    "title": "dhbd_bctdgctdt_CNTT_2024_docx_20251220_115725",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "dhbd_bctdgctdt_CNTT_2024_docx_20251220_115725"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "No content available"
+      }
+    ],
+    "sources": [
+      "dhbd_bctdgctdt_CNTT_2024_docx_20251220_115725"
+    ],
+    "createdAt": "2025-12-20T11:58:55.586976Z",
+    "strategy": "fallback"
+  },
+  {
+    "id": "b31cec6f-c607-46d9-b486-f320ad2b61ef",
+    "title": "NHOM10_BC_Final_docx_20251220_185534",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "NHOM10_BC_Final_docx_20251220_185534"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "No content available"
+      }
+    ],
+    "sources": [
+      "NHOM10_BC_Final_docx_20251220_185534"
+    ],
+    "createdAt": "2025-12-20T11:58:40.670654Z",
+    "strategy": "fallback"
+  },
+  {
+    "id": "0d9c6c3a-ddb0-4605-bf13-edd3e5a6a4d3",
+    "title": "Đặc Tả _docx_20250918_162129",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "Đặc Tả _docx_20250918_162129"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Quản lý thông tin khách hàng"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Cấu trúc thông tin khách hàng"
+      },
+      {
+        "id": "root-0-0-0",
+        "parent": "root-0-0",
+        "title": "Mẫu thông tin khách hàng"
+      },
+      {
+        "id": "root-0-0-0-0",
+        "parent": "root-0-0-0",
+        "title": "Thông tin cơ bản khách hàng"
+      },
+      {
+        "id": "root-0-0-1",
+        "parent": "root-0-0",
+        "title": "Hướng dẫn quản lý thông tin"
+      },
+      {
+        "id": "root-0-0-1-0",
+        "parent": "root-0-0-1",
+        "title": "Quy trình quản lý thông tin"
+      },
+      {
+        "id": "root-0-0-2",
+        "parent": "root-0-0",
+        "title": "Phân tích thông tin người dùng"
+      },
+      {
+        "id": "root-0-0-2-0",
+        "parent": "root-0-0-2",
+        "title": "Cấu trúc thông tin người dùng"
+      },
+      {
+        "id": "root-0-0-2-1",
+        "parent": "root-0-0-2",
+        "title": "Phân chia thông tin khách hàng"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Quy định bảo mật thông tin"
+      },
+      {
+        "id": "root-0-1-0",
+        "parent": "root-0-1",
+        "title": "Cách thức sử dụng thông tin khách hàng"
+      },
+      {
+        "id": "root-1",
+        "parent": "root",
+        "title": "Lưu ý khi xử lý giỏ hàng"
+      },
+      {
+        "id": "root-1-0",
+        "parent": "root-1",
+        "title": "Quy trình xử lý giỏ hàng"
+      },
+      {
+        "id": "root-1-0-0",
+        "parent": "root-1-0",
+        "title": "Luật bảo mật thông tin"
+      },
+      {
+        "id": "root-1-1",
+        "parent": "root-1",
+        "title": "Quy trình xử lý đơn đặt hàng"
+      },
+      {
+        "id": "root-2",
+        "parent": "root",
+        "title": "Thao tác đơn đặt hàng"
+      },
+      {
+        "id": "root-2-0",
+        "parent": "root-2",
+        "title": "Quy trình đơn đặt hàng"
+      },
+      {
+        "id": "root-2-0-0",
+        "parent": "root-2-0",
+        "title": "Bước đầu đặt hàng"
+      },
+      {
+        "id": "root-2-0-1",
+        "parent": "root-2-0",
+        "title": "Khám phá đơn đặt hàng"
+      },
+      {
+        "id": "root-2-1",
+        "parent": "root-2",
+        "title": "Giỏ hàng"
+      },
+      {
+        "id": "root-2-1-0",
+        "parent": "root-2-1",
+        "title": "Giỏ hàng chủ đề"
+      },
+      {
+        "id": "root-2-1-1",
+        "parent": "root-2-1",
+        "title": "Bước hoàn thành đơn đặt hàng"
+      },
+      {
+        "id": "root-2-2",
+        "parent": "root-2",
+        "title": "Lịch sử đơn đặt hàng"
+      },
+      {
+        "id": "root-2-2-0",
+        "parent": "root-2-2",
+        "title": "Thông tin đơn đặt hàng"
+      },
+      {
+        "id": "root-3",
+        "parent": "root",
+        "title": "Khảo sát người dùng"
+      },
+      {
+        "id": "root-3-0",
+        "parent": "root-3",
+        "title": "Thực hiện khảo sát"
+      },
+      {
+        "id": "root-3-0-0",
+        "parent": "root-3-0",
+        "title": "Tối ưu trải nghiệm người dùng"
+      },
+      {
+        "id": "root-3-0-1",
+        "parent": "root-3-0",
+        "title": "Cải thiện dịch vụ"
+      },
+      {
+        "id": "root-3-1",
+        "parent": "root-3",
+        "title": "Nhận định kết quả"
+      },
+      {
+        "id": "root-3-1-0",
+        "parent": "root-3-1",
+        "title": "Kết quả khảo sát"
+      },
+      {
+        "id": "root-3-1-1",
+        "parent": "root-3-1",
+        "title": "Nhận định dữ liệu"
+      },
+      {
+        "id": "root-3-2",
+        "parent": "root-3",
+        "title": "Kết hợp dữ liệu khảo sát"
+      },
+      {
+        "id": "root-3-2-0",
+        "parent": "root-3-2",
+        "title": "Nguồn dữ liệu khảo sát"
+      },
+      {
+        "id": "root-3-2-1",
+        "parent": "root-3-2",
+        "title": "Kết nối dữ liệu"
+      }
+    ],
+    "sources": [
+      "Đặc Tả _docx_20250918_162129"
+    ],
+    "createdAt": "2025-12-20T11:43:10.634751Z",
+    "strategy": "iterative"
+  },
+  {
+    "id": "510f7f0b-28ec-44a9-aaf0-3b10a8b1c770",
+    "title": "15-MB-docx-file-download_docx_20251217_155134",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "15-MB-docx-file-download_docx_20251217_155134"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "No content available"
+      }
+    ],
+    "sources": [
+      "15-MB-docx-file-download_docx_20251217_155134"
+    ],
+    "createdAt": "2025-12-20T05:45:40.606311Z",
+    "strategy": "iterative"
+  },
+  {
+    "id": "56076610-996c-4c62-b304-6b3198bd0036",
+    "title": "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Giải thích Social Engineering"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Lừa đảo tâm lý"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Xác minh domain"
+      },
+      {
+        "id": "root-1",
+        "parent": "root",
+        "title": "Tâm lý bị lừa"
+      },
+      {
+        "id": "root-1-0",
+        "parent": "root-1",
+        "title": "Giải thích tâm lý bị lừa"
+      },
+      {
+        "id": "root-1-1",
+        "parent": "root-1",
+        "title": "Phishing Email: Mô hình tấn công"
+      },
+      {
+        "id": "root-1-1-0",
+        "parent": "root-1-1",
+        "title": "Các dạng tấn công giả danh IT nội bộ"
+      },
+      {
+        "id": "root-1-2",
+        "parent": "root-1",
+        "title": "Phòng ngừa Social Engineering"
+      },
+      {
+        "id": "root-2",
+        "parent": "root",
+        "title": "Phòng chống Social Engineering"
+      },
+      {
+        "id": "root-2-0",
+        "parent": "root-2",
+        "title": "Biện pháp phòng chống"
+      },
+      {
+        "id": "root-2-1",
+        "parent": "root-2",
+        "title": "Phòng chống Social Engineering"
+      },
+      {
+        "id": "root-3",
+        "parent": "root",
+        "title": "Nghiêm trọng của Social Engineering"
+      }
+    ],
+    "sources": [
+      "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115"
+    ],
+    "createdAt": "2025-12-16T16:17:13.236877Z",
+    "strategy": "iterative"
+  },
+  {
+    "id": "48bd46ad-2328-4a63-88c2-5abb8fdc4033",
+    "title": "Chuong1_2_docx_20250918_162129",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "Chuong1_2_docx_20250918_162129"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Types of Data"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Qualitative Data (Quantitative)"
+      },
+      {
+        "id": "root-0-0-0",
+        "parent": "root-0-0",
+        "title": "Characteristics"
+      },
+      {
+        "id": "root-0-0-0-0",
+        "parent": "root-0-0-0",
+        "title": "Descriptive Statistics"
+      },
+      {
+        "id": "root-0-0-0-0-0",
+        "parent": "root-0-0-0-0",
+        "title": "Mean"
+      },
+      {
+        "id": "root-0-0-0-0-1",
+        "parent": "root-0-0-0-0",
+        "title": "Median"
+      },
+      {
+        "id": "root-0-0-0-0-2",
+        "parent": "root-0-0-0-0",
+        "title": "Mode"
+      },
+      {
+        "id": "root-0-0-0-0-3",
+        "parent": "root-0-0-0-0",
+        "title": "Range"
+      },
+      {
+        "id": "root-0-0-0-0-4",
+        "parent": "root-0-0-0-0",
+        "title": "Variance"
+      },
+      {
+        "id": "root-0-0-0-0-5",
+        "parent": "root-0-0-0-0",
+        "title": "Standard Deviation"
+      },
+      {
+        "id": "root-0-0-0-0-6",
+        "parent": "root-0-0-0-0",
+        "title": "Interquartile Range (IQR)"
+      },
+      {
+        "id": "root-0-0-0-1",
+        "parent": "root-0-0-0",
+        "title": "Visualizations"
+      },
+      {
+        "id": "root-0-0-0-1-0",
+        "parent": "root-0-0-0-1",
+        "title": "Boxplot"
+      },
+      {
+        "id": "root-0-0-0-1-1",
+        "parent": "root-0-0-0-1",
+        "title": "Violin Plot"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Quantitative Data (Numerical)"
+      },
+      {
+        "id": "root-0-1-0",
+        "parent": "root-0-1",
+        "title": "Characteristics"
+      },
+      {
+        "id": "root-1",
+        "parent": "root",
+        "title": "Data Visualization Techniques"
+      },
+      {
+        "id": "root-1-0",
+        "parent": "root-1",
+        "title": "Techniques for Data Visualization"
+      },
+      {
+        "id": "root-2",
+        "parent": "root",
+        "title": "Best Practices for Data Visualization"
+      },
+      {
+        "id": "root-2-0",
+        "parent": "root-2",
+        "title": "Clarity and Simplicity"
+      },
+      {
+        "id": "root-2-1",
+        "parent": "root-2",
+        "title": "Use Consistent Styles"
+      },
+      {
+        "id": "root-2-2",
+        "parent": "root-2",
+        "title": "Focus on Visual Storytelling"
+      },
+      {
+        "id": "root-2-3",
+        "parent": "root-2",
+        "title": "Effective Use of Tools"
+      }
+    ],
+    "sources": [
+      "Chuong1_2_docx_20250918_162129"
+    ],
+    "createdAt": "2025-11-06T16:18:43.759760Z",
+    "strategy": "iterative"
+  },
+  {
+    "id": "3710e984-0753-4a49-97d0-a7e9ee3f8c22",
+    "title": "Chuong1_2_docx_20250918_162129",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "Chuong1_2_docx_20250918_162129"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Biểu đồ trực quan hóa dữ liệu"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Dữ liệu định tính"
+      },
+      {
+        "id": "root-0-0-0",
+        "parent": "root-0-0",
+        "title": "Mục đích"
+      },
+      {
+        "id": "root-0-0-1",
+        "parent": "root-0-0",
+        "title": "Tối ưu theo nhiệm vụ"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Dữ liệu định lượng"
+      },
+      {
+        "id": "root-0-1-0",
+        "parent": "root-0-1",
+        "title": "Giới hạn dữ liệu định tính"
+      },
+      {
+        "id": "root-0-1-1",
+        "parent": "root-0-1",
+        "title": "Dấu hiệu nhận dạng dữ liệu định lượng"
+      },
+      {
+        "id": "root-0-2",
+        "parent": "root-0",
+        "title": "Biểu đồ tần suất (histogram)"
+      },
+      {
+        "id": "root-0-3",
+        "parent": "root-0",
+        "title": "Tóm tắt"
+      },
+      {
+        "id": "root-1",
+        "parent": "root",
+        "title": "Các loại biểu đồ phổ biến nhất"
+      },
+      {
+        "id": "root-1-0",
+        "parent": "root-1",
+        "title": "Biểu đồ phổ biến nhất"
+      },
+      {
+        "id": "root-1-0-0",
+        "parent": "root-1-0",
+        "title": "Biểu đồ phổ biến nhất - Khái niệm"
+      },
+      {
+        "id": "root-1-0-1",
+        "parent": "root-1-0",
+        "title": "Biểu đồ phổ biến nhất - Các loại biểu đồ phổ biến nhất"
+      },
+      {
+        "id": "root-1-0-2",
+        "parent": "root-1-0",
+        "title": "Biểu đồ phổ biến nhất - Các tiêu chí lựa chọn"
+      },
+      {
+        "id": "root-1-1",
+        "parent": "root-1",
+        "title": "Biểu đồ tần suất (histogram)"
+      },
+      {
+        "id": "root-1-1-0",
+        "parent": "root-1-1",
+        "title": "Phân tích dữ liệu"
+      },
+      {
+        "id": "root-1-2",
+        "parent": "root-1",
+        "title": "Biểu đồ đường cong phân phối"
+      },
+      {
+        "id": "root-1-2-0",
+        "parent": "root-1-2",
+        "title": "Phân tích dữ liệu"
+      }
+    ],
+    "sources": [
+      "Chuong1_2_docx_20250918_162129"
+    ],
+    "createdAt": "2025-11-06T16:01:00.817985Z",
+    "strategy": "iterative"
+  },
+  {
+    "id": "adcbbb4b-5454-4e05-b20e-4096cb30dc25",
+    "title": "Chuong1_2_docx_20250918_162129",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "Chuong1_2_docx_20250918_162129"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Data Center & Dispersion"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Central Tendency & Dispersion"
+      },
+      {
+        "id": "root-0-0-0",
+        "parent": "root-0-0",
+        "title": "Boxplot Analysis"
+      },
+      {
+        "id": "root-0-0-1",
+        "parent": "root-0-0",
+        "title": "Violin Plot for Distribution Shape"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Skewness & Kurtosis"
+      },
+      {
+        "id": "root-0-1-0",
+        "parent": "root-0-1",
+        "title": "Skewness Assessment"
+      },
+      {
+        "id": "root-0-1-1",
+        "parent": "root-0-1",
+        "title": "Visualizing Kurtosis with Boxplots"
+      },
+      {
+        "id": "root-1",
+        "parent": "root",
+        "title": "Data Visualization"
+      },
+      {
+        "id": "root-1-0",
+        "parent": "root-1",
+        "title": "Boxplot: Seeing Median, IQR, Whiskers & Outliers"
+      },
+      {
+        "id": "root-1-1",
+        "parent": "root-1",
+        "title": "Histogram"
+      },
+      {
+        "id": "root-1-1-0",
+        "parent": "root-1-1",
+        "title": "Skewness & Kurtosis"
+      },
+      {
+        "id": "root-2",
+        "parent": "root",
+        "title": "Violin Plot"
+      },
+      {
+        "id": "root-2-0",
+        "parent": "root-2",
+        "title": "Violin Plot:  Sharpness of Distribution"
+      },
+      {
+        "id": "root-2-0-0",
+        "parent": "root-2-0",
+        "title": "Median and IQR"
+      },
+      {
+        "id": "root-2-0-1",
+        "parent": "root-2-0",
+        "title": "Skewness Assessment"
+      },
+      {
+        "id": "root-3",
+        "parent": "root",
+        "title": "Skewness"
+      },
+      {
+        "id": "root-3-0",
+        "parent": "root-3",
+        "title": "Definition of Skewness"
+      },
+      {
+        "id": "root-4",
+        "parent": "root",
+        "title": "Kurtosis"
+      },
+      {
+        "id": "root-4-0",
+        "parent": "root-4",
+        "title": "Measures of Kurtosis"
+      },
+      {
+        "id": "root-4-1",
+        "parent": "root-4",
+        "title": "Visualizing Kurtosis with Boxplots"
+      }
+    ],
+    "sources": [
+      "Chuong1_2_docx_20250918_162129"
+    ],
+    "createdAt": "2025-11-06T15:34:32.482369Z",
+    "strategy": "iterative"
+  },
+  {
+    "id": "c6062dd3-7e29-4218-acc1-a52b4f61c1c7",
+    "title": "Chuong1_2_docx_20250918_162129",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "Chuong1_2_docx_20250918_162129"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Các kiểu dữ liệu"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Dữ liệu định tính"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Dữ liệu định lượng"
+      },
+      {
+        "id": "root-0-1-0",
+        "parent": "root-0-1",
+        "title": "Dữ liệu rời rạc"
+      },
+      {
+        "id": "root-0-1-1",
+        "parent": "root-0-1",
+        "title": "Dữ liệu liên tục"
+      },
+      {
+        "id": "root-1",
+        "parent": "root",
+        "title": "Trực Quan hóa Dữ Liệu"
+      },
+      {
+        "id": "root-1-0",
+        "parent": "root-1",
+        "title": "Các công cụ trực quan hóa"
+      },
+      {
+        "id": "root-1-0-0",
+        "parent": "root-1-0",
+        "title": "Biểu đồ dòng chảy"
+      },
+      {
+        "id": "root-1-0-1",
+        "parent": "root-1-0",
+        "title": "Các công cụ trực quan hóa"
+      },
+      {
+        "id": "root-1-1",
+        "parent": "root-1",
+        "title": "Ưu điểm của trực quan hóa"
+      },
+      {
+        "id": "root-2",
+        "parent": "root",
+        "title": "Các công cụ trực quan hóa"
+      },
+      {
+        "id": "root-2-0",
+        "parent": "root-2",
+        "title": "Biểu đồ dòng chảy"
+      },
+      {
+        "id": "root-2-1",
+        "parent": "root-2",
+        "title": "Các công cụ trực quan hóa"
+      },
+      {
+        "id": "root-3",
+        "parent": "root",
+        "title": "Tối ưu cấu trúc trực quan"
+      }
+    ],
+    "sources": [
+      "Chuong1_2_docx_20250918_162129"
+    ],
+    "createdAt": "2025-11-06T15:08:20.212993Z",
+    "strategy": "iterative"
+  },
+  {
+    "id": "06e9d236-23d5-4e4e-a3ea-277057c0099f",
+    "title": "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Giáo dục & nâng cao nhận thức"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Chính sách nội bộ"
+      },
+      {
+        "id": "root-1",
+        "parent": "root",
+        "title": "Mô phỏng & phòng thủ"
+      },
+      {
+        "id": "root-1-0",
+        "parent": "root-1",
+        "title": "Mô phỏng tấn công"
+      },
+      {
+        "id": "root-1-1",
+        "parent": "root-1",
+        "title": "Phòng thủ"
+      }
+    ],
+    "sources": [
+      "TIỂU LUẬN AN TOÀN THÔNG TIN_docx_20250918_154115"
+    ],
+    "createdAt": "2025-11-06T14:08:28.540261Z"
+  }
+]

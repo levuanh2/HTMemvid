@@ -1,0 +1,52 @@
+{
+  "0": {
+    "text": "1.2. TẬP DỮ LIỆU\n\t\t\n\n\n\n\n\n\t\t\t\tHình : Biểu đồ dòng chảy hiển thị các loại dữ liệu\n\n1.2.1 Các kiểu dữ liệu\nCó bốn loại biến số: danh nghĩa (nominal), thứ bậc (ordinal), rời rạc (discrete), và liên tục (continuous). Hai loại đầu tiên được gọi là dữ liệu định tính (qualitative data), còn hai loại sau thuộc dữ liệu định lượng (quantitative data). Biến danh nghĩa và thứ bậc được đánh giá bằng từ ngữ hoặc thuộc tính → gọi là dữ liệu định tính. Biến rời rạc và liên tục thuộc về dữ liệu định lượng. Các kiểu giá trị thuộc tính\nGiá trị thuộc tính gồm hai nhóm chính: định tính và định lượng. Dữ liệu định tính phản ánh đặc điểm hay loại, có thể là danh nghĩa (không thứ tự), thứ bậc (có thứ tự), hoặc phân loại thành nhị phân và đa trị. Dữ liệu định lượng biểu diễn bằng số, gồm rời rạc (giá trị nguyên, dùng để đếm) và liên tục (có thể có thập phân, dùng để đo lường). Trong một số trường hợp, cùng một thuộc tính có thể được thể hiện dưới cả hai dạng tùy công cụ đo. Kiểu thuộc tính liên tục và rời rạc\nTrong tập dữ liệu, thuộc tính rời rạc (discrete) là những giá trị có thể đếm được và thường biểu diễn bằng số nguyên, chẳng hạn như số sinh viên trong lớp hoặc số lần xuất hiện của một sự kiện.",
+    "video": "/app/videos/Chuong1_2_docx_20260403_090728.mp4",
+    "timestamp": "2026-04-03T09:07:28.285161",
+    "parent_id": "0",
+    "sub_order": 1,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "1": {
+    "text": "Ngược lại, thuộc tính liên tục (continuous) có thể nhận vô số giá trị trong một khoảng, thường là kết quả đo lường như chiều cao, cân nặng hay nhiệt độ. Việc phân biệt hai loại này rất quan trọng vì nó quyết định cách mô tả dữ liệu, lựa chọn phép thống kê và hình thức trực quan hóa: dữ liệu rời rạc phù hợp với biểu đồ cột, còn dữ liệu liên tục thường được trình bày bằng biểu đồ tần suất (histogram) hoặc đường cong phân phối. Bảng . Minh hoạ cách trình bày dữ liệu rời rạc khi so sánh 2 nhóm can thiệp\n\n Bảng . Minh họa cách hiển thị dữ liệu liên tục so sánh 2 biện pháp can thiệp. 1.2.4. Các đặc tính mô tả dữ liệu\nCác đặc tính mô tả dữ liệu mô tả nhanh bằng số và hình ảnh để hiển thị bức tranh tổng quan về dữ liệu, giúp người đọc dễ hiểu hơn so với chỉ liệt kê số liệu thô:\na) Trung tâm và độ phân tán\nTrung tâm: mean, median, mode. Độ phân tán: range, variance, standard deviation (SD), interquartile range (IQR). Min – Max lấy từ data, useful để thấy toàn bộ mức biến thiên. Visual: Histogram giúp nhận biết dạng phân phối – symmetric, skewed, uni/bimodal... b) Hình dạng phân phối\nSkewness – đánh giá độ lệch trái hay phải của data. Kurtosis – độ nhọn/đuôi dày so với chuẩn. c) Biểu đồ trực quan\nBoxplot: hiển thị median, IQR, whiskers (thường ±1.5×IQR) và outliers, còn giúp đánh giá skewness qua độ lệch box & whiskers.",
+    "video": "/app/videos/Chuong1_2_docx_20260403_090728.mp4",
+    "timestamp": "2026-04-03T09:07:28.285161",
+    "parent_id": "0",
+    "sub_order": 2,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "2": {
+    "text": "Violin plot: combines boxplot + kernel density để biểu diễn distribution shape, đặc biệt hữu ích cho dữ liệu đa mode; hiển thị median, IQR, density… . d) Công cụ phân tích nâng cao\nKhi dữ liệu có dạng phức tạp (bimodal, skewed, clipped), có thể dùng thêm ridgeline plot, mirror density plot (MD plot) để khám phá cấu trúc dữ liệu chi tiết hơn.",
+    "video": "/app/videos/Chuong1_2_docx_20260403_090728.mp4",
+    "timestamp": "2026-04-03T09:07:28.285161",
+    "parent_id": "0",
+    "sub_order": 3,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "3": {
+    "text": "1.2.5. Trực quan hóa dữ liệu\nTrực quan hóa dữ liệu là quá trình biến dữ liệu “khô khan” thành hình ảnh trực quan – biểu đồ, đồ thị, heatmap, scatter… để giúp người đọc nhanh chóng nhìn ra xu hướng, mẫu, mối quan hệ hoặc điểm bất thường trong tập dữ liệu (e.g., phát hiện outlier, quan sát phân phối, so sánh nhóm ...). Các chức năng và lợi ích chính:\nPhát hiện mẫu, xu hướng, outliers: Dễ nhận diện các điểm ngoại lệ, cluster hay xu hướng trong dữ liệu ngay qua hình ảnh. Hỗ trợ truyền tải thông tin hiệu quả: Visual hỗ trợ con người ghi nhớ, xử lý thông tin nhanh và chính xác hơn. Tối ưu theo nhiệm vụ: Nghiên cứu chỉ ra hiệu quả của loại biểu đồ thay đổi theo từng tác vụ – ví dụ, pie chart dễ nhận thấy phần lớn nhất, scatter plot hữu ích để quan sát mối quan hệ giữa hai biến. Nguyên tắc thiết kế trực quan hiệu quả (theo Tufte và nghiên cứu hiện đại):\n“Excellence in statistical graphics consists of complex ideas communicated with clarity, precision, and efficiency.” – biểu đồ phải trực diện, dễ hiểu và không gây nhầm lẫn. Ưu tiên “less is more”, nhất quán về màu & style, và phù hợp với ngữ cảnh dữ liệu.",
+    "video": "/app/videos/Chuong1_2_docx_20260403_090728.mp4",
+    "timestamp": "2026-04-03T09:07:28.285161",
+    "parent_id": null,
+    "sub_order": null,
+    "total_parts": null,
+    "is_subchunk": false
+  },
+  "4": {
+    "text": "Tránh chartjunk – các hiệu ứng cầu kỳ, rườm rà gây rối mắt.",
+    "video": "/app/videos/Chuong1_2_docx_20260403_090728.mp4",
+    "timestamp": "2026-04-03T09:07:28.285161",
+    "parent_id": null,
+    "sub_order": null,
+    "total_parts": null,
+    "is_subchunk": false
+  },
+  "__meta__": {
+    "version": "1.0",
+    "created_at": "2026-04-03T09:07:28.285161",
+    "num_chunks": 5
+  }
+}

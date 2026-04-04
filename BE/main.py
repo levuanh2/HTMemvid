@@ -8,7 +8,7 @@ import time
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple, Any, Callable
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
@@ -30,7 +30,7 @@ from faiss_utils import (
     MODEL_NAME,
 )
 from ollama_utils import summarize_whole_document, summarize_results, SLM_MODEL
-from mindmap_utils import get_main_branches, generate_mindmap_flat, generate_mindmap_cmgn
+from mindmap_generation_worker import run_mindmap_generation
 from chunk_processor import process_and_store_chunks
 from summarize_advanced import advanced_summarize
 from memory_tree import (
@@ -116,6 +116,25 @@ def _cleanup_old_query_jobs() -> None:
         ]
         for jid in expired:
             query_jobs.pop(jid, None)
+
+# Mindmap async jobs (tách biệt `jobs` dùng cho rebuild-index)
+mindmap_jobs: Dict[str, Dict[str, Any]] = {}
+mindmap_jobs_lock = threading.Lock()
+MINDMAP_JOB_TTL_MINUTES = int(os.environ.get("MINDMAP_JOB_TTL_MINUTES", "30"))
+
+
+def _cleanup_old_mindmap_jobs() -> None:
+    if MINDMAP_JOB_TTL_MINUTES <= 0:
+        return
+    cutoff = time.time() - (MINDMAP_JOB_TTL_MINUTES * 60)
+    with mindmap_jobs_lock:
+        expired = [
+            jid for jid, j in mindmap_jobs.items()
+            if isinstance(j.get("created_at"), (int, float)) and j["created_at"] < cutoff
+        ]
+        for jid in expired:
+            mindmap_jobs.pop(jid, None)
+
 
 def _make_query_cache_key(q: str, selected_sources: list, use_memory_tree: bool) -> str:
     # Normalize list để key ổn định theo thứ tự chọn
@@ -1393,9 +1412,48 @@ def delete_source():
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+def run_mindmap_job(job_id: str, source_names: list[str], strategy_requested: str) -> None:
+    """Background: sinh mindmap + lưu file; cập nhật mindmap_jobs thread-safe."""
+
+    def set_progress(p: int) -> None:
+        with mindmap_jobs_lock:
+            j = mindmap_jobs.get(job_id)
+            if j is not None:
+                j["progress"] = min(100, max(0, int(p)))
+
+    try:
+        with mindmap_jobs_lock:
+            if job_id in mindmap_jobs:
+                mindmap_jobs[job_id]["status"] = "running"
+                mindmap_jobs[job_id]["progress"] = max(int(mindmap_jobs[job_id].get("progress") or 0), 5)
+
+        record = run_mindmap_generation(
+            INDEX_META_JSON_PATH,
+            source_names,
+            strategy_requested,
+            _append_mindmap,
+            progress_cb=set_progress,
+        )
+
+        with mindmap_jobs_lock:
+            if job_id in mindmap_jobs:
+                mindmap_jobs[job_id]["status"] = "done"
+                mindmap_jobs[job_id]["progress"] = 100
+                mindmap_jobs[job_id]["result"] = _mindmap_response(record)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        with mindmap_jobs_lock:
+            if job_id in mindmap_jobs:
+                mindmap_jobs[job_id]["status"] = "error"
+                mindmap_jobs[job_id]["error"] = str(exc)
+        print(f"[MINDMAP_JOB] job_id={job_id} failed: {exc}")
+
+
 # -------------------------
 @app.post("/generate-mindmap")
 def generate_mindmap():
+    _cleanup_old_mindmap_jobs()
     try:
         data = request.json or {}
         raw_sources = data.get("sources") or []
@@ -1421,241 +1479,49 @@ def generate_mindmap():
             return jsonify({"error": "No sources selected"}), 400
 
         strategy_requested = (
-                    data.get("strategy") or data.get("mode") or data.get("method") or "iterative").strip().lower()
+            data.get("strategy") or data.get("mode") or data.get("method") or "iterative"
+        ).strip().lower()
 
-        if len(source_names) == 1:
-            root_title = Path(source_names[0]).stem or "Mind Map"
-        else:
-            display_candidates = [Path(name).stem for name in source_names if Path(name).stem]
-            if not display_candidates:
-                root_title = "Mind Map tổng hợp"
-            else:
-                preview = ", ".join(display_candidates[:3])
-                if len(display_candidates) > 3:
-                    preview += f" + {len(display_candidates) - 3} nguồn"
-                root_title = f"Tổng hợp: {preview}"
+        job_id = str(uuid.uuid4())
+        with mindmap_jobs_lock:
+            mindmap_jobs[job_id] = {
+                "status": "pending",
+                "progress": 0,
+                "result": None,
+                "error": None,
+                "created_at": time.time(),
+            }
 
-        with open(INDEX_META_JSON_PATH, encoding="utf-8") as f:
-            meta = json.load(f)
+        thread = threading.Thread(
+            target=run_mindmap_job,
+            args=(job_id, source_names, strategy_requested),
+            daemon=True,
+        )
+        thread.start()
 
-        # FIX 1: Normalize source linh hoạt hơn - loại timestamp và .mp4
-        def normalize_video_name(name: str) -> str:
-            """Normalize video name: loại path, .mp4, timestamp"""
-            if not name:
-                return ""
-            # Loại path nếu có (videos/, ...)
-            name = Path(name).name if '/' in name or '\\' in name else name
-            # Normalize unicode
-            cleaned = unicodedata.normalize('NFKD', name.strip()).replace('\u00a0', ' ')
-            # Loại .mp4
-            cleaned = cleaned.replace('.mp4', '')
-            # Loại timestamp dạng _YYYYMMDD_HHMMSS nếu có
-            cleaned = re.sub(r'_\d{8}_\d{6}$', '', cleaned)
-            return cleaned.strip().lower()
-        
-        normalized_sources = set()
-        for s in source_names:
-            normalized = normalize_video_name(s)
-            if normalized:
-                normalized_sources.add(normalized)
-        
-        print(f"🔍 Normalized sources: {normalized_sources}")
-
-        # Lấy tất cả chunks từ meta
-        all_chunks_with_meta = []
-        for key, m in meta.items():
-            video_raw = m.get("video", "").strip()
-            if not video_raw:
-                continue
-            video_clean = normalize_video_name(video_raw)
-
-            if video_clean in normalized_sources:
-                all_chunks_with_meta.append({
-                    "text": m.get("text", ""),
-                    "parent_id": m.get("parent_id"),
-                    "sub_order": m.get("sub_order"),
-                    "total_parts": m.get("total_parts"),
-                    "is_subchunk": m.get("is_subchunk", False),
-                    "key": key  # giữ key để debug nếu cần
-                })
-
-        print(f"📦 Tìm thấy {len(all_chunks_with_meta)} chunks từ {len(meta)} entries trong index")
-        
-        if not all_chunks_with_meta:
-            flat_nodes = [
-                {"id": "root", "parent": None, "title": root_title},
-                {"id": "root-0", "parent": "root", "title": "No content available"}
-            ]
-            strategy_used = "fallback"
-        else:
-            # FIX 2: Ghép sub-chunk thành chunk gốc trước khi đưa vào LLM
-            # Logic mới: xử lý sub-chunks theo parent_id và merge lại
-            merged_chunks = []
-            sub_groups = {}  # {parent_id: [list of sub-chunks]}
-            normal_chunks = []
-            chunk_keys_by_parent = {}  # {key: item} để track chunk gốc
-
-            # Bước 1: Phân loại chunks
-            for item in all_chunks_with_meta:
-                is_subchunk = item.get("is_subchunk", False)
-                parent_id = item.get("parent_id")
-                item_key = str(item.get("key", "")).strip()
-                text = item.get("text", "").strip()
-                
-                if not text:
-                    continue  # Bỏ qua chunk không có text
-                
-                if is_subchunk and parent_id:
-                    # Normalize parent_id thành string để làm key
-                    parent_key = str(parent_id).strip()
-                    if parent_key:
-                        if parent_key not in sub_groups:
-                            sub_groups[parent_key] = []
-                        sub_groups[parent_key].append(item)
-                else:
-                    # Chunk thường (không phải sub-chunk)
-                    normal_chunks.append(text)
-                    # Track chunk gốc theo key của nó
-                    if item_key:
-                        chunk_keys_by_parent[item_key] = item
-
-            # Bước 2: Ghép sub-chunk theo parent_id
-            for parent_key, subs in sub_groups.items():
-                # Kiểm tra xem có chunk gốc với key = parent_key không
-                # Nếu có, bỏ qua sub-chunks (vì đã có chunk gốc trong normal_chunks)
-                if parent_key in chunk_keys_by_parent:
-                    print(f"ℹ️ Parent {parent_key} đã có chunk gốc, bỏ qua {len(subs)} sub-chunks")
-                    continue
-                
-                # Sort theo sub_order để đảm bảo thứ tự đúng
-                subs.sort(key=lambda x: (x.get("sub_order") or 0, x.get("text", "")))
-                
-                # Kiểm tra xem có đủ parts không (optional, chỉ để log)
-                total_parts = subs[0].get("total_parts") if subs else None
-                if total_parts and len(subs) < total_parts:
-                    print(f"⚠️ Warning: Parent {parent_key} có {len(subs)}/{total_parts} sub-chunks (thiếu {total_parts - len(subs)} parts)")
-                
-                # Merge text của các sub-chunks
-                merged_text = "\n\n".join(
-                    sub.get("text", "").strip() 
-                    for sub in subs 
-                    if sub.get("text", "").strip()
-                )
-                
-                if merged_text.strip():
-                    merged_chunks.append(merged_text)
-                else:
-                    print(f"⚠️ Warning: Parent {parent_key} merge ra text rỗng")
-
-            # Kết hợp chunk thường + chunk ghép (đã merge từ sub-chunks)
-            # Thứ tự: normal chunks trước, sau đó merged chunks
-            final_chunks = normal_chunks + merged_chunks
-            
-            # Log để debug
-            print(f"📊 Mindmap generation: {len(all_chunks_with_meta)} total items, {len(normal_chunks)} normal chunks, {len(merged_chunks)} merged chunks, {len(final_chunks)} final chunks")
-            
-            # Nếu final_chunks rỗng nhưng có all_chunks_with_meta, có thể có lỗi logic
-            if not final_chunks and all_chunks_with_meta:
-                print(f"⚠️ ERROR: Có {len(all_chunks_with_meta)} chunks nhưng final_chunks rỗng!")
-                print(f"   - Normal chunks: {len(normal_chunks)}")
-                print(f"   - Sub groups: {len(sub_groups)}")
-                print(f"   - Merged chunks: {len(merged_chunks)}")
-                # Fallback: dùng tất cả text có được (không merge)
-                fallback_chunks = [item.get("text", "").strip() for item in all_chunks_with_meta if item.get("text", "").strip()]
-                if fallback_chunks:
-                    print(f"   - Using fallback: {len(fallback_chunks)} chunks")
-                    final_chunks = fallback_chunks
-
-            if not final_chunks:
-                print(f"❌ Không có chunks để sinh mindmap")
-                flat_nodes = [
-                    {"id": "root", "parent": None, "title": root_title},
-                    {"id": "root-0", "parent": "root", "title": "No content available"}
-                ]
-                strategy_used = "fallback"
-            else:
-                # Sinh mind map từ chunk gốc trọn vẹn
-                print(f"🚀 Bắt đầu sinh mindmap với {len(final_chunks)} chunks...")
-                flat_nodes = None
-                strategy_used = None
-                
-                if strategy_requested in {"cmgn", "semantic", "coreference"}:
-                    try:
-                        print(f"   → Thử CMGN strategy...")
-                        flat_nodes = generate_mindmap_cmgn(final_chunks, model=SLM_MODEL)
-                        strategy_used = "cmgn"
-                        print(f"   ✓ CMGN thành công: {len(flat_nodes)} nodes")
-                    except Exception as exc:
-                        print(f"   ⚠️ CMGN failed: {exc}, fallback iterative")
-                        try:
-                            flat_nodes = generate_mindmap_flat(final_chunks, model=SLM_MODEL)
-                            strategy_used = "iterative"
-                            print(f"   ✓ Iterative thành công: {len(flat_nodes)} nodes")
-                        except Exception as exc2:
-                            print(f"   ❌ Iterative cũng failed: {exc2}")
-                            flat_nodes = None
-                else:
-                    try:
-                        print(f"   → Thử Iterative strategy...")
-                        flat_nodes = generate_mindmap_flat(final_chunks, model=SLM_MODEL)
-                        strategy_used = "iterative"
-                        print(f"   ✓ Iterative thành công: {len(flat_nodes)} nodes")
-                    except Exception as exc:
-                        print(f"   ❌ Iterative failed: {exc}")
-                        flat_nodes = None
-                
-                # Nếu cả hai strategy đều fail, tạo fallback
-                if not flat_nodes or len(flat_nodes) == 0:
-                    print(f"   ⚠️ Tất cả strategies failed, tạo fallback mindmap")
-                    try:
-                        # Thử tạo mindmap đơn giản từ main branches
-                        from mindmap_utils import get_main_branches
-                        mains = get_main_branches(final_chunks[:10], model=SLM_MODEL)  # Chỉ dùng 10 chunks đầu
-                        if mains:
-                            flat_nodes = [
-                                {"id": "root", "parent": None, "title": root_title}
-                            ]
-                            for idx, main in enumerate(mains):
-                                flat_nodes.append({
-                                    "id": f"root-{idx}",
-                                    "parent": "root",
-                                    "title": main
-                                })
-                            strategy_used = "fallback_branches"
-                            print(f"   ✓ Fallback branches thành công: {len(flat_nodes)} nodes")
-                        else:
-                            raise ValueError("Không tạo được branches")
-                    except Exception as exc3:
-                        print(f"   ❌ Fallback cũng failed: {exc3}")
-                        # Cuối cùng, tạo mindmap rỗng
-                        flat_nodes = [
-                            {"id": "root", "parent": None, "title": root_title},
-                            {"id": "root-0", "parent": "root", "title": "Không thể sinh mindmap từ dữ liệu"}
-                        ]
-                        strategy_used = "error"
-
-        # Ép root_title
-        if flat_nodes:
-            root_node = next((n for n in flat_nodes if n.get("parent") is None), flat_nodes[0])
-            root_node["title"] = root_title or root_node.get("title") or "Mind Map"
-
-        mindmap_record = {
-            "id": str(uuid.uuid4()),
-            "title": root_title,
-            "nodes": flat_nodes,
-            "sources": source_names,
-            "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "strategy": strategy_used,
-        }
-
-        _append_mindmap(mindmap_record)
-
-        return jsonify(_mindmap_response(mindmap_record))
+        return jsonify({"job_id": job_id, "status": "started"}), 202
 
     except Exception as e:
-        import traceback;
+        import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.get("/mindmap-status/<job_id>")
+def mindmap_status(job_id: str):
+    _cleanup_old_mindmap_jobs()
+    with mindmap_jobs_lock:
+        job = mindmap_jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        return jsonify({
+            "status": job.get("status"),
+            "progress": job.get("progress", 0),
+            "result": job.get("result"),
+            "error": job.get("error"),
+        }), 200
+
+
 @app.get('/mindmaps')
 def list_mindmaps():
     records = _load_mindmaps()

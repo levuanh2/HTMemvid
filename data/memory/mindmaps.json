@@ -1,0 +1,63 @@
+[
+  {
+    "id": "bce70556-d123-4c60-9aba-cdd9e7c0a837",
+    "title": "NHOM10_BC_Final_docx_20260404_091940",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "NHOM10_BC_Final_docx_20260404_091940"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Kỹ thuật huấn luyện mạng nơ-ron nhiều lớp (MLP)"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "ID3 (Iterative Dichotomiser 3)"
+      },
+      {
+        "id": "root-0-0-0",
+        "parent": "root-0-0",
+        "title": "Cây quyết định ID3 (ID3)"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Thuật toán k-Nearest Neighbors (k-NN)"
+      },
+      {
+        "id": "root-0-1-0",
+        "parent": "root-0-1",
+        "title": "Backpropagation"
+      },
+      {
+        "id": "root-0-1-0-0",
+        "parent": "root-0-1-0",
+        "title": "Kỹ thuật ID3 (Iterative Dichotomiser 3)"
+      },
+      {
+        "id": "root-1",
+        "parent": "root",
+        "title": "Tự học Tree ID3"
+      },
+      {
+        "id": "root-1-0",
+        "parent": "root-1",
+        "title": "Cây quyết định ID3 (ID3)"
+      },
+      {
+        "id": "root-1-1",
+        "parent": "root-1",
+        "title": "Connectionism"
+      }
+    ],
+    "sources": [
+      "NHOM10_BC_Final_docx_20260404_091940"
+    ],
+    "createdAt": "2026-04-04T09:24:42.139282Z",
+    "strategy": "iterative"
+  }
+]

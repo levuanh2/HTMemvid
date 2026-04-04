@@ -1,5 +1,5 @@
 {
-  "index_built_at": "2026-04-03T09:08:31.177409Z",
+  "index_built_at": "2026-04-04T09:20:14.021637Z",
   "dim": 384,
   "nodes": [
     {
@@ -15,6 +15,76 @@
       "type": "section",
       "title": "Tổng quan tài liệu",
       "source_stem": "chuong1_2_docx"
+    },
+    {
+      "memory_id": "mem_doc_2224801030378_nguyenhuuluc-lab5_firewall_docx",
+      "tree_id": "memtree_2224801030378_nguyenhuuluc-lab5_firewall_docx",
+      "type": "document",
+      "title": "Tài liệu: 2224801030378_nguyenhuuluc-lab5_firewall_docx",
+      "source_stem": "2224801030378_nguyenhuuluc-lab5_firewall_docx"
+    },
+    {
+      "memory_id": "mem_sec_2224801030378_nguyenhuuluc-lab5_firewall_docx_0",
+      "tree_id": "memtree_2224801030378_nguyenhuuluc-lab5_firewall_docx",
+      "type": "section",
+      "title": "Tổng quan tài liệu",
+      "source_stem": "2224801030378_nguyenhuuluc-lab5_firewall_docx"
+    },
+    {
+      "memory_id": "mem_doc_nhom10_bc_final_docx",
+      "tree_id": "memtree_nhom10_bc_final_docx",
+      "type": "document",
+      "title": "Tài liệu: nhom10_bc_final_docx",
+      "source_stem": "nhom10_bc_final_docx"
+    },
+    {
+      "memory_id": "mem_sec_nhom10_bc_final_docx_0",
+      "tree_id": "memtree_nhom10_bc_final_docx",
+      "type": "section",
+      "title": "Section 1",
+      "source_stem": "nhom10_bc_final_docx"
+    },
+    {
+      "memory_id": "mem_sec_nhom10_bc_final_docx_1",
+      "tree_id": "memtree_nhom10_bc_final_docx",
+      "type": "section",
+      "title": "Section 2",
+      "source_stem": "nhom10_bc_final_docx"
+    },
+    {
+      "memory_id": "mem_sec_nhom10_bc_final_docx_2",
+      "tree_id": "memtree_nhom10_bc_final_docx",
+      "type": "section",
+      "title": "Section 3",
+      "source_stem": "nhom10_bc_final_docx"
+    },
+    {
+      "memory_id": "mem_sec_nhom10_bc_final_docx_3",
+      "tree_id": "memtree_nhom10_bc_final_docx",
+      "type": "section",
+      "title": "Section 4",
+      "source_stem": "nhom10_bc_final_docx"
+    },
+    {
+      "memory_id": "mem_sec_nhom10_bc_final_docx_4",
+      "tree_id": "memtree_nhom10_bc_final_docx",
+      "type": "section",
+      "title": "Section 5",
+      "source_stem": "nhom10_bc_final_docx"
+    },
+    {
+      "memory_id": "mem_sec_nhom10_bc_final_docx_5",
+      "tree_id": "memtree_nhom10_bc_final_docx",
+      "type": "section",
+      "title": "Section 6",
+      "source_stem": "nhom10_bc_final_docx"
+    },
+    {
+      "memory_id": "mem_sec_nhom10_bc_final_docx_6",
+      "tree_id": "memtree_nhom10_bc_final_docx",
+      "type": "section",
+      "title": "Section 7",
+      "source_stem": "nhom10_bc_final_docx"
     }
   ]
 }

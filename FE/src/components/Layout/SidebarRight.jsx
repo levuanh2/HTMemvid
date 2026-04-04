@@ -32,6 +32,30 @@ export default function SidebarRight({ selectedSources }) {
     fetchSummaries();
   }, [fetchMindMaps]);
 
+  const pollMindmapJob = async (jobId, { intervalMs = 1200, timeoutMs = 15 * 60 * 1000 } = {}) => {
+    const start = Date.now();
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (Date.now() - start > timeoutMs) {
+        throw new Error("Quá thời gian chờ tạo Mind Map.");
+      }
+      const res = await fetch(`/api/mindmap-status/${encodeURIComponent(jobId)}`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.status === "done") return data.result;
+      if (data.status === "error") {
+        throw new Error(data.error || "Lỗi khi tạo Mind Map.");
+      }
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+  };
+
   const handleGenerateMindMap = async () => {
     console.log("handleGenerateMindMap called with:", selectedSources);
     if (!selectedSources || selectedSources.length === 0) {
@@ -47,9 +71,15 @@ export default function SidebarRight({ selectedSources }) {
       });
       console.log("▶️ POST /generate-mindmap status:", res.status);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      console.log("▶️ MindMap response data:", data);
-      if (data.error) throw new Error(data.error);
+      const startData = await res.json();
+      console.log("▶️ MindMap job started:", startData);
+      if (startData.error) throw new Error(startData.error);
+
+      const jobId = startData.job_id;
+      if (!jobId) throw new Error("Server không trả job_id.");
+
+      const data = await pollMindmapJob(jobId, { intervalMs: 1200, timeoutMs: 15 * 60 * 1000 });
+      console.log("▶️ MindMap result:", data);
 
       const record = {
         id: data.id || Date.now().toString(),

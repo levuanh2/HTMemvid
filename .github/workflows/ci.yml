@@ -10,11 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout source code
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2) Setup Python 3.11 + enable pip cache
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -24,8 +22,6 @@ jobs:
             requirements.txt
             BE/requirements.txt
 
-      # 3) Install dependencies
-      # Repo hiện dùng requirements.txt ở root; step này vẫn tương thích nếu sau này bạn tách BE/requirements.txt.
       - name: Install dependencies
         shell: bash
         run: |
@@ -36,17 +32,14 @@ jobs:
             pip install -r requirements.txt
           fi
 
-      # 4) Test import (quan trọng): đảm bảo Flask app import được
       - name: Import app
         working-directory: BE
         run: python -c "from main import app; print('OK: imported app', type(app))"
 
-      # 5) Optional: chạy server nhẹ + healthcheck
       - name: Smoke run + healthcheck
         working-directory: BE
         shell: bash
         run: |
-          # Tắt debug/reloader để dễ smoke test trong CI
           DEBUG=0 FLASK_DEBUG=0 python main.py &
           pid=$!
           sleep 5
@@ -61,7 +54,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Cache npm để tăng tốc build FE (phục vụ cả local build và docker build)
       - name: Setup Node (cache npm)
         uses: actions/setup-node@v4
         with:
@@ -69,7 +61,6 @@ jobs:
           cache: npm
           cache-dependency-path: FE/package-lock.json
 
-      # Build images theo đúng context production (context=repo root)
       - name: Docker build backend
         run: docker build -t memvid-backend -f BE/Dockerfile .
 
@@ -106,4 +97,3 @@ jobs:
       - name: Docker compose down
         if: always()
         run: docker compose down -v
-

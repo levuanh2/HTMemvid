@@ -10,5 +10,17 @@
       "chunk_query": true,
       "memory_query": true
     }
+  },
+  "3854f7cc-9474-48bd-a4ca-bcc606cdbfb3": {
+    "filename": "TIỂU LUẬN AN TOÀN THÔNG TIN.docx",
+    "source_stem": "tiểu luận an toàn thông tin_docx",
+    "status": "ready",
+    "progress": 1.0,
+    "created_at": "2026-04-04T08:57:33.188416+00:00",
+    "substatus": "memory_tree_ready",
+    "capabilities": {
+      "chunk_query": true,
+      "memory_query": true
+    }
   }
 }

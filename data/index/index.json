@@ -47,6 +47,33 @@
   "__meta__": {
     "version": "1.0",
     "created_at": "2026-04-03T09:07:28.285161",
-    "num_chunks": 5
+    "num_chunks": 8
+  },
+  "5": {
+    "text": "TIỂU LUẬN AN TOÀN THÔNG TIN\nĐỀ TÀI 5: Social Engineering trong An toàn thông tin\nI. Giới thiệu chung\nSocial Engineering (Kỹ thuật lừa đảo phi kỹ thuật) là hành vi khai thác yếu tố con người để đánh lừa, lấy cắp thông tin, hoặc tạo điều kiện cho tấn công mạng. Không cần kỹ thuật cao, Social Engineering thường thành công nhờ sự thiếu cảnh giác, lòng tin, và thiếu kiến thức bảo mật của nạn nhân. Đây là mắt xích yếu nhất trong chuỗi an toàn thông tin. II. Các dạng tấn công Social Engineering phổ biến\n\nIII. Tình huống thực tế\nVụ CEO Fraud: Hacker giả danh giám đốc gửi email yêu cầu kế toán chuyển tiền gấp → mất hàng trăm nghìn USD. Giả danh IT nội bộ: Hacker gọi điện, giả danh bộ phận kỹ thuật, yêu cầu cung cấp mật khẩu để \"nâng cấp hệ thống\" → chiếm đoạt hệ thống. Tình huống mô phỏng:\nNhân viên A nhận email từ địa chỉ giả it-support@xyz-corp.co, yêu cầu xác nhận tài khoản qua Google Form. Nhân viên A nhập email, mật khẩu và OTP. Hacker đăng nhập vào hệ thống, lấy dữ liệu khách hàng → tiếp tục lừa đảo. IV. Biện pháp phòng chống\nGiáo dục & nâng cao nhận thức:\nTập huấn định kỳ, mô phỏng tấn công phishing. Chính sách nội bộ:\nQuy định không cung cấp thông tin qua email, xác minh 2 bước với các giao dịch quan trọng. Kiểm thử định kỳ:\nTổ chức kiểm tra phản ứng của nhân viên với email giả lập. Công nghệ hỗ trợ:\nSử dụng xác thực 2 lớp (2FA), bộ lọc thư rác/phishing, hệ thống phát hiện truy cập bất thườg. V.",
+    "video": "/app/videos/TIỂU_LUẬN_AN_TOÀN_THÔNG_TIN_docx_20260404_085734.mp4",
+    "timestamp": "2026-04-04T08:57:34.904011",
+    "parent_id": null,
+    "sub_order": null,
+    "total_parts": null,
+    "is_subchunk": false
+  },
+  "6": {
+    "text": "Kết luận\nSocial Engineering không đòi hỏi kỹ thuật cao nhưng cực kỳ nguy hiểm nếu người dùng mất cảnh giác. Con người là điểm yếu quan trọng – cần kết hợp đào tạo, quy trình, công nghệ để đảm bảo an toàn thông tin. PHỤ LỤC LAB MÔ PHỎNG: TẤN CÔNG & PHÒNG THỦ SOCIAL ENGINEERING\n🎯 Mục tiêu\nMô phỏng một cuộc tấn công phishing qua email. Ghi nhận hành vi người dùng và cách phản ứng/phòng vệ.",
+    "video": "/app/videos/TIỂU_LUẬN_AN_TOÀN_THÔNG_TIN_docx_20260404_085734.mp4",
+    "timestamp": "2026-04-04T08:57:34.904011",
+    "parent_id": null,
+    "sub_order": null,
+    "total_parts": null,
+    "is_subchunk": false
+  },
+  "7": {
+    "text": "🧪 A. Mô phỏng tấn công\nTạo email giả:\nĐịa chỉ: it.support.xyzcorp@gmail.com\nTiêu đề: [Cảnh báo] Xác nhận tài khoản bảo mật\nNội dung: yêu cầu truy cập biểu mẫu để tránh bị khóa tài khoản. Tạo Google Form:\nGồm các trường: Email, mật khẩu, OTP (giả lập). Giao diện giống biểu mẫu thật. Gửi và ghi nhận:\nGửi cho người đóng vai nạn nhân trong nhóm. Ghi nhận hành vi: người nhận có mở link không, có nhập thông tin không (dùng dữ liệu giả). Hình minh họa chụp lại:\nEmail phishing\nGiao diện biểu mẫu\nSơ đồ luồng tấn công: Hacker → Email → Người dùng → Nhập thông tin → Bị xâm nhập\nB. Mô phỏng phòng thủ\nPhản ứng từ hệ thống:\nGmail/Google Workspace cảnh báo địa chỉ gửi đáng ngờ. Cảnh báo khi biểu mẫu đòi hỏi thông tin nhạy cảm. Phản ứng từ người dùng:\nKiểm tra domain người gửi\nKhông nhập dữ liệu nếu thấy nghi ngờ. Báo ngay với phòng CNTT. Hình ảnh minh họa:\nGiao diện cảnh báo email đáng ngờ\nHộp thoại chặn truy cập form lạ",
+    "video": "/app/videos/TIỂU_LUẬN_AN_TOÀN_THÔNG_TIN_docx_20260404_085734.mp4",
+    "timestamp": "2026-04-04T08:57:34.904011",
+    "parent_id": null,
+    "sub_order": null,
+    "total_parts": null,
+    "is_subchunk": false
   }
 }

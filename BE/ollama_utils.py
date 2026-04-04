@@ -16,6 +16,9 @@ def _safe_chat(messages: list[dict], model: str = None) -> str:
     model: override model (nếu None sẽ dùng SLM_MODEL).
     Trả về raw text (hoặc chuỗi lỗi để debug).
     """
+    if os.environ.get("SKIP_MODEL_LOAD") == "1":
+        return "[CI MODE] Skipped LLM response"
+
     model = model or SLM_MODEL
     last_err: Exception | None = None
     for attempt in range(1, 4):
@@ -50,6 +53,9 @@ def run_ollama_chat(system_prompt: str, user_prompt: str, model: str = None) -> 
     Wrapper high-level: truyền system + user, có thể override model.
     SLM-friendly: dùng model nhỏ theo SLM_MODEL nếu không override.
     """
+    if os.environ.get("SKIP_MODEL_LOAD") == "1":
+        return "[CI MODE] Skipped LLM response"
+
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},

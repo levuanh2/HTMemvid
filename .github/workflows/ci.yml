@@ -10,6 +10,8 @@ jobs:
   backend-test:
     name: Backend Test (Python 3.11)
     runs-on: ubuntu-latest
+    env:
+      SKIP_MODEL_LOAD: "1"
 
     steps:
       - name: Checkout

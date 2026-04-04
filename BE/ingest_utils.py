@@ -69,8 +69,22 @@ def extract_text(path: str) -> str:
     return ''
 
 
-import re 
-_semantic_embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+import re
+
+_EMBEDDING_MODEL_NAME = os.environ.get("EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
+_semantic_embeddings = None
+
+
+def _get_semantic_embeddings():
+    """Lazy HuggingFaceEmbeddings — không load khi import; SKIP_MODEL_LOAD=1 → None."""
+    global _semantic_embeddings
+    if os.getenv("SKIP_MODEL_LOAD") == "1":
+        return None
+    if _semantic_embeddings is None:
+        _semantic_embeddings = HuggingFaceEmbeddings(model_name=_EMBEDDING_MODEL_NAME)
+    return _semantic_embeddings
+
+
 def split_text(text: str) -> List[str]:
     """
     Chia van ban thanbh cac chunk dua tren ngu nghia (semantic chunk)
@@ -78,9 +92,12 @@ def split_text(text: str) -> List[str]:
     """
     if not text or not text.strip():
         return []
+    emb = _get_semantic_embeddings()
+    if emb is None:
+        raise RuntimeError("Embedding model not available (CI mode)")
     #tao semantic
     text_splitter=SemanticChunker(
-        _semantic_embeddings,
+        emb,
         breakpoint_threshold_type="percentile",
         breakpoint_threshold_amount=94,
         min_chunk_size=300,

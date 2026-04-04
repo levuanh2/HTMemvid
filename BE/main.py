@@ -155,7 +155,10 @@ def home():
 
 @app.get('/health')
 def health():
-    return jsonify({"status": "ok"}), 200
+    return jsonify({
+        "status": "ok",
+        "mode": "ci" if os.environ.get("SKIP_MODEL_LOAD") == "1" else "normal",
+    }), 200
 
 @app.get('/stats')
 def stats():

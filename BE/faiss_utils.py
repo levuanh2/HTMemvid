@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Dict, Tuple
 import numpy as np
 import faiss
-from embedding_model import get_sentence_transformer, DEFAULT_MODEL_NAME
+from embedding_model import get_embedding_model, DEFAULT_MODEL_NAME
 
 # Đường dẫn index và metadata (ưu tiên DATA_DIR=/app trong Docker)
 DATA_ROOT = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parent)))
@@ -15,8 +15,16 @@ META_PATH = str(INDEX_DIR / "index.json")
 os.makedirs(str(INDEX_DIR), exist_ok=True)
 MODEL_NAME = os.environ.get("EMBEDDING_MODEL_NAME", DEFAULT_MODEL_NAME)
 
-# Singleton model (được cache trong embedding_model.py)
-_model = get_sentence_transformer(MODEL_NAME)
+
+def _skip_faiss_in_ci() -> bool:
+    return os.getenv("SKIP_MODEL_LOAD") == "1"
+
+
+def _require_embedding_model():
+    model = get_embedding_model(MODEL_NAME)
+    if model is None:
+        raise RuntimeError("Embedding model not available (CI mode)")
+    return model
 
 
 # ===== Helpers =====
@@ -104,11 +112,17 @@ def append_to_index(chunks: List[str], video_name: str = "", custom_metadata: Li
     if not chunks:
         return
 
+    if _skip_faiss_in_ci():
+        print("[FAISS] Skipped append_to_index (CI mode)")
+        return
+
+    model = _require_embedding_model()
+
     # Batch embedding để tối ưu tốc độ (giữ batch_size cố định)
     all_embeds = []
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i:i + batch_size]
-        batch_embeds = _model.encode(
+        batch_embeds = model.encode(
             batch,
             convert_to_numpy=True,
             batch_size=batch_size,
@@ -160,10 +174,15 @@ def append_to_index(chunks: List[str], video_name: str = "", custom_metadata: Li
 
 def search_index(query: str, k: int = 5) -> List[str]:
     """Tìm kiếm và trả về list text chunks"""
+    if _skip_faiss_in_ci():
+        print("[FAISS] Skipped search_index (CI mode)")
+        return []
+
     if not os.path.exists(INDEX_PATH):
         return []
 
-    qv = _model.encode([query], convert_to_numpy=True).astype("float32")
+    model = _require_embedding_model()
+    qv = model.encode([query], convert_to_numpy=True).astype("float32")
     idx = faiss.read_index(INDEX_PATH)
     D, I = idx.search(qv, k)
 
@@ -225,6 +244,10 @@ def rebuild_chunk_index(existing_meta: Dict[str, Dict] | None = None) -> None:
     - Giữ nguyên id của từng chunk (dùng key trong META làm id).
     - Nếu không còn metadata nào → xóa file index.
     """
+    if _skip_faiss_in_ci():
+        print("[FAISS] Skipped rebuild_chunk_index (CI mode)")
+        return
+
     meta = existing_meta if existing_meta is not None else _load_meta()
 
     if not meta:
@@ -261,12 +284,14 @@ def rebuild_chunk_index(existing_meta: Dict[str, Dict] | None = None) -> None:
             pass
         return
 
+    model = _require_embedding_model()
+
     # Batch embedding để tối ưu tốc độ rebuild
     batch_size = 32
     all_embeds = []
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
-        batch_embeds = _model.encode(
+        batch_embeds = model.encode(
             batch,
             convert_to_numpy=True,
             batch_size=batch_size,

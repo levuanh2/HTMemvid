@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional, Tuple
 
 import faiss
 import numpy as np
-from embedding_model import get_sentence_transformer
+from embedding_model import get_embedding_model
 
 from ollama_utils import run_ollama_chat, SLM_MODEL
 from faiss_utils import MODEL_NAME
@@ -29,7 +29,13 @@ MEMORY_INDEX_META_PATH = MEMORY_DIR / "memory_index.json"
 
 os.makedirs(MEMORY_DIR, exist_ok=True)
 
-_mem_model = get_sentence_transformer(MODEL_NAME)
+
+def _require_mem_model():
+    """Lazy load embedding model (không load khi import module)."""
+    model = get_embedding_model(MODEL_NAME)
+    if model is None:
+        raise RuntimeError("Embedding model not available (CI mode)")
+    return model
 
 
 @dataclass
@@ -64,7 +70,7 @@ def _embed(text: str) -> List[float]:
     text = (text or "").strip()
     if not text:
         return []
-    vec = _mem_model.encode([text], convert_to_numpy=True).astype("float32")[0]
+    vec = _require_mem_model().encode([text], convert_to_numpy=True).astype("float32")[0]
     return vec.tolist()
 
 
@@ -79,7 +85,7 @@ def _embed_batch(texts: List[str], batch_size: int = 32) -> List[List[float]]:
     all_embeds = []
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
-        batch_embeds = _mem_model.encode(
+        batch_embeds = _require_mem_model().encode(
             batch, 
             convert_to_numpy=True, 
             batch_size=batch_size,
@@ -548,6 +554,8 @@ def rebuild_memory_index() -> None:
 
 
 def _load_memory_index():
+    if os.getenv("SKIP_MODEL_LOAD") == "1":
+        return None, None
     if not MEMORY_INDEX_PATH.exists() or not MEMORY_INDEX_META_PATH.exists():
         return None, None
     try:
@@ -870,7 +878,7 @@ def query_with_memory_tree(query: str, selected_sources: Optional[List[str]] = N
             return None
 
     # Embed query
-    qv = _mem_model.encode([q], convert_to_numpy=True).astype("float32")
+    qv = _require_mem_model().encode([q], convert_to_numpy=True).astype("float32")
 
     # Search với top_k lớn hơn để có nhiều candidate
     search_k = min(strategy_top_k * 3, len(nodes_meta))

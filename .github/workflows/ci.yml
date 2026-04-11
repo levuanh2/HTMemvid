@@ -39,13 +39,33 @@ jobs:
         working-directory: BE
         run: python -c "from main import app; print('OK')"
 
+      # OCR-related code paths may expect tesseract on the runner
+      - name: Install tesseract (smoke deps)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr
+
       - name: Smoke run + healthcheck
         working-directory: BE
         run: |
           DEBUG=0 FLASK_DEBUG=0 python main.py &
-          sleep 5
-          curl -f http://localhost:5000/health
-          pkill -f "python main.py" || true
+          pid=$!
+
+          echo "Waiting for backend to be ready..."
+
+          for i in {1..30}; do
+            if curl -fsS http://localhost:5000/health > /dev/null; then
+              echo "Backend is up!"
+              break
+            fi
+            echo "Retry $i..."
+            sleep 2
+          done
+
+          echo "Final health check..."
+          curl -fsS http://localhost:5000/health
+
+          kill $pid || true
 
   docker-build-test:
     name: Docker Build Test
@@ -74,11 +94,22 @@ jobs:
       - name: Docker compose up
         run: docker compose up -d --build
 
-      - name: Wait backend
-        run: sleep 10
+      - name: Wait for backend health
+        run: |
+          echo "Waiting for backend to be ready..."
+          for i in {1..40}; do
+            if curl -fsS http://localhost:5000/health > /dev/null; then
+              echo "Backend is up!"
+              exit 0
+            fi
+            echo "Retry $i..."
+            sleep 2
+          done
+          echo "Backend did not become ready in time"
+          exit 1
 
       - name: Healthcheck
-        run: curl -f http://localhost:5000/health
+        run: curl -fsS http://localhost:5000/health
 
       - name: Logs on failure
         if: failure()

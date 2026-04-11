@@ -19,26 +19,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /srv/app
+WORKDIR /app
 
-# Install Python deps
-COPY requirements.txt ./requirements.txt
+# Install Python deps (copy requirements first for caching)
+# Copy dependencies first (for cache)
+COPY BE/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Gunicorn cho production
-RUN pip install --no-cache-dir gunicorn
 
 # Copy backend source
 COPY BE/ .
 
-# Create runtime data directories (also backed by volumes in docker-compose)
 RUN mkdir -p /app/videos /app/index /app/memory /app/input_docs
 
 EXPOSE 5000
 
 ENV DATA_DIR=/app
 
-# Increase timeout because LLM/Ollama requests can be slow (avoid premature worker kill).
-# Keep workers=1 to avoid in-memory job/cache inconsistency across multiple workers.
-CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5000", "--timeout", "300", "main:app"]
+# Run production server (Gunicorn).
+# IMPORTANT: This codebase uses in-memory async job stores; multiple workers do not share job state.
+# Keep WEB_CONCURRENCY=1 (default) to keep /query-status and /mindmap-status correct.
+CMD ["sh", "-c", "gunicorn -w ${WEB_CONCURRENCY:-1} -b 0.0.0.0:5000 --timeout ${GUNICORN_TIMEOUT:-300} main:app"]
 

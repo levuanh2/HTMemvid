@@ -15,6 +15,30 @@
 FE/dist
 
 # Avoid sending large generated artifacts to Docker build context
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+data/
+index/
+videos/
+*.mp4
+*.avi
+
+*.log
+
+.venv/
+node_modules/
+
+*.pt
+*.bin
+*.gguf
+
+.git
+.gitignore
+
+# Legacy / existing generated locations in this repo
 BE/videos
 BE/input_docs
 BE/index

@@ -1,5 +1,5 @@
 {
-  "index_built_at": "2026-04-04T09:20:14.021637Z",
+  "index_built_at": "2026-04-08T03:33:24.431029Z",
   "dim": 384,
   "nodes": [
     {
@@ -85,6 +85,62 @@
       "type": "section",
       "title": "Section 7",
       "source_stem": "nhom10_bc_final_docx"
+    },
+    {
+      "memory_id": "mem_doc_baocaogamengine_levuanh_2224801030388_docx",
+      "tree_id": "memtree_baocaogamengine_levuanh_2224801030388_docx",
+      "type": "document",
+      "title": "Tài liệu: baocaogamengine_levuanh_2224801030388_docx",
+      "source_stem": "baocaogamengine_levuanh_2224801030388_docx"
+    },
+    {
+      "memory_id": "mem_sec_baocaogamengine_levuanh_2224801030388_docx_0",
+      "tree_id": "memtree_baocaogamengine_levuanh_2224801030388_docx",
+      "type": "section",
+      "title": "Section 1",
+      "source_stem": "baocaogamengine_levuanh_2224801030388_docx"
+    },
+    {
+      "memory_id": "mem_sec_baocaogamengine_levuanh_2224801030388_docx_1",
+      "tree_id": "memtree_baocaogamengine_levuanh_2224801030388_docx",
+      "type": "section",
+      "title": "Section 2",
+      "source_stem": "baocaogamengine_levuanh_2224801030388_docx"
+    },
+    {
+      "memory_id": "mem_sec_baocaogamengine_levuanh_2224801030388_docx_2",
+      "tree_id": "memtree_baocaogamengine_levuanh_2224801030388_docx",
+      "type": "section",
+      "title": "Section 3",
+      "source_stem": "baocaogamengine_levuanh_2224801030388_docx"
+    },
+    {
+      "memory_id": "mem_sec_baocaogamengine_levuanh_2224801030388_docx_3",
+      "tree_id": "memtree_baocaogamengine_levuanh_2224801030388_docx",
+      "type": "section",
+      "title": "Section 4",
+      "source_stem": "baocaogamengine_levuanh_2224801030388_docx"
+    },
+    {
+      "memory_id": "mem_sec_baocaogamengine_levuanh_2224801030388_docx_4",
+      "tree_id": "memtree_baocaogamengine_levuanh_2224801030388_docx",
+      "type": "section",
+      "title": "Section 5",
+      "source_stem": "baocaogamengine_levuanh_2224801030388_docx"
+    },
+    {
+      "memory_id": "mem_sec_baocaogamengine_levuanh_2224801030388_docx_5",
+      "tree_id": "memtree_baocaogamengine_levuanh_2224801030388_docx",
+      "type": "section",
+      "title": "Section 6",
+      "source_stem": "baocaogamengine_levuanh_2224801030388_docx"
+    },
+    {
+      "memory_id": "mem_sec_baocaogamengine_levuanh_2224801030388_docx_6",
+      "tree_id": "memtree_baocaogamengine_levuanh_2224801030388_docx",
+      "type": "section",
+      "title": "Section 7",
+      "source_stem": "baocaogamengine_levuanh_2224801030388_docx"
     }
   ]
 }

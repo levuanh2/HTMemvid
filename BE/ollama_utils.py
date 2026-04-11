@@ -7,7 +7,7 @@ from typing import List
 from langdetect import detect
 
 # Default SLM model (thay đổi theo model bạn cài trên Ollama)
-SLM_MODEL = 'gemma2:2b'  
+SLM_MODEL = 'gemma4:e4b'  
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 def _safe_chat(messages: list[dict], model: str = None) -> str:
     """

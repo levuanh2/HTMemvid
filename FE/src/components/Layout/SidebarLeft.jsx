@@ -11,39 +11,51 @@ import { FiMoreVertical, FiAlertCircle } from "react-icons/fi";
  * @param {string} substatus - Optional substatus
  * @returns {object} UI config
  */
-const getStatusConfig = (status, substatus) => {
+const getStatusConfig = (status, substatus, canQuery) => {
+  if (canQuery === true) {
+    return {
+      mainText: "Sẵn sàng tra cứu",
+      subText: substatus ? "Đang tối ưu thêm…" : null,
+      showProgress: false,
+      checkboxEnabled: true,
+      badge: "READY",
+      borderColor: "border-green-300",
+      bgColor: "bg-green-50",
+    };
+  }
+
   switch (status) {
     case "processing":
       return {
         mainText: "Đang phân tích tài liệu…",
         showProgress: true,
         checkboxEnabled: false,
-        badge: null,
-        borderColor: "",
-        bgColor: "",
+        badge: "PROCESSING",
+        borderColor: "border-yellow-200",
+        bgColor: "bg-yellow-50",
       };
 
     case "index_ready":
       return {
-        mainText: "Có thể sử dụng",
+        mainText: "Đang xử lý…",
         subText: substatus === "building_memory_tree"
           ? "Đang tối ưu thêm nội dung"
           : "Đang tối ưu thêm nội dung",
-        badge: "Sẵn sàng tra cứu",
+        badge: "PROCESSING",
         showProgress: true,
-        checkboxEnabled: true,
-        borderColor: "",
-        bgColor: "",
+        checkboxEnabled: false,
+        borderColor: "border-yellow-200",
+        bgColor: "bg-yellow-50",
       };
 
     case "ready":
       return {
-        mainText: "Sẵn sàng",
-        badge: "Hoàn tất",
-        showProgress: false,
-        checkboxEnabled: true,
-        borderColor: "",
-        bgColor: "",
+        mainText: "Đang xử lý…",
+        badge: "PROCESSING",
+        showProgress: true,
+        checkboxEnabled: false,
+        borderColor: "border-yellow-200",
+        bgColor: "bg-yellow-50",
       };
 
     case "error":
@@ -51,7 +63,7 @@ const getStatusConfig = (status, substatus) => {
         mainText: "Lỗi xử lý tài liệu",
         showProgress: false,
         checkboxEnabled: false,
-        badge: null,
+        badge: "ERROR",
         borderColor: "border-red-300",
         bgColor: "bg-red-50",
         showErrorIcon: true,
@@ -104,6 +116,8 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
                 progress: data.progress ?? s.progress, // Giữ progress cũ nếu không có
                 substatus: data.substatus,
                 capabilities: data.capabilities,
+                can_query: data.can_query === true,
+                video_stem: data.video_stem ?? s.video_stem,
                 error: data.error
               }
               : s
@@ -158,6 +172,7 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
             progress: 1.0,
             substatus: "memory_tree_ready",
             capabilities: { chunk_query: true, memory_query: true },
+            can_query: true,
             num_chunks: s.num_chunks,
           }));
 
@@ -232,8 +247,10 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
         const newSource = {
           source_id: data.source_id,
           filename: data.filename,
+          video_stem: data.video_stem,
           status: data.status || "processing",
           progress: 0.0,
+          can_query: data.can_query === true,
         };
 
         // Optimistic UI: Thêm vào list ngay
@@ -266,10 +283,13 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
 
   const handleSelectAll = (checked) => {
     if (checked) {
-      // Chọn sources đã index_ready hoặc ready
+      // Chọn sources có thể query ngay (single source of truth: can_query)
       const readySources = sources
-        .filter((s) => (s.status === "ready" || s.status === "index_ready") && s.video_stem)
-        .map((s) => s.video_stem);
+        .filter((s) => {
+          const isSelectable = s?.can_query === true;
+          return isSelectable && (s.video_stem || s.video);
+        })
+        .map((s) => s.video_stem || s.video);
       setSelectedSources(readySources);
     } else {
       setSelectedSources([]);
@@ -277,15 +297,18 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
   };
 
   const toggleSelect = (source) => {
-    // Cho phép select sources đã index_ready hoặc ready
-    if ((source.status !== "ready" && source.status !== "index_ready") || !source.video_stem) {
+    const isSelectable = source?.can_query === true;
+    const key = source?.video_stem || source?.video;
+
+    // Cho phép select độc lập theo từng document
+    if (!isSelectable || !key) {
       return;
     }
 
     setSelectedSources((prev) =>
-      prev.includes(source.video_stem)
-        ? prev.filter((v) => v !== source.video_stem)
-        : [...prev, source.video_stem]
+      prev.includes(key)
+        ? prev.filter((v) => v !== key)
+        : [...prev, key]
     );
   };
 
@@ -402,9 +425,10 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
           const isSelected = selectedSources.includes(src.video_stem || src.video);
 
           // Get UI config từ status
-          const statusConfig = getStatusConfig(src.status, src.substatus);
-          const showProgress = statusConfig.showProgress && src.status !== "ready";
-          const checkboxEnabled = statusConfig.checkboxEnabled && !isDeleting;
+          const isSelectable = src?.can_query === true;
+          const statusConfig = getStatusConfig(src.status, src.substatus, isSelectable);
+          const showProgress = statusConfig.showProgress;
+          const checkboxEnabled = statusConfig.checkboxEnabled && isSelectable && !isDeleting;
 
           return (
             <div

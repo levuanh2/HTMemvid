@@ -47,7 +47,7 @@
   "__meta__": {
     "version": "1.0",
     "created_at": "2026-04-03T09:07:28.285161",
-    "num_chunks": 192
+    "num_chunks": 234
   },
   "5": {
     "text": "TIỂU LUẬN AN TOÀN THÔNG TIN\nĐỀ TÀI 5: Social Engineering trong An toàn thông tin\nI. Giới thiệu chung\nSocial Engineering (Kỹ thuật lừa đảo phi kỹ thuật) là hành vi khai thác yếu tố con người để đánh lừa, lấy cắp thông tin, hoặc tạo điều kiện cho tấn công mạng. Không cần kỹ thuật cao, Social Engineering thường thành công nhờ sự thiếu cảnh giác, lòng tin, và thiếu kiến thức bảo mật của nạn nhân. Đây là mắt xích yếu nhất trong chuỗi an toàn thông tin. II. Các dạng tấn công Social Engineering phổ biến\n\nIII. Tình huống thực tế\nVụ CEO Fraud: Hacker giả danh giám đốc gửi email yêu cầu kế toán chuyển tiền gấp → mất hàng trăm nghìn USD. Giả danh IT nội bộ: Hacker gọi điện, giả danh bộ phận kỹ thuật, yêu cầu cung cấp mật khẩu để \"nâng cấp hệ thống\" → chiếm đoạt hệ thống. Tình huống mô phỏng:\nNhân viên A nhận email từ địa chỉ giả it-support@xyz-corp.co, yêu cầu xác nhận tài khoản qua Google Form. Nhân viên A nhập email, mật khẩu và OTP. Hacker đăng nhập vào hệ thống, lấy dữ liệu khách hàng → tiếp tục lừa đảo. IV. Biện pháp phòng chống\nGiáo dục & nâng cao nhận thức:\nTập huấn định kỳ, mô phỏng tấn công phishing. Chính sách nội bộ:\nQuy định không cung cấp thông tin qua email, xác minh 2 bước với các giao dịch quan trọng. Kiểm thử định kỳ:\nTổ chức kiểm tra phản ứng của nhân viên với email giả lập. Công nghệ hỗ trợ:\nSử dụng xác thực 2 lớp (2FA), bộ lọc thư rác/phishing, hệ thống phát hiện truy cập bất thườg. V.",
@@ -1730,6 +1730,384 @@
     "parent_id": "73",
     "sub_order": 5,
     "total_parts": 5,
+    "is_subchunk": true
+  },
+  "192": {
+    "text": "TRƯỜNG ĐẠI HỌC THỦ DẦU MỘT\nVIỆN CÔNG NGHỆ SỐ\n\n\n\n\n\n\n\n\n\n\n\n\nBÁO CÁO TIỂU LUẬN MÔN HỌC\n   \t\t\t\t\tGAME ENGINE\n\n\n \nSVTH: Lê Vũ Anh\t2224801030388\n\nGVHD: ThS. Hồ Đắc Hưng\n\n\n\n\nTP.HCM, tháng 3/2026\n\nTRƯỜNG ĐẠI HỌC THỦ DẦU MỘT\nVIỆN CÔNG NGHỆ SỐ\n\n\n\n\nBÁO CÁO TIỂU LUẬN MÔN HỌC\n   \t\t\t\t\tGAME ENGINE\n\n\n\nSVTH: Lê Vũ Anh\t2224801030388\n\nGVHD: ThS. Hồ Đắc Hưng\n\n\n\n\n\n\n\n\n\nTP.HCM, tháng 3/2026\nNHẬN XÉT VÀ CHẤM ĐIỂM CỦA GIẢNG VIÊN\n\n\nHọ và tên giảng viên: ThS. Hồ Đắc Hưng\nĐề tài: Báo cáo tiểu luận môn học Game Engine\n\n\nNội dung nhận xét:\n........................................................................................................................................... ...........................................................................................................................................",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": null,
+    "sub_order": null,
+    "total_parts": null,
+    "is_subchunk": false
+  },
+  "193": {
+    "text": "........................................................................................................................................... ........................................................................................................................................... ...........................................................................................................................................",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": null,
+    "sub_order": null,
+    "total_parts": null,
+    "is_subchunk": false
+  },
+  "194": {
+    "text": "....................",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "194",
+    "sub_order": 1,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "195": {
+    "text": "Trước hết, em xin gửi lời cảm ơn chân thành sâu sắc đến ThS.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "194",
+    "sub_order": 3,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "196": {
+    "text": "Hồ Đắc Hưng – giảng viên hướng dẫn môn học. Thầy đã tận tình chỉ bảo, đưa ra những định hướng quý báu và giải đáp các thắc mắc về kỹ thuật trong suốt quá trình em nghiên cứu và triển khai dự án thực tế trên nền tảng Unity. Những kiến thức chuyên môn và kinh nghiệm thực tiễn của thầy là nguồn động lực lớn giúp em hoàn thành tốt bài báo cáo này. Em cũng xin cảm ơn Trường Đại học Thủ Dầu Một cùng Viện Công nghệ số đã tạo điều kiện về cơ sở vật chất và môi trường học tập thuận lợi để em có thể tiếp cận với các công nghệ lập trình hiện đại. Dù đã dành nhiều tâm huyết, nhưng do kiến thức còn hạn chế, bài báo cáo khó tránh khỏi những thiếu sót. Em rất mong nhận được sự góp ý từ thầy để bản thân có thể rút kinh nghiệm và hoàn thiện hơn trong học tập cũng như công việc sau này. Em xin trân trọng cảm ơn! LỜI MỞ ĐẦU\n\tTrong kỷ nguyên số hiện nay, ngành công nghiệp trò chơi điện tử không chỉ dừng lại ở mức độ giải trí thuần túy mà đã trở thành một lĩnh vực công nghệ cao, đóng góp quan trọng vào nền kinh tế số toàn cầu. Đứng sau sự thành công của những siêu phẩm đồ họa siêu thực hay những tựa game di động gây sốt chính là Game Engine – \"trái tim\" và bộ khung sườn cốt lõi của mọi dự án phát triển trò chơi.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "195",
+    "sub_order": 1,
+    "total_parts": 4,
+    "is_subchunk": true
+  },
+  "197": {
+    "text": "Tại Việt Nam, với vị thế nằm trong Top 5 toàn cầu về lượt tải xuống ứng dụng di động, nhu cầu về làm chủ công nghệ Game Engine đang trở nên cấp thiết hơn bao giờ hết. Việc hiểu rõ các thành phần cấu tạo như Rendering Engine, Physics Engine hay hệ thống Scripting không chỉ giúp nhà phát triển tối ưu hóa sản phẩm mà còn mở ra cơ hội đưa game Việt vươn tầm quốc tế. Trong số các công cụ hiện nay, Unity nổi lên như một \"người chơi chủ chốt\" nhờ khả năng phát triển đa nền tảng mạnh mẽ và hệ sinh thái tài nguyên phong phú, đặc biệt phù hợp với thị trường game tại Việt Nam. Xuất phát từ tầm quan trọng đó, em thực hiện báo cáo tiểu luận với đề tài nghiên cứu về công nghệ Game Engine và ứng dụng thực tế. Nội dung báo cáo tập trung vào ba mục tiêu chính:\nTìm hiểu tổng quan về lịch sử và các thành phần cốt lõi của một Game Engine hiện đại. Phân tích thực trạng thị trường và vị thế của các công cụ phát triển game tại Việt Nam. Triển khai dự án thực tế trên Unity, từ việc xây dựng bản đồ, tạo hiệu ứng môi trường đến lập trình logic nhân vật và hệ thống va chạm. Thông qua bài báo cáo này, em hy vọng sẽ củng cố được nền tảng kiến thức chuyên môn, đồng thời đánh giá được tiềm năng phát triển của bản thân trong ngành công nghiệp phần mềm giải trí đầy năng động này.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "195",
+    "sub_order": 2,
+    "total_parts": 4,
+    "is_subchunk": true
+  },
+  "198": {
+    "text": "CHƯƠNG I: TỔNG QUAN VỀ CÔNG NGHỆ GAME ENGINE(GAME ENGINE 101)\n1.1 Định nghĩa về Game Engine\nTrong lĩnh vực phát triển phần mềm giải trí, Game Engine (Công cụ phát triển trò chơi) được hiểu là một hệ thống phần mềm trung gian (middleware) đóng vai trò là khung sườn (framework) cốt lõi để xây dựng và phát triển trò chơi điện tử. Thay vì phải viết lại mã nguồn từ đầu cho mỗi dự án, các nhà phát triển sử dụng Game Engine như một \"hộp công cụ\" tích hợp sẵn các tính năng tối quan trọng. Có thể ví Game Engine như một hệ điều hành chuyên biệt dành cho trò chơi, nơi nó quản lý sự tương tác giữa phần cứng và các tài nguyên nội dung (hình ảnh, âm thanh, kịch bản). Cấu trúc định nghĩa của một Game Engine hiện đại thường bao gồm 5 trụ cột chính:\nRendering Engine (Công cụ kết xuất): Xử lý đồ họa 2D hoặc 3D, tính toán ánh sáng, đổ bóng và đưa hình ảnh lên màn hình thông qua các API đồ họa (như DirectX, Vulkan hay Metal). Physics Engine (Công cụ vật lý): Mô phỏng các quy luật vật lý trong thế giới thực như trọng lực, va chạm (collision detection), và động lực học của vật thể rắn/lỏng. Audio Engine (Công cụ âm thanh): Quản lý việc phát lại, trộn âm và các hiệu ứng âm thanh vòm, âm thanh 3D theo vị trí nhân vật. Scripting (Kịch bản): Cung cấp ngôn ngữ lập trình (C++, C#, Lua...) để định nghĩa logic trò chơi, hành vi của AI và các quy tắc tương tác.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "195",
+    "sub_order": 3,
+    "total_parts": 4,
+    "is_subchunk": true
+  },
+  "199": {
+    "text": "Memory Management (Quản lý bộ nhớ): Tối ưu hóa việc nạp và giải phóng tài nguyên hệ thống, đảm bảo trò chơi vận hành mượt mà trên nhiều cấu hình thiết bị khác nhau. 1.2 Lịch sử hình thành và phát triển của Game Engine\nLịch sử của Game Engine gắn liền với sự tiến hóa của phần cứng máy tính. Quá trình này có thể chia thành 4 giai đoạn then chốt:\n1.2.1 Kỷ nguyên sơ khai (Trước những năm 1990)\nTrong giai đoạn này, khái niệm \"Game Engine\" chưa thực sự tồn tại. Mỗi trò chơi đều được viết mã nguồn riêng biệt từ con số 0 (Hard-coded). Các nhà phát triển phải trực tiếp tương tác với phần cứng để tối ưu hóa tài nguyên cực kỳ hạn hẹp của các dòng máy như Atari hay NES. Việc tái sử dụng mã nguồn giữa các trò chơi là rất hiếm hoi. 1.2.2 Sự ra đời của khái niệm Middleware (Thập niên 1990)\nBước ngoặt xảy ra vào năm 1993 với sự xuất hiện của Doom (id Software). John Carmack đã thiết kế trò chơi với cấu trúc tách biệt hoàn toàn giữa:\nHệ thống lõi (Core system): Xử lý đồ họa và va chạm.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "195",
+    "sub_order": 4,
+    "total_parts": 4,
+    "is_subchunk": true
+  },
+  "200": {
+    "text": "Dữ liệu nội dung (Game data): Các màn chơi, nhân vật và âm thanh (lưu trong file .WAD). Thiết kế này cho phép các nhà phát triển khác \"mượn\" hệ thống lõi để tạo ra trò chơi mới mà không cần lập trình lại từ đầu. Thuật ngữ \"Game Engine\" bắt đầu được sử dụng rộng rãi từ đây. Đến năm 1998, Unreal Engine đời đầu ra mắt cùng tựa game cùng tên, đặt nền móng cho mô hình kinh doanh cấp phép (licensing) công cụ cho các studio khác. 1.2.3 Cuộc cách mạng đồ họa 3D và Đa nền tảng (Thập niên 2000)\nGiai đoạn này chứng kiến sự bùng nổ của các API đồ họa như DirectX và OpenGL. Game Engine không còn chỉ dừng lại ở việc hiển thị hình ảnh, mà bắt đầu tích hợp các thư viện vật lý phức tạp (như Havok). Unity (2005): Xuất hiện và thay đổi cuộc chơi bằng cách tập trung vào sự đơn giản và khả năng đa nền tảng (multi-platform), cho phép các nhà phát triển độc lập (Indie) tiếp cận công nghệ cao với chi phí thấp. 1.2.4 Kỷ nguyên hiện đại: Siêu thực và Công nghệ đám mây (Từ 2010 đến nay)\nHiện nay, Game Engine đã vượt ra khỏi biên giới của trò chơi điện tử để lấn sân sang điện ảnh, kiến trúc và mô phỏng quân sự. Công nghệ đột phá: Sự ra đời của Ray Tracing (Dò tia thời gian thực) và các hệ thống như Nanite/Lumen của Unreal Engine 5 đã xóa nhòa ranh giới giữa hình ảnh trò chơi và thực tế.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "196",
+    "sub_order": 1,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "201": {
+    "text": "Hệ sinh thái: Các Engine hiện đại cung cấp cả chợ tài nguyên (Asset Store), hệ thống phân tích dữ liệu người dùng và khả năng vận hành máy chủ đám mây tích hợp. Hình 1: Lịch Sử Hình Thành\n1.3 Các thành phần cốt lõi của một Game Engine (Core Components)\nMột Game Engine hiện đại không phải là một khối phần mềm đơn nhất mà là sự hợp thành của nhiều hệ thống con (sub-systems) hoạt động nhịp nhàng thông qua một vòng lặp chính (Game Loop). 1.3.1 Rendering Engine (Công cụ kết xuất đồ họa)\nĐây là \"bộ mặt\" của Game Engine, chịu trách nhiệm chuyển đổi các dữ liệu toán học (tọa độ đỉnh, kết cấu bề mặt) thành hình ảnh hiển thị trên màn hình. Chức năng: Xử lý các tác vụ như đổ bóng (Shading), chiếu sáng (Lighting), hiệu ứng hạt (Particles), và khử răng cưa (Anti-aliasing). Giao tiếp phần cứng: Nó hoạt động thông qua các API đồ họa cấp thấp như DirectX, Vulkan hoặc Metal để tận dụng tối đa sức mạnh của GPU. Tối ưu hóa: Sử dụng các kỹ thuật như Culling (loại bỏ vật thể không nằm trong tầm nhìn) để giảm tải cho hệ thống. 1.3.2 Physics Engine (Công cụ vật lý)\nThành phần này đảm bảo các vật thể trong trò chơi tuân thủ các quy luật tự nhiên, tạo ra cảm giác \"thật\" cho người chơi. Phát hiện va chạm (Collision Detection): Tính toán khi nào hai vật thể chạm nhau và phản ứng của chúng (ví dụ: quả bóng nảy lại khi đập vào tường).",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "196",
+    "sub_order": 2,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "202": {
+    "text": "Động lực học (Dynamics): Mô phỏng trọng lực, lực đẩy, ma sát và sự biến dạng của vật thể mềm/rắn.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "196",
+    "sub_order": 3,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "203": {
+    "text": "Thư viện phổ biến: Các Engine thường tích hợp sẵn các bộ máy vật lý nổi tiếng như PhysX (NVIDIA) hoặc Havok. 1.3.3 Input Management System (Hệ thống quản lý đầu vào)\nHệ thống này đóng vai trò cầu nối giữa hành động thực tế của người chơi và phản hồi trong thế giới ảo. Đa thiết bị: Xử lý tín hiệu từ bàn phím, chuột, tay cầm (gamepad), màn hình cảm ứng, hay thậm chí là bộ cảm biến chuyển động (VR/AR). Ánh xạ hành động (Input Mapping): Cho phép người chơi tùy chỉnh phím bấm. Thay vì lập trình cứng \"Phím Space = Nhảy\", hệ thống sẽ ánh xạ \"Hành động Nhảy = [Phím bất kỳ]\". 1.3.4 Scripting and API System (Hệ thống Kịch bản và API)\nĐây là \"bộ não\" điều khiển logic của trò chơi, cho phép các nhà thiết kế (Designer) xây dựng nội dung mà không cần can thiệp sâu vào mã nguồn lõi bằng C++. Scripting: Sử dụng các ngôn ngữ bậc cao như C# (trong Unity) hoặc Blueprints/C++ (trong Unreal) để định nghĩa kịch bản: \"Nếu người chơi mở hòm đồ, hãy trừ 1 chìa khóa và cộng 100 vàng\". API (Application Programming Interface): Cung cấp các thư viện hàm có sẵn để lập trình viên gọi lệnh nhanh chóng, giúp rút ngắn thời gian phát triển và giảm thiểu sai sót. 1.4 Các công nghệ Game Engine hiện đại (Modern Technologies)\nSự phát triển của phần cứng (GPU thế hệ mới) và trí tuệ nhân tạo đã đẩy giới hạn của Game Engine vượt xa khỏi việc chỉ là công cụ vẽ hình ảnh đơn thuần.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": null,
+    "sub_order": null,
+    "total_parts": null,
+    "is_subchunk": false
+  },
+  "204": {
+    "text": "API cũng cho phép các nhà phát triển tích hợp các công cụ và plugin của bên thứ ba, mở rộng khả năng của engine vượt ra ngoài các tính năng cốt lõi ban đầu. 1.4.1 Real-time Rendering (Kết xuất thời gian thực)\nĐây là công nghệ cốt lõi giúp hình ảnh trong game đạt đến chất lượng tương đương với phim điện ảnh nhưng vẫn có thể tương tác được. Ray Tracing (Dò tia): Mô phỏng cách ánh sáng di chuyển và phản xạ trong thế giới thực. Nó tạo ra các hiệu ứng đổ bóng, phản chiếu mặt nước và khúc xạ ánh sáng cực kỳ chân thực mà các kỹ thuật cũ (Rasterization) không thể làm được.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": null,
+    "sub_order": null,
+    "total_parts": null,
+    "is_subchunk": false
+  },
+  "205": {
+    "text": "Global Illumination (Chiếu sáng toàn cục): Các hệ thống như Lumen (Unreal Engine 5) cho phép ánh sáng thay đổi ngay lập tức khi môi trường thay đổi (ví dụ: khi phá hủy một bức tường, ánh sáng mặt trời sẽ tràn vào phòng một cách tự nhiên). Virtual Geometry (Hình học ảo hóa): Công nghệ Nanite cho phép nhập các mô hình có hàng tỷ đa giác (polygons) trực tiếp vào game mà không làm giảm hiệu suất, loại bỏ khái niệm \"LOD\" (Level of Detail) truyền thống. 1.4.2 Artificial Intelligence Integration (Tích hợp Trí tuệ nhân tạo)\nAI không còn chỉ là các kịch bản lập trình sẵn cho NPC (nhân vật máy), mà đã trở thành một phần của quy trình vận hành Engine:\nDLSS & FSR (Siêu lấy mẫu): Sử dụng AI để nâng cấp hình ảnh từ độ phân giải thấp lên cao (ví dụ từ 1080p lên 4K) giúp tăng tốc độ khung hình (FPS) mà không làm mờ hình ảnh. Generative AI (AI tạo sinh): Các Engine hiện đại bắt đầu tích hợp AI để tự động tạo ra địa hình (Procedural Generation), viết hội thoại cho nhân vật theo thời gian thực hoặc tạo ra các chuyển động (Animation) mượt mà dựa trên dữ liệu học máy. AI Navigation: Hệ thống NavMesh thông minh giúp NPC tìm đường trong môi trường phức tạp, biết tránh vật thể động và phối hợp tác chiến theo nhóm.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "199",
+    "sub_order": 1,
+    "total_parts": 6,
+    "is_subchunk": true
+  },
+  "206": {
+    "text": "1.4.3 Cross-platform Development (Phát triển đa nền tảng)\nKhả năng \"viết một lần, chạy mọi nơi\" (Write once, run anywhere) là tiêu chuẩn vàng của các Engine hiện đại như Unity hay Unreal. Tính trừu tượng hóa phần cứng: Engine cung cấp một lớp giao diện chung giúp lập trình viên không cần quan tâm đến sự khác biệt giữa kiến trúc chip của PlayStation, Xbox, PC hay Mobile. Tối ưu hóa tự động: Engine tự động điều chỉnh độ phân giải texture, shader và hiệu ứng vật lý để phù hợp với cấu hình thiết bị đích (ví dụ: tự hạ thấp đồ họa khi chạy trên điện thoại tầm trung nhưng vẫn giữ nguyên trải nghiệm chơi). Hỗ trợ Cloud Gaming: Khả năng đóng gói sản phẩm để truyền phát (streaming) qua đám mây, cho phép chơi game cấu hình cao trên các thiết bị cấu hình thấp thông qua internet. CHƯƠNG II: THỊ TRƯỜNG GAME ENGINE TẠI VIỆT NAM\n2.1 Tổng quan về ngành công nghiệp Game Việt Nam\nNgành công nghiệp game Việt Nam hiện nay không còn là một ngành giải trí đơn thuần mà đã được Chính phủ công nhận là một trong những ngành công nghiệp văn hóa trọng điểm (theo Chiến lược phát triển công nghiệp văn hóa đến năm 2030). 2.1.1 Vị thế trên bản đồ thế giới\nLượt tải xuống dẫn đầu: Theo báo cáo đầu năm 2026, các studio Việt Nam tiếp tục giữ vững vị trí Top 5 toàn cầu về tổng lượng tải xuống trên các kho ứng dụng (đặc biệt là Google Play).",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "199",
+    "sub_order": 2,
+    "total_parts": 6,
+    "is_subchunk": true
+  },
+  "207": {
+    "text": "Ước tính các ứng dụng \"Made in Vietnam\" chiếm tới gần 1/3 tổng lượng tải game di động toàn cầu. Doanh thu tăng trưởng: Doanh thu toàn ngành dự kiến cán mốc 1,66 - 1,7 tỷ USD trong năm 2025 và đang trên đà hướng tới mục tiêu 2,5 tỷ USD vào năm 2030. Số lượng người chơi: Việt Nam hiện có khoảng 54,6 triệu người chơi game, với tỷ lệ tiếp cận internet và smartphone thuộc hàng cao nhất khu vực (hơn 85% dân số). 2.1.2 Sự chuyển dịch trong mô hình phát triển\nTrong giai đoạn 2024 - 2026, ngành game Việt Nam đang trải qua một cuộc \"thay máu\" về chiến lược sản phẩm:\nTừ Hyper-casual sang Hybrid-casual: Sau thời gian dài thống trị với các game đơn giản (Hyper-casual), các studio lớn như ABI Games Studio, iKame, OneSoft đã chuyển dịch sang các dòng game có chiều sâu hơn (Hybrid-casual, Mid-core) để tối ưu hóa doanh thu từ vật phẩm ảo (IAP) thay vì chỉ dựa vào quảng cáo. Chiến lược \"Go Global\": Khoảng 88% doanh thu của các studio game Việt đến từ thị trường nước ngoài (Mỹ, Trung Quốc, EU). Việt Nam đang trở thành một \"hub\" sản xuất game cho thế giới thay vì chỉ tập trung vào thị trường nội địa vốn bị cạnh tranh gay gắt bởi các nhà phát hành Trung Quốc.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "199",
+    "sub_order": 3,
+    "total_parts": 6,
+    "is_subchunk": true
+  },
+  "208": {
+    "text": "2.1.3 Hệ sinh thái và Năng lực sản xuất\nCác \"ông lớn\" đầu ngành: Thị trường phân hóa rõ rệt với sự dẫn dắt của các tập đoàn lớn như VNG (nhà phát hành và phát triển lớn nhất), Amanotes (số 1 thế giới về game âm nhạc), và các studio trẻ đầy năng động trong lĩnh vực Web3 và AI Game. Nguồn nhân lực: Việt Nam sở hữu đội ngũ lập trình viên trẻ, kỹ thuật tốt và có khả năng thích nghi nhanh với công nghệ mới. Các trường đại học lớn đã bắt đầu đưa ngành Phát triển Game vào chương trình đào tạo chính quy. Hạ tầng công nghệ: Việc phủ sóng 5G rộng khắp (đạt 90% dân số vào cuối 2025) và việc ban hành Đạo luật AI đầu tiên tại Đông Nam Á (tháng 3/2026) đã tạo hành lang pháp lý và kỹ thuật thuận lợi cho các nhà phát triển game ứng dụng công nghệ hiện đại. 2.2 Phân khúc thị trường Game Engine (Market Segmentation)\nViệc lựa chọn một Game Engine tại thị trường Việt Nam không chỉ dựa trên sức mạnh kỹ thuật mà còn phụ thuộc vào chi phí vận hành, nguồn nhân lực sẵn có và khả năng tối ưu hóa cho thiết bị đầu cuối. 2.2.1 Phát triển Game di động (Mobile Game Development)\nĐây là phân khúc chiếm tỷ trọng lớn nhất (hơn 80%) tại Việt Nam. Sự thống trị của các thiết bị Android và iOS đã định hình nên sự lựa chọn công cụ phát triển. Engine thống trị: Unity là \"ông vua\" không đối thủ trong phân khúc này tại Việt Nam.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "199",
+    "sub_order": 4,
+    "total_parts": 6,
+    "is_subchunk": true
+  },
+  "209": {
+    "text": "Lý do lựa chọn:\nTính đa năng: Khả năng đóng gói (build) game cực nhanh cho cả hai hệ điều hành di động chỉ từ một bộ mã nguồn. Nguồn nhân lực: Cộng đồng lập trình viên Unity tại Việt Nam rất lớn, giúp các studio dễ dàng tuyển dụng và đào tạo. Tối ưu hóa: Unity cực kỳ hiệu quả cho các dòng game Hyper-casual và Mid-core – những thế mạnh truyền thống của các studio Việt như Amanotes hay OneSoft. Xu hướng mới: Sự trỗi dậy của Godot (mã nguồn mở) đang bắt đầu thu hút các nhóm phát triển nhỏ (Indie) nhờ lợi thế miễn phí hoàn toàn và bộ cài nhẹ. 2.2.2 Phát triển Game PC và Console (PC and Console Game Development)\nDù là một phân khúc đang trong giai đoạn \"trứng nước\" tại Việt Nam, nhưng đây lại là nơi thể hiện tham vọng đưa game Việt vươn tầm AAA (chất lượng cao). Engine ưu tiên: Unreal Engine (UE) là sự lựa chọn hàng đầu nhờ khả năng xử lý đồ họa siêu thực. Đặc điểm ứng dụng:\nCác studio tập trung vào đồ họa 3D phức tạp, đổ bóng thời gian thực và môi trường rộng lớn thường chọn UE (ví dụ: các dự án indie như Thần Trùng hay các dự án game lịch sử). CryEngine cũng được một số ít studio sử dụng cho các dự án yêu cầu hiệu ứng môi trường đặc thù, nhưng độ phổ biến không cao bằng UE do yêu cầu kỹ thuật khắt khe và cộng đồng hỗ trợ tại Việt Nam còn mỏng.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "199",
+    "sub_order": 5,
+    "total_parts": 6,
+    "is_subchunk": true
+  },
+  "210": {
+    "text": "Thách thức: Chi phí sản xuất cao và đòi hỏi đội ngũ nghệ sĩ 3D (3D Artists) trình độ cao là rào cản lớn nhất cho phân khúc này tại thị trường nội địa. 2.2.3 Ứng dụng AR/VR và Mô phỏng (AR/VR and Simulation Applications)\nVượt ra ngoài biên giới giải trí, Game Engine đang trở thành công cụ cốt lõi cho cuộc cách mạng chuyển đổi số (Digital Twin) tại Việt Nam. Thực tế ảo (VR) và Thực tế tăng cường (AR):\nĐược ứng dụng mạnh mẽ trong Bất động sản (tour tham quan nhà mẫu 3D), Giáo dục (phòng thí nghiệm ảo) và Y tế. Cả Unity và Unreal đều có những bộ SDK (Software Development Kit) mạnh mẽ hỗ trợ các thiết bị như Meta Quest hay Apple Vision Pro đang dần phổ biến tại các đô thị lớn như Hà Nội và TP.HCM. Mô phỏng (Simulation): * Nhiều doanh nghiệp quốc phòng và công nghiệp tại Việt Nam đang sử dụng Game Engine để xây dựng các hệ thống mô phỏng lái xe, lái máy bay hoặc quản lý vận hành nhà máy thông minh.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "199",
+    "sub_order": 6,
+    "total_parts": 6,
+    "is_subchunk": true
+  },
+  "211": {
+    "text": "Sự tích hợp giữa AI và Digital Twin trong Game Engine giúp dự báo rủi ro và đào tạo nhân sự trong môi trường ảo an toàn, tiết kiệm chi phí. Hình 2: Phân bổ thị trường các công cụ phát triển trò chơi\n2.3 Doanh thu và Sự tăng trưởng của ngành Game Việt Nam\nBước sang năm 2026, ngành công nghiệp game Việt Nam đã xác lập vị thế là một trong những cột trụ quan trọng của nền kinh tế số, với những số liệu tăng trưởng ấn tượng bất chấp những biến động của kinh tế toàn cầu. 2.3.1 Tốc độ tăng trưởng doanh thu (2024 - 2026)\nTheo các báo cáo mới nhất từ Bộ Thông tin & Truyền thông và các tổ chức nghiên cứu thị trường (như Newzoo, AppMagic):\nGiai đoạn 2024: Doanh thu toàn ngành đạt khoảng 1,5 tỷ USD. Trong đó, doanh thu từ các studio nội địa đóng góp một phần đáng kể nhờ việc đẩy mạnh xuất khẩu sản phẩm ra thị trường quốc tế. Dự báo 2025 - 2026: Doanh thu dự kiến cán mốc 1,66 tỷ USD vào cuối năm 2025 và hướng tới ngưỡng 2 tỷ USD trong năm 2026. Tốc độ tăng trưởng kép hàng năm (CAGR) duy trì ở mức xấp xỉ 9,77%, thuộc nhóm cao nhất khu vực Đông Nam Á. 2.3.2 Nghịch lý giữa \"Lượt tải\" và \"Doanh thu\"\nViệt Nam hiện đang đối mặt với một đặc điểm thị trường độc đáo: Sức sản xuất khổng lồ nhưng giá trị thu về chưa tương xứng.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "200",
+    "sub_order": 1,
+    "total_parts": 2,
+    "is_subchunk": true
+  },
+  "212": {
+    "text": "Về sản lượng: Việt Nam đứng thứ 1 thế giới về lượt tải xuống trên Google Play (đạt 6,1 tỷ lượt tải trong năm 2024, chiếm tới 37,3% thị phần toàn cầu). Điều này có nghĩa là cứ 10 game được tải về trên thế giới thì có gần 4 game mang dấu ấn của lập trình viên Việt Nam. Về doanh thu bình quân (ARPU): Mặc dù lượt tải cao, nhưng doanh thu bình quân trên mỗi người dùng tại Việt Nam vẫn còn thấp so với các thị trường như Hàn Quốc hay Mỹ.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "200",
+    "sub_order": 2,
+    "total_parts": 2,
+    "is_subchunk": true
+  },
+  "213": {
+    "text": "Chỉ có khoảng 7% - 10% người chơi thực hiện thanh toán trong ứng dụng (IAP). 2.3.3 Động lực tăng trưởng mới\nSự tăng trưởng trong giai đoạn 2026 không còn chỉ dựa vào số lượng mà bắt đầu dịch chuyển sang chất lượng:\nChuyển dịch mô hình kinh doanh: Các studio đang rời xa mô hình chỉ thu lợi từ quảng cáo (Ad-based) để chuyển sang Hybrid-casual (kết hợp quảng cáo và bán vật phẩm), giúp doanh thu từ người dùng quốc tế tăng vọt 36,4% chỉ trong vòng một năm. Hạ tầng 5G và Cloud Gaming: Với việc Viettel và Vinaphone phủ sóng 5G tới 90% dân số vào cuối 2025, độ trễ giảm xuống dưới 30ms, mở ra kỷ nguyên cho game AAA và chơi game trên đám mây (Cloud Gaming) với tốc độ tăng trưởng dự kiến 22-35%. Sự hỗ trợ từ Chính phủ: Việc đưa Game vào danh sách 12 ngành công nghiệp văn hóa trọng điểm (tháng 11/2025) và ban hành Luật AI (tháng 3/2026) đã tạo điều kiện cho các doanh nghiệp tiếp cận nguồn vốn và công nghệ dễ dàng hơn. 2.4 Các Game Engine phổ biến tại Việt Nam\nTrong bối cảnh năm 2026, sự lựa chọn Game Engine của các studio Việt Nam đã trở nên chuyên hóa rõ rệt để tối ưu hóa giữa chi phí, thời gian sản xuất và chất lượng đồ họa. 2.4.1 Unity: \"Ông vua\" của thị phần Mobile\nUnity hiện vẫn duy trì vị thế áp đảo tại Việt Nam với hơn 70% thị phần trong mảng phát triển game di động.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "201",
+    "sub_order": 1,
+    "total_parts": 7,
+    "is_subchunk": true
+  },
+  "214": {
+    "text": "Lý do phổ biến:\nHệ sinh thái nhân sự: Hầu hết các cơ sở đào tạo tại Việt Nam (như FPT Aptech, VTC Academy) đều lấy Unity làm giáo trình chính, giúp các studio dễ dàng tuyển dụng nhân lực. Tối ưu hóa Hyper-casual: Với các studio chuyên dòng game \"mì ăn liền\" như ABI Games Studio hay OneSoft, Unity cung cấp quy trình đóng gói cực nhanh và hỗ trợ tốt cho các mạng quảng cáo tích hợp. Asset Store phong phú: Giúp các nhóm nhỏ tiết kiệm hàng ngàn giờ làm việc bằng cách mua lại các tài nguyên có sẵn. Case Study: Các siêu phẩm đạt hàng trăm triệu lượt tải như Magic Tiles 3 (Amanotes) hay các dòng game bắn súng của Horus Entertainment đều được xây dựng trên nền tảng này. 2.4.2 Unreal Engine (UE): Tham vọng AAA và Đồ họa siêu thực\nNếu Unity là lựa chọn cho bài toán kinh tế, thì Unreal Engine là \"vũ khí\" để các nhà phát triển Việt khẳng định vị thế về kỹ thuật và mỹ thuật trên trường quốc tế. Đặc điểm tại thị trường Việt:\nSức mạnh UE5: Các công nghệ như Nanite và Lumen đang được các studio Việt ứng dụng mạnh mẽ vào các dự án PC/Console có bối cảnh lịch sử hoặc văn hóa Việt Nam.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "201",
+    "sub_order": 2,
+    "total_parts": 7,
+    "is_subchunk": true
+  },
+  "215": {
+    "text": "Phát triển ứng dụng phi trò chơi: UE còn phổ biến trong các dự án diễn họa kiến trúc cao cấp và sản xuất phim hoạt hình 3D tại các studio như Sparx (thuộc tập đoàn Virtuos).*\nBlueprints: Tính năng lập trình trực quan giúp các nghệ sĩ (Artist) có thể tham gia vào quy trình logic mà không cần biết sâu về C++. Dự án tiêu biểu: Dự án MMORPG \"Võ Thập - Nam Quốc Sơn Hà\" sử dụng Unreal Engine 5 để tái hiện bối cảnh dã sử Việt Nam thế kỷ X-XI là minh chứng cho tham vọng này. 2.4.3 Godot Engine: Ngôi sao đang lên của cộng đồng Indie\nMặc dù mới gia nhập đường đua, Godot đang tạo nên một làn sóng mới trong cộng đồng phát triển game độc lập tại Việt Nam từ năm 2025. Lợi thế cạnh tranh:\nHoàn toàn miễn phí: Với bản chất mã nguồn mở, Godot không thu phí bản quyền (royalty-free), cực kỳ phù hợp với các dự án có ngân sách hạn chế. Sức mạnh 2D vượt trội: Godot được đánh giá là Engine xử lý game 2D tốt nhất hiện nay, giúp các dự án theo phong cách Pixel Art hay Platformer vận hành mượt mà. Cộng đồng năng động: Godot trở thành công cụ yêu thích trong các cuộc thi Global Game Jam Vietnam, nơi các lập trình viên cần tạo ra bản mẫu (prototype) chỉ trong 48 giờ. Tiềm năng: Với sự cập nhật của phiên bản Godot 4.x hỗ trợ tốt hơn cho 3D và AI, nhiều studio nhỏ đang dần chuyển dịch từ Unity sang Godot để giảm áp lực chi phí cấp phép.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "201",
+    "sub_order": 3,
+    "total_parts": 7,
+    "is_subchunk": true
+  },
+  "216": {
+    "text": "Hình 3: Hình So Sánh Unity và Unreal\n\nCHƯƠNG III: UNITY – A KEY PLAYER\n3.1 Tổng quan về Unity Engine\nUnity là một trong những Game Engine đa nền tảng (cross-platform) phổ biến và mạnh mẽ nhất trên thế giới hiện nay. Được Unity Technologies ra mắt lần đầu tiên vào năm 2005, công cụ này đã tạo ra một bước ngoặt lớn trong ngành công nghiệp game bằng cách tập trung vào sự đơn giản và khả năng đa nền tảng, cho phép các nhà phát triển độc lập (Indie) tiếp cận công nghệ phát triển trò chơi chất lượng cao với mức chi phí thấp. Với triết lý \"dân chủ hóa việc phát triển game\", Unity mang đến một hệ sinh thái toàn diện, vượt ra ngoài ranh giới của một phần mềm kết xuất đồ họa đơn thuần. Về mặt kiến trúc cốt lõi, Unity vận hành dựa trên hệ thống Component-based (dựa trên thành phần). Trong môi trường này, mọi thực thể xuất hiện trong trò chơi đều được định nghĩa là một đối tượng cơ bản (GameObject). Để đối tượng đó có thể tương tác, di chuyển hoặc hiển thị, nhà phát triển sẽ đính kèm các thành phần (Component) chức năng tương ứng, chẳng hạn như hệ thống vật lý, bộ xử lý âm thanh hay kịch bản logic. Hệ thống Kịch bản (Scripting) của Unity sử dụng ngôn ngữ lập trình bậc cao là C#.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "201",
+    "sub_order": 4,
+    "total_parts": 7,
+    "is_subchunk": true
+  },
+  "217": {
+    "text": "Điều này cung cấp sự linh hoạt cực lớn cho lập trình viên trong việc xây dựng các cơ chế trò chơi chuyên sâu, từ việc thiết lập các kịch bản chiến đấu (combat scripts) phức tạp đến quản lý hệ thống máu và chuyển trạng thái nhân vật (animator state transitions). Mặc dù nổi tiếng với khả năng xử lý đồ họa 3D, Unity còn sở hữu một bộ công cụ 2D vô cùng mạnh mẽ và chuyên biệt. Engine này hỗ trợ tối đa quy trình xử lý ảnh điểm (pixel art), từ việc nhập và cắt các chuỗi hình ảnh (sprite sheets) một cách tự động, đến việc thiết lập môi trường vật lý 2D chuẩn xác. Những tính năng này biến Unity trở thành một nền tảng lý tưởng để xây dựng các dự án game như 2D Dungeon RPG, nơi yêu cầu sự tỉ mỉ trong từng khung hình chuyển động của nhân vật. Nhờ sự giao thoa hoàn hảo giữa sức mạnh kỹ thuật, giao diện thân thiện và tính đa dụng, Unity đã củng cố vững chắc vị thế là một \"key player\" không thể thay thế trong ngành công nghiệp phần mềm giải trí. 3.2 Các tính năng chính của Unity\nSức mạnh cốt lõi của Unity không chỉ nằm ở công cụ kết xuất đồ họa linh hoạt mà còn được thể hiện qua một hệ sinh thái toàn diện, hỗ trợ tối đa cho vòng đời phát triển của một dự án.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "201",
+    "sub_order": 5,
+    "total_parts": 7,
+    "is_subchunk": true
+  },
+  "218": {
+    "text": "Dưới đây là ba tính năng nổi bật nhất đã định hình nên sự thành công của nền tảng này:\n3.2.1 Cross-platform Development (Phát triển đa nền tảng)\nKhả năng \"viết một lần, chạy mọi nơi\" (Write once, run anywhere) là tiêu chuẩn vàng của các Engine hiện đại như Unity. Tính năng này cho phép lập trình viên chỉ cần xây dựng một bộ mã nguồn duy nhất nhưng có thể biên dịch và xuất bản (build) sản phẩm lên đa dạng nền tảng, từ thiết bị di động (iOS, Android), máy tính cá nhân (Windows, macOS), máy chơi game chuyên dụng (Console), cho đến môi trường WebGL và Thực tế ảo (VR/AR). Tính đa năng này đặc biệt thể hiện rõ qua khả năng đóng gói game cực nhanh cho cả hai hệ điều hành di động chỉ từ một bộ mã nguồn. Unity tự động xử lý lớp giao diện phần cứng, tự động điều chỉnh định dạng nén kết cấu (texture compression) và thông số kỹ thuật để tối ưu hóa hiệu suất cho từng nền tảng đích mà không đòi hỏi sự can thiệp thủ công quá sâu. 3.2.2 Asset Store Ecosystem (Hệ sinh thái Asset Store) \nUnity Asset Store là một trong những chợ tài nguyên kỹ thuật số lớn nhất trong ngành công nghiệp game. Hệ thống này cung cấp một thư viện khổng lồ bao gồm các mô hình 3D, đồ họa 2D, tệp âm thanh, kịch bản logic (scripts) và các công cụ mở rộng (plugins) do chính cộng đồng và Unity phát triển.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "201",
+    "sub_order": 6,
+    "total_parts": 7,
+    "is_subchunk": true
+  },
+  "219": {
+    "text": "Sự phong phú của hệ sinh thái này giúp các nhóm nhỏ tiết kiệm hàng ngàn giờ làm việc bằng cách mua lại các tài nguyên có sẵn thay vì phải tự sản xuất từ đầu. Yếu tố này đóng vai trò then chốt trong việc giảm thiểu rủi ro tài chính và rút ngắn đáng kể thời gian đưa sản phẩm ra thị trường (Time-to-market), đặc biệt hữu ích cho các studio độc lập (Indie). 3.2.3 Strong Developer Community (Cộng đồng nhà phát triển vững mạnh) \nMột trong những tài sản vô hình mang lại lợi thế cạnh tranh lớn nhất cho Unity chính là cộng đồng người dùng khổng lồ và năng động toàn cầu. Lập trình viên có thể dễ dàng tiếp cận với hệ thống tài liệu (documentation) đồ sộ, các khóa học trực tuyến và sự hỗ trợ giải quyết lỗi kỹ thuật thông qua các diễn đàn chuyên sâu. Xét riêng tại thị trường Việt Nam, cộng đồng lập trình viên Unity rất lớn, giúp các studio dễ dàng tuyển dụng và đào tạo nhân sự.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "201",
+    "sub_order": 7,
+    "total_parts": 7,
+    "is_subchunk": true
+  },
+  "220": {
+    "text": "Đồng thời, hầu hết các cơ sở đào tạo tại Việt Nam hiện nay đều lấy Unity làm giáo trình chính, đảm bảo nguồn cung nhân sự ổn định cho ngành công nghiệp. 3.3 Comparison Between Unity and Other Game Engines(So sánh giữa Unity và các công cụ trò chơi khác)\nĐể hiểu rõ vị thế \"Key Player\" của Unity trong ngành công nghiệp phần mềm giải trí, cần thực hiện một phép so sánh đa chiều với các đối thủ cạnh tranh trực tiếp là Unreal Engine và Godot Engine. Việc lựa chọn công cụ không chỉ dựa trên sức mạnh kỹ thuật mà còn phụ thuộc vào mục tiêu dự án, quy mô đội ngũ và khả năng tối ưu hóa tài chính. Hình 4 : Hình so sánh Unity và công cụ trò chơi khác\nSo sánh với Unreal Engine (UE): Trong khi Unreal Engine (phát triển bởi Epic Games) được xem là \"ông vua\" của các dự án AAA nhờ sức mạnh xử lý đồ họa cực đại với các công nghệ như Nanite và Lumen, thì Unity lại chiếm ưu thế ở tính linh hoạt. Unreal Engine yêu cầu lập trình viên phải có kiến thức sâu về C++ hoặc sử dụng hệ thống Blueprints đồ sộ nhưng phức tạp. Ngược lại, C# của Unity cân bằng giữa hiệu suất và tốc độ phát triển, giúp quy trình gỡ lỗi (debugging) và triển khai logic diễn ra nhanh chóng hơn. Unity đặc biệt vượt trội UE ở mảng Game Mobile nhờ khả năng đóng gói ứng dụng nhẹ và tương thích tốt với nhiều loại phần cứng khác nhau.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "202",
+    "sub_order": 1,
+    "total_parts": 5,
+    "is_subchunk": true
+  },
+  "221": {
+    "text": "So sánh với Godot Engine: Godot là một ngôi sao đang lên trong cộng đồng phát triển game độc lập (Indie). Với bản chất mã nguồn mở, Godot cung cấp quyền tự do tuyệt đối cho nhà phát triển mà không phải lo lắng về các chính sách phí bản quyền. Tuy nhiên, Unity vẫn duy trì khoảng cách xa về mặt hệ sinh thái. Hệ thống Asset Store của Unity cho phép các studio mua lại các giải pháp kỹ thuật có sẵn (như hệ thống tìm đường AI, hiệu ứng hình ảnh chuyên sâu), điều mà người dùng Godot thường phải tự xây dựng từ đầu. Đối với các dự án yêu cầu tính thương mại cao và sự hỗ trợ kỹ thuật chuyên nghiệp, Unity vẫn là lựa chọn an toàn và ổn định hơn. Khả năng ứng dụng thực tế: Unity thường được ưu tiên cho các dự án cần sự cân bằng giữa hiệu suất và thời gian đưa sản phẩm ra thị trường (Time-to-market). Tại thị trường Việt Nam, nơi các dòng game Hyper-casual và Mid-core chiếm lĩnh, Unity gần như không có đối thủ nhờ khả năng tối ưu hóa dung lượng và hiệu năng trên các dòng điện thoại thông minh tầm trung. 3.4 Job Roles Related to Unity Development\nSự phát triển mạnh mẽ của hệ sinh thái Unity đã dẫn đến việc hình thành nhiều vị trí công việc chuyên biệt hóa cao trong quy trình sản xuất trò chơi chuyên nghiệp. Tùy thuộc vào quy mô dự án, các vai trò này có thể được gộp chung hoặc phân tách rõ rệt dựa trên kỹ năng cốt lõi.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "202",
+    "sub_order": 2,
+    "total_parts": 5,
+    "is_subchunk": true
+  },
+  "222": {
+    "text": "3.4.1 Unity Game Developer (Lập trình viên Game) \nĐây là vị trí tổng quát nhất, thường đóng vai trò là nhân sự cốt lõi trong các studio có quy mô vừa và nhỏ (Indie studios). Một Unity Game Developer chịu trách nhiệm lắp ráp các thành phần của trò chơi vào trong Engine, từ việc quản lý các cảnh (Scene Management), xây dựng giao diện người dùng (UI) đến việc tích hợp các tài nguyên từ bộ phận nghệ thuật. Họ phải có khả năng vận hành linh hoạt các công cụ của Unity để đảm bảo tính năng được hiện thực hóa đúng với tài liệu thiết kế (Game Design Document). Ngoài ra, khả năng đóng gói và tối ưu hóa ứng dụng trên đa nền tảng (Build & Deployment) cũng là một yêu cầu quan trọng đối với vị trí này. 3.4.2 Gameplay Programmer (Lập trình viên Logic) \nKhác với vị trí lập trình viên tổng quát, Gameplay Programmer tập trung sâu vào lớp logic tương tác của trò chơi. Nhiệm vụ chính của họ là sử dụng ngôn ngữ C# để lập trình các cơ chế điều khiển nhân vật, hệ thống trí tuệ nhân tạo (AI), logic chiến đấu và các quy tắc tương tác giữa các đối tượng trong môi trường game. Gameplay Programmer đóng vai trò cầu nối quan trọng trong việc chuyển đổi ý tưởng sáng tạo của nhà thiết kế thành các đoạn mã vận hành ổn định.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "202",
+    "sub_order": 3,
+    "total_parts": 5,
+    "is_subchunk": true
+  },
+  "223": {
+    "text": "Những hệ thống phức tạp như cây trạng thái nhân vật (state machines), hệ thống nhiệm vụ hay cơ chế hồi đáp vật lý đều nằm dưới sự quản lý của vị trí này. 3.4.3 Technical Artist (Nghệ sĩ Kỹ thuật) \nĐây là một vai trò mang tính lai (hybrid), đóng vai trò cầu nối giữa bộ phận nghệ thuật (Art) và bộ phận lập trình (Programming). Technical Artist chịu trách nhiệm đảm bảo các tài nguyên đồ họa không chỉ đẹp mắt mà còn phải vận hành tối ưu trên phần cứng mục tiêu. Họ thường làm việc với các hệ thống kỹ thuật như Shader Graph để tạo hiệu ứng hình ảnh, tối ưu hóa số lượng đa giác (polygon counts), quản lý hệ thống ánh sáng (lighting) và thiết lập quy trình xử lý hậu kỳ (post-processing). Trong môi trường Unity, họ là người trực tiếp tham gia vào việc tối ưu hóa hiệu suất (Performance Optimization) để đảm bảo trò chơi duy trì tốc độ khung hình ổn định mà không làm giảm đi chất lượng thẩm mỹ.",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "202",
+    "sub_order": 4,
+    "total_parts": 5,
+    "is_subchunk": true
+  },
+  "224": {
+    "text": "[37]\n\nChương 4:Triển khai dự án\n4.1 Tổng quan cấu trúc thư mục dự án\n\t\n\nHình 5: Cấu trúc thư mục dự án\n4.2 Cắt hình ảnh map\n\nHình 6: Cắt hình ảnh map\n\n\n\nHình 7: Tạo đối tượng map \n\n \nHình 8 : Tạo bản đồ game\n\n\n\n\n4.3 Tạo Rule\n\n\nHình 9: Tạo Rule cho các khối đất\n\n\nHình 10 : Tạo Rule cho các thực vật\n\n\n\n\n\nHình 11: Tạo rule cho các thảm cỏ\n4.4 Tạo Frame cho animation\n\nHình 12: Tạo frame cho sóng\n\nHình 13: Gán hoạt ảnh cho nước\n\nHình 14: Tạo Rule và gán hoạt ảnh cho thực vật\n4.5 Tạo hiệu ứng sóng biển\n\nHình 15: Tạo đối tượng Partical System \n\n\nHình 16: Gán scriptes nước vào render\n\nHình 17: Tạo frame hoạt ảnh nước\n\nHình 18: Tạo hiệu ứng màu xuất hiện và biến mất của nước\n\nHình 19: Tạo hướng di chuyên cho sóng nước\n4.6 Tạo nhân vật\n\nHình 20: Tạo nhân vật và gán vật lí\n\nHình 21: Scripts cho nhân vật di chuyển\n4.7 Animator nhân vật\n\nHình 22: Tạo hoạt ảnh đứng im cho nhân vật\n\nHình 23: Tạo hoạt ảnh di chuyển\n\n\nHình 24: Tạo animator chuyển đổi giữa đứng im và di chuyển\n\n\n4.8 Tạo Camare điều khiển theo nhân vật\n\nHình 25: Tạo camare theo nhân vật\n\n4.9 Collision \n\nHình 26: Tạo collision cho nhân vật và thực vật\n4.10 Tilemap cho collision\n\nHình 27: Tilemap cho collision\nHình 28: Tạo viền giới hạn map",
+    "video": "/app/videos/BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043.mp4",
+    "timestamp": "2026-04-08T03:30:44.906145",
+    "parent_id": "202",
+    "sub_order": 5,
+    "total_parts": 5,
+    "is_subchunk": true
+  },
+  "225": {
+    "text": "Class 1: Introduction and Sources of Law\nRisk management\nEg: One of your ex-employees is hoping to join another company. She has asked you to write a reference letter on her behalf. She obviously does not know that you have a very low opinion of her, largely because you believe that she stole money from your business. Furthermore, since the company that she wants to join is one of your best customers, you are tempted to write a candid letter. Questions for Discussion: Will you write a reference for your ex-employee? If so, what will it say?",
+    "video": "/app/videos/LAW122_notes_docx_20260411_163146.mp4",
+    "timestamp": "2026-04-11T16:31:47.621616",
+    "parent_id": null,
+    "sub_order": null,
+    "total_parts": null,
+    "is_subchunk": false
+  },
+  "226": {
+    "text": "→ You need to identify, evaluate, and respond to the legal risks involved. Identification: “Can we be held liable for this”\nIf you accuse your ex-employee of theft, she may sue you for defamation because your statement would cause a reasonable person to think less of her. More surprisingly, if you unreasonably refuse to write a letter, you may be held liable for reducing the ex-employee’s job prospects. → In any event, you need to be concerned about liability, about actually being held legally responsible. But you also need to be concerned about the possibility of being sued. Evaluation: “What are the changes of sth going wrong?” “What does it cost if it does”\nHaving identified the risk of being sued for defamation, you may decide that a candid letter would be legally acceptable. Your allegations may be true.",
+    "video": "/app/videos/LAW122_notes_docx_20260411_163146.mp4",
+    "timestamp": "2026-04-11T16:31:47.621616",
+    "parent_id": null,
+    "sub_order": null,
+    "total_parts": null,
+    "is_subchunk": false
+  },
+  "227": {
+    "text": "Even if they are not, you may be justified in sharing your suspicions with the other company. Furthermore, you may believe that the arguments in your favour are strong enough to discourage your former employee from suing you. Response: “What are we going to do about it?”\nFinally, having identified and evaluated the risks, you need to formulate a response.",
+    "video": "/app/videos/LAW122_notes_docx_20260411_163146.mp4",
+    "timestamp": "2026-04-11T16:31:47.621616",
+    "parent_id": null,
+    "sub_order": null,
+    "total_parts": null,
+    "is_subchunk": false
+  },
+  "228": {
+    "text": "You have several options. You can refuse to write a letter. You can write a letter that does not mention your suspicions. Or you can write a letter that accuses your former employee of theft. The choice is still yours. Significantly, however, you are now in a position to make an informed decision. A basic understanding of the law makes you a better business person. ⇒ RISK MANAGEMENT: potential costs associated with nearly every form of behaviour, and that includes doing nothing at all. Risk Avoidance: “Eliminate risk” \nEg: An automobile that regularly explodes upon impact should be removed from the market. Aside from issues of morality, the financial costs of being held liable will probably outweigh any sales profits\n\nRisk Reduction: “Minimize risk”\nEg: a bank that lends $500.000 to a manufacturer realizes that the loan may not be repaid if the economy goes into recession. The bank can, however, protect itself by requiring the business to grant a mortgage over its factory. In that case, if the bank does not get its money, it may at least get the property. Risk Shifting: “Make risk someone else’s problem”\nEg: Buy liability insurance for losses caused by danger\n\nRisk Acceptance: “Live with the risk”\nEg: a golf course that operates behind a factory. It is possible that a wild shot might\nhit a factory window, and that the golf course might be held responsible for the resulting damage. Nevertheless, if the likelihood of such an accident is small, the club might decide to do nothing at all. It certainly would not close the course to avoid the risk altogether.",
+    "video": "/app/videos/LAW122_notes_docx_20260411_163146.mp4",
+    "timestamp": "2026-04-11T16:31:47.621616",
+    "parent_id": "228",
+    "sub_order": 1,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "229": {
+    "text": "It might also find that the costs of reducing the risk by erecting a large safety net, or shifting the risk by buying an insurance policy, are too high. The most sensible approach might be to hope for the best and pay for any windows that are broken. A Map Of The Law\nCivil Law jurisdiction: Originated in ancient Rome\nCommon Law jurisdiction(*): Originated in England\n\nPublic Law and Private Law\nPublic Law: concerned with governments and the ways in which they deal with their citizens, includes:\nConstitutional law: provides the basic rules of our political and legal systems, determines who is entitled to create and enforce laws, and it establishes the fundamental rights and freedoms that Canadians enjoy. Administrative law: concerned with the creation and operation of administrative agencies, boards, commissions, and tribunals. Criminal law: deals with offences against the state = concerned with people who break rules that are designed to protect society as a whole. Tax law: concerned with the rules that are used to collect money for public spending. Private Law: concerned with the rules that apply in private matters.",
+    "video": "/app/videos/LAW122_notes_docx_20260411_163146.mp4",
+    "timestamp": "2026-04-11T16:31:47.621616",
+    "parent_id": "228",
+    "sub_order": 2,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "230": {
+    "text": "Both parties in a private dispute are usually private persons, either individuals or organizations such as corporations, usually divided into three main parts:\nThe law of torts: a private wrong, an offence against a particular person, divided into:\nIntentional torts: such as assault and false imprisonment\nBusiness torts: such as deceit and conspiracy\nNegligence: which covers most situations in which one person carelessly hurts another\n\nThe law of contracts: concerned with the creation and enforcement of agreements\n\nThe law of property: concerned with the acquisition, use, and disposition of property\n\n(*) Criminal (Case brought by the state (Crown)) vs Tort (Case brought by the individual victim): \nEg 1: At a bar in Toronto, Liam throws a bottle at Noah during an argument. Noah suffers a broken nose.",
+    "video": "/app/videos/LAW122_notes_docx_20260411_163146.mp4",
+    "timestamp": "2026-04-11T16:31:47.621616",
+    "parent_id": "228",
+    "sub_order": 3,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "231": {
+    "text": "Criminal law: The Crown can charge Liam with assault causing bodily harm. Even if Noah doesn’t want to proceed, the state can continue prosecution. Tort law: Noah can sue Liam for battery and claim damages for: Medical expenses, Lost wages, Pain and suffering\n\nEg 2: Emma drives drunk and crashes into Olivia’s car. Olivia suffers a spinal injury. Criminal law: The Crown charges Emma with impaired driving and dangerous driving causing bodily harm. Tort law: Olivia sues Emma for negligence and seeks compensation for: Medical treatment, Rehabilitation costs, Loss of future income\n\nSources of Law \n(3 sources)\nThe Constitution: most important, creates the basic rules for Canadian society, including its political and legal systems. Every other law in the country must be compatible with it: Section 52 of The Constitution states, “any law that is inconsistent with the provisions of the Constitution is, to the extent of the inconsistency, of no force or effect.”\nVery difficult to change: Requires consent of both Parliament and Legislatures of two-thirds of all provinces with at least 50% of population (for anything affecting multiple provinces)\nDivision of power:\nFederal: \nGoverns the country as a whole. Has the residual power (that gives the federal government authority over everything that is not specifically mentioned)\nProvincial and Territorial: \nManage local matters and regional interests. (*) Can only act within their powers, or law is ultra vires and unconstitutional. Eg: The federal government passed a law banning the importation and manufacture of margarine to protect the dairy industry. The Supreme Court of Canada ruled the law was partially invalid.",
+    "video": "/app/videos/LAW122_notes_docx_20260411_163146.mp4",
+    "timestamp": "2026-04-11T16:31:47.621616",
+    "parent_id": "229",
+    "sub_order": 1,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "232": {
+    "text": "Valid: Federal government can ban importation of margarine → falls under its power over international and interprovincial trade. Invalid: Federal government cannot ban manufacturing of margarine → production within a province falls under provincial authority over “property and civil rights.”\n⇒ Federal government controls trade between provinces and countries. Provinces control production and sale within their own borders. Taxation Power & The Constitution\nRule: The Constitution limits how governments get money. Federal Power: Unlimited. Can use any tax system. Provincial Power: Limited to Direct Taxes only (taxpayer pays it themselves). → The Conflict: Provinces often try to create taxes that \"look\" direct but are actually indirect (passed to customers). If a court finds a provincial tax is indirect, it is struck down as unconstitutional. 222\nLegislation\nThe courts\n\n5. Charter of Rights and Freedom\nEg: Quebec passed a law banning most commercial advertising directed at children under 13. Irwin Toy wanted to advertise toys on television and challenged the law. → It argued the law was unconstitutional because:\nIt regulated television, which is a federal matter. It violated freedom of expression under s. 2(b) of the Charter. Division of Powers Issue\nThe Supreme Court of Canada agreed that telecommunications (including broadcasting) fall under federal jurisdiction. However, the Quebec law was not really about regulating broadcasters. Its main purpose was to regulate advertisers, which falls under provincial power over property and civil rights. ⇒ Result: The law was valid under the division of powers because its effect on television was only incidental.",
+    "video": "/app/videos/LAW122_notes_docx_20260411_163146.mp4",
+    "timestamp": "2026-04-11T16:31:47.621616",
+    "parent_id": "229",
+    "sub_order": 2,
+    "total_parts": 3,
+    "is_subchunk": true
+  },
+  "233": {
+    "text": "Charter (Freedom of Expression) Issue\nThe Court said advertising is a protected expression under s. 2(b). Therefore, the ban did infringe freedom of expression. Under s. 1 of the Charter, rights can be limited if the limit is reasonable and justified in a free and democratic society. ⇒ The Court held the law was justified because:\nProtecting children from commercial exploitation is an important objective. The ban was carefully tailored (applied only to children under 13). Class 2 Tort",
+    "video": "/app/videos/LAW122_notes_docx_20260411_163146.mp4",
+    "timestamp": "2026-04-11T16:31:47.621616",
+    "parent_id": "229",
+    "sub_order": 3,
+    "total_parts": 3,
     "is_subchunk": true
   }
 }

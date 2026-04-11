@@ -46,5 +46,101 @@
       "chunk_query": true,
       "memory_query": true
     }
+  },
+  "00feedaa-d156-4eae-ad51-9f2e0cba351f": {
+    "filename": "BaoCaoGamEngine_LeVuAnh_2224801030388.docx",
+    "source_stem": "baocaogamengine_levuanh_2224801030388_docx",
+    "status": "ready",
+    "progress": 1.0,
+    "created_at": "2026-04-07T08:25:42.762672+00:00",
+    "substatus": "memory_tree_ready",
+    "capabilities": {
+      "chunk_query": true,
+      "memory_query": true
+    }
+  },
+  "b9fdf87f-16e1-46ad-b457-b45ef6c23b0b": {
+    "filename": "BaoCaoGamEngine_LeVuAnh_2224801030388.docx",
+    "source_stem": "baocaogamengine_levuanh_2224801030388_docx",
+    "status": "ready",
+    "progress": 1.0,
+    "created_at": "2026-04-07T08:34:22.750889+00:00",
+    "substatus": "memory_tree_ready",
+    "capabilities": {
+      "chunk_query": true,
+      "memory_query": true
+    }
+  },
+  "06eca3f5-47af-4639-aeb7-bba7661709ca": {
+    "filename": "BaoCaoGamEngine_LeVuAnh_2224801030388.docx",
+    "source_stem": "baocaogamengine_levuanh_2224801030388_docx",
+    "status": "ready",
+    "progress": 1.0,
+    "created_at": "2026-04-07T08:55:27.769532+00:00",
+    "substatus": "memory_tree_ready",
+    "capabilities": {
+      "chunk_query": true,
+      "memory_query": true
+    }
+  },
+  "1fe6f728-1bd0-4356-8539-085159b0c51a": {
+    "filename": "BaoCaoGamEngine_LeVuAnh_2224801030388.docx",
+    "source_stem": "baocaogamengine_levuanh_2224801030388_docx",
+    "status": "index_ready",
+    "progress": 0.8,
+    "created_at": "2026-04-07T09:05:58.215660+00:00",
+    "substatus": "building_memory_tree",
+    "capabilities": {
+      "chunk_query": true,
+      "memory_query": false
+    }
+  },
+  "afbcebe7-7ef4-4d52-999c-7045eaa9efe7": {
+    "filename": "BaoCaoGamEngine_LeVuAnh_2224801030388.docx",
+    "source_stem": "baocaogamengine_levuanh_2224801030388_docx",
+    "status": "ready",
+    "progress": 1.0,
+    "created_at": "2026-04-07T09:10:58.716251+00:00",
+    "substatus": "memory_tree_ready",
+    "capabilities": {
+      "chunk_query": true,
+      "memory_query": true
+    }
+  },
+  "379c9a1f-806e-4f83-8c36-36ea20f8eacb": {
+    "filename": "BaoCaoGamEngine_LeVuAnh_2224801030388.docx",
+    "source_stem": "baocaogamengine_levuanh_2224801030388_docx",
+    "status": "ready",
+    "progress": 1.0,
+    "created_at": "2026-04-07T09:15:13.484132+00:00",
+    "substatus": "memory_tree_ready",
+    "capabilities": {
+      "chunk_query": true,
+      "memory_query": true
+    }
+  },
+  "08c3ceb8-8a36-4c44-8230-3fa845d3ba7b": {
+    "filename": "BaoCaoGamEngine_LeVuAnh_2224801030388.docx",
+    "source_stem": "baocaogamengine_levuanh_2224801030388_docx",
+    "status": "ready",
+    "progress": 1.0,
+    "created_at": "2026-04-08T03:30:31.841298+00:00",
+    "substatus": "memory_tree_ready",
+    "capabilities": {
+      "chunk_query": true,
+      "memory_query": true
+    }
+  },
+  "e3c654ba-04a3-4c7c-84b0-1ae8ab52f8df": {
+    "filename": "LAW122 notes.docx",
+    "source_stem": "law122 notes_docx",
+    "status": "ready",
+    "progress": 1.0,
+    "created_at": "2026-04-11T16:31:40.305643+00:00",
+    "substatus": "memory_tree_ready",
+    "capabilities": {
+      "chunk_query": true,
+      "memory_query": true
+    }
   }
 }

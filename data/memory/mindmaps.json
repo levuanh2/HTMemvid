@@ -1,5 +1,764 @@
 [
   {
+    "id": "af77746e-d75d-4f97-b65e-765d23f470d1",
+    "title": "LAW122_notes_docx_20260411_163146",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "LAW122_notes_docx_20260411_163146"
+      },
+      {
+        "id": "s-overview",
+        "parent": "root",
+        "title": "Overview / Definition"
+      },
+      {
+        "id": "s-components",
+        "parent": "root",
+        "title": "Components / Structure"
+      },
+      {
+        "id": "s-process",
+        "parent": "root",
+        "title": "Process / Workflow"
+      },
+      {
+        "id": "s-applications",
+        "parent": "root",
+        "title": "Applications / Use cases"
+      },
+      {
+        "id": "s-issues",
+        "parent": "root",
+        "title": "Issues / Limitations / Challenges"
+      },
+      {
+        "id": "t-overview-0",
+        "parent": "s-overview",
+        "title": "Sources of Law"
+      },
+      {
+        "id": "t-applications-0",
+        "parent": "s-applications",
+        "title": "Risk Management"
+      },
+      {
+        "id": "t-issues-0",
+        "parent": "s-issues",
+        "title": "Torts and Contracts"
+      },
+      {
+        "id": "t-issues-1",
+        "parent": "s-issues",
+        "title": "Charter of Rights and Freedoms"
+      },
+      {
+        "id": "t-applications-0-s-0",
+        "parent": "t-applications-0",
+        "title": "Risk Management: Definition & Components"
+      },
+      {
+        "id": "t-applications-0-s-0-f-0",
+        "parent": "t-applications-0-s-0",
+        "title": "Risk management is understanding potential costs associated with all behaviors."
+      },
+      {
+        "id": "t-applications-0-s-0-f-1",
+        "parent": "t-applications-0-s-0",
+        "title": "Risk avoidance means eliminating risks entirely."
+      },
+      {
+        "id": "t-applications-0-s-0-f-2",
+        "parent": "t-applications-0-s-0",
+        "title": "Risk reduction aims to minimize risks through proactive measures."
+      },
+      {
+        "id": "t-applications-0-s-1",
+        "parent": "t-applications-0",
+        "title": "Legal Framework for Risk Management: Civil Law vs Common Law"
+      },
+      {
+        "id": "t-applications-0-s-1-f-0",
+        "parent": "t-applications-0-s-1",
+        "title": "Civil Law focuses on codified rules and established procedures."
+      },
+      {
+        "id": "t-applications-0-s-1-f-1",
+        "parent": "t-applications-0-s-1",
+        "title": "Common Law relies on precedent-based judicial rulings."
+      },
+      {
+        "id": "t-applications-0-s-1-f-2",
+        "parent": "t-applications-0-s-1",
+        "title": "Understanding the legal framework influences risk management decisions."
+      },
+      {
+        "id": "t-applications-0-s-2",
+        "parent": "t-applications-0",
+        "title": "Risk Avoidance: Minimizing Potential Costs"
+      },
+      {
+        "id": "t-applications-0-s-2-f-0",
+        "parent": "t-applications-0-s-2",
+        "title": "Understanding legal frameworks is crucial for business decisions."
+      },
+      {
+        "id": "t-applications-0-s-2-f-1",
+        "parent": "t-applications-0-s-2",
+        "title": "Risk avoidance involves minimizing potential costs through various strategies like eliminating or reducing risk."
+      },
+      {
+        "id": "t-applications-0-s-2-f-2",
+        "parent": "t-applications-0-s-2",
+        "title": "Risk acceptance involves living with the potential consequences of certain risks."
+      },
+      {
+        "id": "t-applications-0-s-3",
+        "parent": "t-applications-0",
+        "title": "Risk Reduction: Shifting Responsibility and Mitigation Strategies"
+      },
+      {
+        "id": "t-applications-0-s-4",
+        "parent": "t-applications-0",
+        "title": "Risk Acceptance: Weighing Benefits and Risks"
+      },
+      {
+        "id": "t-applications-0-s-4-f-0",
+        "parent": "t-applications-0-s-4",
+        "title": "Risk acceptance involves choosing to live with potential risks if their impact is considered manageable."
+      },
+      {
+        "id": "t-applications-0-s-4-f-1",
+        "parent": "t-applications-0-s-4",
+        "title": "Understanding legal frameworks and their implications is crucial for informed decision-making in business."
+      },
+      {
+        "id": "t-applications-0-s-4-f-2",
+        "parent": "t-applications-0-s-4",
+        "title": "Different approaches exist for managing risk, including avoidance, reduction, shifting, and acceptance."
+      },
+      {
+        "id": "t-overview-0-s-0",
+        "parent": "t-overview-0",
+        "title": "Legal Risks"
+      },
+      {
+        "id": "t-overview-0-s-0-f-0",
+        "parent": "t-overview-0-s-0",
+        "title": "**Identify potential legal risks** to your business, including liability and possibility of lawsuits."
+      },
+      {
+        "id": "t-overview-0-s-0-f-1",
+        "parent": "t-overview-0-s-0",
+        "title": "**Evaluate the likelihood and costs** associated with those risks."
+      },
+      {
+        "id": "t-overview-0-s-0-f-2",
+        "parent": "t-overview-0-s-0",
+        "title": "**Consider constitutional rights and limitations**  during any legal decision."
+      },
+      {
+        "id": "t-overview-0-s-1",
+        "parent": "t-overview-0",
+        "title": "Sources of Law"
+      },
+      {
+        "id": "t-overview-0-s-1-f-0",
+        "parent": "t-overview-0-s-1",
+        "title": "**The Constitution:** Sets fundamental rules for Canadian society."
+      },
+      {
+        "id": "t-overview-0-s-1-f-1",
+        "parent": "t-overview-0-s-1",
+        "title": "**Criminal Law & Tort Law:** Different legal avenues exist for addressing wrongs and potential lawsuits."
+      },
+      {
+        "id": "t-overview-0-s-1-f-2",
+        "parent": "t-overview-0-s-1",
+        "title": "**Division of Powers:**  Federal vs. Provincial authority defines jurisdiction."
+      },
+      {
+        "id": "t-overview-0-s-2",
+        "parent": "t-overview-0",
+        "title": "Charter Rights & Freedoms"
+      },
+      {
+        "id": "t-overview-0-s-2-f-0",
+        "parent": "t-overview-0-s-2",
+        "title": "Charter Rights & Freedoms are fundamental principles enshrined in the Canadian Constitution."
+      },
+      {
+        "id": "t-overview-0-s-2-f-1",
+        "parent": "t-overview-0-s-2",
+        "title": "These rights protect individual freedoms and often conflict with provincial jurisdiction, leading to a complex legal framework."
+      },
+      {
+        "id": "t-overview-0-s-2-f-2",
+        "parent": "t-overview-0-s-2",
+        "title": "The division of power between federal and provincial governments creates overlapping jurisdictions for various legal issues."
+      },
+      {
+        "id": "t-issues-0-s-0",
+        "parent": "t-issues-0",
+        "title": "Share suspicions"
+      },
+      {
+        "id": "t-issues-0-s-0-f-0",
+        "parent": "t-issues-0-s-0",
+        "title": "Share suspicions with another company."
+      },
+      {
+        "id": "t-issues-0-s-0-f-1",
+        "parent": "t-issues-0-s-0",
+        "title": "Strong arguments can discourage lawsuits."
+      },
+      {
+        "id": "t-issues-0-s-0-f-2",
+        "parent": "t-issues-0-s-0",
+        "title": "Define strategies after assessing risks."
+      },
+      {
+        "id": "t-issues-0-s-1",
+        "parent": "t-issues-0",
+        "title": "Strong case"
+      },
+      {
+        "id": "t-issues-0-s-1-f-0",
+        "parent": "t-issues-0-s-1",
+        "title": "Evaluate risk of legal action"
+      },
+      {
+        "id": "t-issues-0-s-1-f-1",
+        "parent": "t-issues-0-s-1",
+        "title": "Strong justification for sharing suspicions"
+      },
+      {
+        "id": "t-issues-0-s-1-f-2",
+        "parent": "t-issues-0-s-1",
+        "title": "Develop strong arguments against lawsuit"
+      },
+      {
+        "id": "t-issues-0-s-2",
+        "parent": "t-issues-0",
+        "title": "Discourage lawsuit"
+      },
+      {
+        "id": "t-issues-0-s-2-f-0",
+        "parent": "t-issues-0-s-2",
+        "title": "Assess risk of lawsuit"
+      },
+      {
+        "id": "t-issues-0-s-2-f-1",
+        "parent": "t-issues-0-s-2",
+        "title": "Communicate with other party"
+      },
+      {
+        "id": "t-issues-0-s-2-f-2",
+        "parent": "t-issues-0-s-2",
+        "title": "Develop appropriate response"
+      },
+      {
+        "id": "t-issues-1-s-0",
+        "parent": "t-issues-1",
+        "title": "**Charter of Rights and Freedoms**"
+      },
+      {
+        "id": "t-issues-1-s-1",
+        "parent": "t-issues-1",
+        "title": "Components:  1. Individual rights, 2. Societal freedoms"
+      },
+      {
+        "id": "t-issues-1-s-1-f-0",
+        "parent": "t-issues-1-s-1",
+        "title": "**Charter protects fundamental rights for individuals.**"
+      },
+      {
+        "id": "t-issues-1-s-1-f-1",
+        "parent": "t-issues-1-s-1",
+        "title": "**Includes basic freedoms like speech, assembly, and religion.**"
+      },
+      {
+        "id": "t-issues-1-s-1-f-2",
+        "parent": "t-issues-1-s-1",
+        "title": "**Empowering citizens to participate in a just society.**"
+      },
+      {
+        "id": "t-issues-1-s-2",
+        "parent": "t-issues-1",
+        "title": "Process:  Implementation & enforcement through legal systems, courts"
+      },
+      {
+        "id": "t-issues-1-s-2-f-0",
+        "parent": "t-issues-1-s-2",
+        "title": "Charter of Rights & Freedoms"
+      },
+      {
+        "id": "t-issues-1-s-2-f-1",
+        "parent": "t-issues-1-s-2",
+        "title": "Legal systems, courts play critical roles"
+      },
+      {
+        "id": "t-issues-1-s-3",
+        "parent": "t-issues-1",
+        "title": "Examples:  Freedom of speech, right to privacy"
+      },
+      {
+        "id": "t-issues-1-s-4",
+        "parent": "t-issues-1",
+        "title": "Issues:  Balancing individual liberties with societal needs, threats to fundamental rights"
+      },
+      {
+        "id": "t-issues-1-s-4-f-0",
+        "parent": "t-issues-1-s-4",
+        "title": "Privacy vs. Security"
+      },
+      {
+        "id": "t-issues-1-s-4-f-1",
+        "parent": "t-issues-1-s-4",
+        "title": "Freedoms in Public Spaces"
+      },
+      {
+        "id": "t-issues-1-s-4-f-2",
+        "parent": "t-issues-1-s-4",
+        "title": "Balancing Individuality and Collective Good"
+      }
+    ],
+    "sources": [
+      "LAW122_notes_docx_20260411_163146"
+    ],
+    "createdAt": "2026-04-11T16:40:25.288907Z",
+    "strategy": "advanced_v2"
+  },
+  {
+    "id": "f30fcd5e-3a4b-4979-b62e-55f9bd38389c",
+    "title": "2224801030378_NguyenHuuLuc-LAB5_Firewall_docx_20260404_091612",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "2224801030378_NguyenHuuLuc-LAB5_Firewall_docx_20260404_091612"
+      },
+      {
+        "id": "s-overview",
+        "parent": "root",
+        "title": "Overview / Definition"
+      },
+      {
+        "id": "s-components",
+        "parent": "root",
+        "title": "Components / Structure"
+      },
+      {
+        "id": "s-process",
+        "parent": "root",
+        "title": "Process / Workflow"
+      },
+      {
+        "id": "s-applications",
+        "parent": "root",
+        "title": "Applications / Use cases"
+      },
+      {
+        "id": "s-issues",
+        "parent": "root",
+        "title": "Issues / Limitations / Challenges"
+      },
+      {
+        "id": "t-process-0",
+        "parent": "s-process",
+        "title": "Table Processing"
+      },
+      {
+        "id": "t-process-1",
+        "parent": "s-process",
+        "title": "Firewall Configuration"
+      },
+      {
+        "id": "t-process-2",
+        "parent": "s-process",
+        "title": "Chain and Rules"
+      },
+      {
+        "id": "t-process-0-s-0",
+        "parent": "t-process-0",
+        "title": "Chain and Table Interaction"
+      },
+      {
+        "id": "t-process-0-s-0-f-0",
+        "parent": "t-process-0-s-0",
+        "title": "Table Processing involves filtering and processing packets based on specific rules."
+      },
+      {
+        "id": "t-process-0-s-0-f-1",
+        "parent": "t-process-0-s-0",
+        "title": "Chains link tables for more complex actions, allowing packet processing at different stages."
+      },
+      {
+        "id": "t-process-0-s-0-f-2",
+        "parent": "t-process-0-s-0",
+        "title": "Iptables allows defining rules for packet actions based on source IP or port. If no matching rule is found, the default policy applies."
+      },
+      {
+        "id": "t-process-0-s-1",
+        "parent": "t-process-0",
+        "title": "IPtable Rule Management"
+      },
+      {
+        "id": "t-process-0-s-1-f-0",
+        "parent": "t-process-0-s-1",
+        "title": "IPtable rule management defines how packets are processed based on specific rules."
+      },
+      {
+        "id": "t-process-0-s-1-f-1",
+        "parent": "t-process-0-s-1",
+        "title": "Chains allow for multiple processing stages, enabling actions like packet filtering and forwarding before reaching the interface."
+      },
+      {
+        "id": "t-process-0-s-2",
+        "parent": "t-process-0",
+        "title": "Default Policy Handling"
+      },
+      {
+        "id": "t-process-0-s-2-f-0",
+        "parent": "t-process-0-s-2",
+        "title": "Table Processing uses default policy for packets that don't match specific rules"
+      },
+      {
+        "id": "t-process-0-s-2-f-1",
+        "parent": "t-process-0-s-2",
+        "title": "Default policy allows packets through, similar to 'passthrough'"
+      },
+      {
+        "id": "t-process-0-s-2-f-2",
+        "parent": "t-process-0-s-2",
+        "title": "Default policy can be implemented using chains for finer control."
+      },
+      {
+        "id": "t-process-0-s-3",
+        "parent": "t-process-0",
+        "title": "Security Rules on Metasploitable"
+      },
+      {
+        "id": "t-process-0-s-3-f-0",
+        "parent": "t-process-0-s-3",
+        "title": "Table Processing: Chain Rules"
+      },
+      {
+        "id": "t-process-0-s-3-f-1",
+        "parent": "t-process-0-s-3",
+        "title": "Specific rules can be defined for handling packets at various stages."
+      },
+      {
+        "id": "t-process-0-s-3-f-2",
+        "parent": "t-process-0-s-3",
+        "title": "Packets matching a rule are treated by the chain, others apply default policy."
+      },
+      {
+        "id": "t-process-1-s-0",
+        "parent": "t-process-1",
+        "title": "Implementing Firewall on Mikrotik"
+      },
+      {
+        "id": "t-process-1-s-0-f-0",
+        "parent": "t-process-1-s-0",
+        "title": "Mikrotik RouterOS: Hệ điều hành chuyên dụng cho Router Board."
+      },
+      {
+        "id": "t-process-1-s-0-f-1",
+        "parent": "t-process-1-s-0",
+        "title": "Firewall Mikrotik: Sử dụng IP address, subnet mask, MAC Address"
+      },
+      {
+        "id": "t-process-1-s-0-f-2",
+        "parent": "t-process-1-s-0",
+        "title": "Cấu hình NAT, DNS, Firewall L7 Protocol trên Mikrotik để chặn truy cập web"
+      },
+      {
+        "id": "t-process-1-s-1",
+        "parent": "t-process-1",
+        "title": "Steps to Configure Firewall on Mikrotik"
+      },
+      {
+        "id": "t-process-1-s-1-f-0",
+        "parent": "t-process-1-s-1",
+        "title": "**Mikrotik RouterOS:** Sử dụng Winbox để cài đặt firewall, định tuyến, DHCP Server."
+      },
+      {
+        "id": "t-process-1-s-1-f-1",
+        "parent": "t-process-1-s-1",
+        "title": "**Firewall Mikrotik:** Cấu hình IP Tables để chặn truy cập website như Youtube."
+      },
+      {
+        "id": "t-process-1-s-1-f-2",
+        "parent": "t-process-1-s-1",
+        "title": "**Iptables:**  Ứng dụng tường lửa mạnh mẽ trên Linux dùng để chặn truy cập web."
+      },
+      {
+        "id": "t-process-1-s-2",
+        "parent": "t-process-1",
+        "title": "IPtables as a Firewall"
+      },
+      {
+        "id": "t-process-1-s-2-f-0",
+        "parent": "t-process-1-s-2",
+        "title": "IPTables:  A powerful firewall tool"
+      },
+      {
+        "id": "t-process-1-s-2-f-1",
+        "parent": "t-process-1-s-2",
+        "title": "Table: Rules for network traffic"
+      },
+      {
+        "id": "t-process-1-s-2-f-2",
+        "parent": "t-process-1-s-2",
+        "title": "Chain: Logic order of rules"
+      },
+      {
+        "id": "t-process-2-s-0",
+        "parent": "t-process-2",
+        "title": "Chain of custody"
+      },
+      {
+        "id": "t-process-2-s-0-f-0",
+        "parent": "t-process-2-s-0",
+        "title": "Chain of custody (CoC)"
+      },
+      {
+        "id": "t-process-2-s-0-f-1",
+        "parent": "t-process-2-s-0",
+        "title": "Ensures evidence integrity from collection to court."
+      },
+      {
+        "id": "t-process-2-s-0-f-2",
+        "parent": "t-process-2-s-0",
+        "title": "Documents and records of evidence handling."
+      },
+      {
+        "id": "t-process-2-s-1",
+        "parent": "t-process-2",
+        "title": "Chain of evidence"
+      },
+      {
+        "id": "t-process-2-s-1-f-0",
+        "parent": "t-process-2-s-1",
+        "title": "Chain of evidence (CoE) links suspects to crime scene"
+      },
+      {
+        "id": "t-process-2-s-1-f-1",
+        "parent": "t-process-2-s-1",
+        "title": "It establishes a direct connection between evidence and perpetrators"
+      },
+      {
+        "id": "t-process-2-s-1-f-2",
+        "parent": "t-process-2-s-1",
+        "title": "Key elements: chain of custody, origin, authenticity, and correlation"
+      }
+    ],
+    "sources": [
+      "2224801030378_NguyenHuuLuc-LAB5_Firewall_docx_20260404_091612"
+    ],
+    "createdAt": "2026-04-06T09:39:11.306437Z",
+    "strategy": "advanced_v2"
+  },
+  {
+    "id": "e6f01fa7-9611-4b04-a2a0-448563357ff7",
+    "title": "2224801030378_NguyenHuuLuc-LAB5_Firewall_docx_20260404_091612",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "2224801030378_NguyenHuuLuc-LAB5_Firewall_docx_20260404_091612"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Firewall"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Lợi ích của Firewall"
+      },
+      {
+        "id": "root-0-0-0",
+        "parent": "root-0-0",
+        "title": "Firewall Mikrotik"
+      },
+      {
+        "id": "root-0-0-0-0",
+        "parent": "root-0-0-0",
+        "title": "Tạo rule firewall"
+      },
+      {
+        "id": "root-0-0-1",
+        "parent": "root-0-0",
+        "title": "Thực hành Firewall"
+      },
+      {
+        "id": "root-0-0-2",
+        "parent": "root-0-0",
+        "title": "Firewall Linux"
+      },
+      {
+        "id": "root-0-0-2-0",
+        "parent": "root-0-0-2",
+        "title": "Lợi ích của Firewall Linux"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Chặn truy cập website"
+      },
+      {
+        "id": "root-0-1-0",
+        "parent": "root-0-1",
+        "title": "Block Website"
+      },
+      {
+        "id": "root-1",
+        "parent": "root",
+        "title": "IP Address"
+      },
+      {
+        "id": "root-1-0",
+        "parent": "root-1",
+        "title": "Firewall - IP Address"
+      },
+      {
+        "id": "root-1-1",
+        "parent": "root-1",
+        "title": "L7 Protocol"
+      },
+      {
+        "id": "root-2",
+        "parent": "root",
+        "title": "Lọc gói tin"
+      },
+      {
+        "id": "root-2-0",
+        "parent": "root-2",
+        "title": "Firewall - Lọc gói tin"
+      },
+      {
+        "id": "root-3",
+        "parent": "root",
+        "title": "Firewall - IP Address"
+      },
+      {
+        "id": "root-3-0",
+        "parent": "root-3",
+        "title": "IP Address on Firewall"
+      }
+    ],
+    "sources": [
+      "2224801030378_NguyenHuuLuc-LAB5_Firewall_docx_20260404_091612"
+    ],
+    "createdAt": "2026-04-04T10:02:27.830036Z",
+    "strategy": "iterative"
+  },
+  {
+    "id": "a696f7bf-d8e8-40d5-8689-bcf71e75f17c",
+    "title": "NHOM10_BC_Final_docx_20260404_091940",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "NHOM10_BC_Final_docx_20260404_091940"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Biến độc lập - Chọn lọc"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Các phương pháp chọn lọc biến độc lập"
+      },
+      {
+        "id": "root-0-0-0",
+        "parent": "root-0-0",
+        "title": "Phương pháp chọn lọc biến độc lập theo từng đối tượng"
+      },
+      {
+        "id": "root-0-0-1",
+        "parent": "root-0-0",
+        "title": "Tử duyệt biến độc lập theo từng đối tượng"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Quy trình chọn lọc biến độc lập"
+      },
+      {
+        "id": "root-0-1-0",
+        "parent": "root-0-1",
+        "title": "Cấu trúc dataset và biến độc lập"
+      },
+      {
+        "id": "root-0-1-1",
+        "parent": "root-0-1",
+        "title": "Phát hiện biến độc lập"
+      },
+      {
+        "id": "root-0-2",
+        "parent": "root-0",
+        "title": "Ứng dụng chọn lọc biến độc lập trong xử lý dữ liệu"
+      },
+      {
+        "id": "root-0-2-0",
+        "parent": "root-0-2",
+        "title": "Phân tích biến độc lập"
+      },
+      {
+        "id": "root-0-2-0-0",
+        "parent": "root-0-2-0",
+        "title": "Chọn lọc biến độc lập theo đối tượng"
+      },
+      {
+        "id": "root-0-2-0-1",
+        "parent": "root-0-2-0",
+        "title": "Phân tích và lựa chọn biến độc lập dựa trên các yêu cầu"
+      },
+      {
+        "id": "root-0-2-1",
+        "parent": "root-0-2",
+        "title": "Ứng dụng lựa chọn biến độc lập"
+      },
+      {
+        "id": "root-0-2-1-0",
+        "parent": "root-0-2-1",
+        "title": "Phương pháp lựa chọn biến độc lập theo đối tượng"
+      },
+      {
+        "id": "root-0-3",
+        "parent": "root-0",
+        "title": "Cấu trúc dataset và lựa chọn biến độc lập"
+      },
+      {
+        "id": "root-0-3-0",
+        "parent": "root-0-3",
+        "title": "Quy trình Lựa Chọn Biến Độc Lập"
+      },
+      {
+        "id": "root-0-3-0-0",
+        "parent": "root-0-3-0",
+        "title": "Lựa chọn biến độc lập dựa trên đối tượng"
+      },
+      {
+        "id": "root-0-3-0-1",
+        "parent": "root-0-3-0",
+        "title": "Cấu trúc dataset"
+      }
+    ],
+    "sources": [
+      "NHOM10_BC_Final_docx_20260404_091940"
+    ],
+    "createdAt": "2026-04-04T10:01:18.771238Z",
+    "strategy": "iterative"
+  },
+  {
     "id": "bce70556-d123-4c60-9aba-cdd9e7c0a837",
     "title": "NHOM10_BC_Final_docx_20260404_091940",
     "nodes": [

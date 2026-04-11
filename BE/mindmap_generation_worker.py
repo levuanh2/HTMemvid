@@ -7,13 +7,395 @@ import json
 import re
 import unicodedata
 import uuid
+import random
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-from ollama_utils import SLM_MODEL
+import numpy as np
+
+from embedding_model import get_embedding_model
+from ollama_utils import SLM_MODEL, run_ollama_chat
 from mindmap_utils import generate_mindmap_flat, generate_mindmap_cmgn, get_main_branches
 
+
+STRUCTURE_LABELS: list[tuple[str, str]] = [
+    ("overview", "Overview / Definition"),
+    ("components", "Components / Structure"),
+    ("process", "Process / Workflow"),
+    ("applications", "Applications / Use cases"),
+    ("issues", "Issues / Limitations / Challenges"),
+]
+
+VAGUE_WORDS = {
+    "introduction", "introduce", "general", "content", "summary",
+    "tổng quan", "giới thiệu", "chung", "nội dung",
+}
+
+STOPWORDS_VI = {
+    "và", "là", "của", "trong", "cho", "với", "các", "một", "những", "được", "khi", "từ", "đến", "theo", "này", "đó",
+    "trên", "dưới", "hơn", "ít", "nhiều", "vì", "do", "để", "có", "không", "tại", "về", "như", "cũng", "đang", "sẽ",
+}
+
+
+def _word_count(s: str) -> int:
+    return len([w for w in re.split(r"\s+", (s or "").strip()) if w])
+
+
+def _is_vague(title: str) -> bool:
+    t = (title or "").strip().lower()
+    if len(t) < 3:
+        return True
+    return any(v in t for v in VAGUE_WORDS)
+
+
+def _dedupe_short(items: list[str], max_items: int) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for it in items:
+        it = (it or "").strip()
+        if not it:
+            continue
+        key = re.sub(r"\s+", " ", it).strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(it)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _parse_json_list(text: str) -> list[str]:
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    try:
+        val = json.loads(raw)
+        if isinstance(val, list):
+            return [str(x) for x in val]
+    except Exception:
+        pass
+
+    m = re.search(r"\[[\s\S]*\]", raw)
+    if not m:
+        return []
+    try:
+        val = json.loads(m.group(0))
+        if isinstance(val, list):
+            return [str(x) for x in val]
+    except Exception:
+        return []
+    return []
+
+
+def _unit(x: np.ndarray) -> np.ndarray:
+    return x / (np.linalg.norm(x, axis=1, keepdims=True) + 1e-12)
+
+
+def _semantic_dedupe(items: list[str], model, threshold: float, max_items: int) -> list[str]:
+    """
+    Dedupe bằng cosine similarity. Giữ thứ tự ưu tiên ban đầu.
+    """
+    items = [i.strip() for i in items if i and i.strip()]
+    items = _dedupe_short(items, max_items=max_items * 2)
+    if len(items) <= 1:
+        return items[:max_items]
+
+    emb = model.encode(items, convert_to_numpy=True, show_progress_bar=False).astype("float32")
+    emb = _unit(emb)
+    keep: list[int] = []
+    for i in range(len(items)):
+        ok = True
+        for j in keep:
+            if float(emb[i] @ emb[j]) >= threshold:
+                ok = False
+                break
+        if ok:
+            keep.append(i)
+        if len(keep) >= max_items:
+            break
+    return [items[i] for i in keep]
+
+
+def _extract_keywords(chunks: list[str], top_k: int = 24) -> list[str]:
+    toks: list[str] = []
+    for c in chunks:
+        c = (c or "").lower()
+        for w in re.findall(r"[\w\-À-ỹ]{3,}", c):
+            if w in STOPWORDS_VI:
+                continue
+            toks.append(w)
+    freq = Counter(toks)
+    return [w for w, _ in freq.most_common(top_k)]
+
+
+def _topic_keyword_overlap(topic: str, keywords: set[str]) -> bool:
+    t = (topic or "").lower()
+    topic_tokens = set(re.findall(r"[\w\-À-ỹ]{3,}", t))
+    return len(topic_tokens & keywords) > 0
+
+
+def _select_diverse_chunks(all_chunks: list[str], model, k_sim: int = 18, k_rand: int = 8) -> list[str]:
+    """
+    Chọn context tránh bias: top-sim (so với centroid) + random (diversity).
+    """
+    chunks = [c.strip() for c in all_chunks if c and c.strip()]
+    if not chunks:
+        return []
+    if len(chunks) <= (k_sim + k_rand):
+        return chunks
+
+    pool = chunks[: min(len(chunks), 240)]
+    emb = model.encode(pool, convert_to_numpy=True, show_progress_bar=False).astype("float32")
+    emb_u = _unit(emb)
+    centroid = _unit(np.mean(emb_u, axis=0, keepdims=True))
+    sims = (emb_u @ centroid.T).reshape(-1)
+    top_idx = np.argsort(-sims)[:k_sim].tolist()
+    remaining = [i for i in range(len(pool)) if i not in set(top_idx)]
+    rand_idx = random.sample(remaining, k=min(k_rand, len(remaining)))
+    return [pool[i] for i in (top_idx + rand_idx)]
+
+
+def _soft_cluster(
+    topics: list[str],
+    chunks: list[str],
+    model,
+    threshold: float = 0.56,
+) -> tuple[dict[str, list[str]], dict[str, np.ndarray]]:
+    """
+    Soft clustering: 1 chunk có thể thuộc nhiều topics nếu sim >= threshold.
+    Luôn đảm bảo chunk thuộc ít nhất 1 topic (best-match fallback).
+    """
+    topics = [t.strip() for t in topics if t and t.strip()]
+    chunks = [c.strip() for c in chunks if c and c.strip()]
+    groups: dict[str, list[str]] = {t: [] for t in topics}
+    if not topics or not chunks:
+        return groups, {}
+
+    t_emb = _unit(model.encode(topics, convert_to_numpy=True, show_progress_bar=False).astype("float32"))
+    c_emb = _unit(model.encode(chunks, convert_to_numpy=True, show_progress_bar=False).astype("float32"))
+    sims = c_emb @ t_emb.T  # (C, T)
+
+    for i, row in enumerate(sims):
+        assigned = False
+        for j, s in enumerate(row.tolist()):
+            if float(s) >= threshold:
+                groups[topics[j]].append(chunks[i])
+                assigned = True
+        if not assigned:
+            j = int(np.argmax(row))
+            groups[topics[j]].append(chunks[i])
+
+    t_map = {topics[i]: t_emb[i] for i in range(len(topics))}
+    return groups, t_map
+
+
+def _rerank_topics(topics: list[str], groups: dict[str, list[str]], top_n: int = 8) -> list[str]:
+    scored = [(float(len(groups.get(t) or [])), t) for t in topics]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [t for _, t in scored[:top_n]]
+
+
+def _classify_topic_to_structure(topic: str, model) -> str:
+    labels = [lbl for _, lbl in STRUCTURE_LABELS]
+    lab_u = _unit(model.encode(labels, convert_to_numpy=True, show_progress_bar=False).astype("float32"))
+    t_u = _unit(model.encode([topic], convert_to_numpy=True, show_progress_bar=False).astype("float32"))
+    sims = (t_u @ lab_u.T).reshape(-1)
+    return STRUCTURE_LABELS[int(np.argmax(sims))][0]
+
+
+def _cosine_assign(groups: list[str], texts: list[str], model) -> dict[str, list[str]]:
+    if not groups or not texts:
+        return {g: [] for g in groups}
+
+    g_emb = model.encode(groups, convert_to_numpy=True, show_progress_bar=False).astype("float32")
+    t_emb = model.encode(texts, convert_to_numpy=True, show_progress_bar=False).astype("float32")
+
+    g_norm = g_emb / (np.linalg.norm(g_emb, axis=1, keepdims=True) + 1e-12)
+    t_norm = t_emb / (np.linalg.norm(t_emb, axis=1, keepdims=True) + 1e-12)
+
+    sims = t_norm @ g_norm.T
+    best = np.argmax(sims, axis=1)
+
+    out: dict[str, list[str]] = {g: [] for g in groups}
+    for i, gi in enumerate(best.tolist()):
+        out[groups[int(gi)]].append(texts[i])
+    return out
+
+
+def _build_multilevel_mindmap(
+    root_title: str,
+    final_chunks: list[str],
+    progress_cb: Optional[Callable[[int], None]] = None,
+    enable_level3: bool = False,
+) -> tuple[list[dict], str]:
+    def _prog(p: int) -> None:
+        if progress_cb is not None:
+            progress_cb(p)
+
+    model = get_embedding_model()
+    if model is None:
+        raise RuntimeError("Embedding model not available (CI mode)")
+
+    # Context selection tránh bias: top-sim + random diversity
+    sample_for_topics = _select_diverse_chunks(final_chunks, model, k_sim=18, k_rand=8)
+    if not sample_for_topics:
+        raise ValueError("No chunks for mindmap")
+
+    _prog(56)
+
+    sys_topics = (
+        "You are an expert knowledge organizer.\n"
+        "Extract HIGH-LEVEL conceptual topics from the document.\n\n"
+        "Rules:\n"
+        "- Topics must be DISTINCT (no overlap)\n"
+        "- Topics must follow logical structure if possible:\n"
+        "  Definition / Overview\n"
+        "  Components / Structure\n"
+        "  Process / Workflow\n"
+        "  Applications / Use cases\n"
+        "  Issues / Limitations / Challenges\n"
+        "- Avoid vague words like: 'Introduction', 'General', 'Content'\n"
+        "- Each topic should represent a MEANINGFUL concept cluster\n"
+        "- Each topic should be 3–6 words, no long sentences\n\n"
+        "Return JSON array only:\n"
+        "[\"Topic 1\", \"Topic 2\", ...]"
+    )
+    user_topics = "Nội dung:\n\n" + "\n\n---\n\n".join(sample_for_topics)
+    topics_raw = run_ollama_chat(sys_topics, user_topics, model=SLM_MODEL)
+    topics_0 = _dedupe_short(_parse_json_list(topics_raw), max_items=10)
+    topics_0 = [t for t in topics_0 if not _is_vague(t)]
+    topics = _semantic_dedupe(topics_0, model=model, threshold=0.85, max_items=8)
+
+    # Keyword extraction support: topic phải bám dữ liệu
+    keywords = set(_extract_keywords(sample_for_topics, top_k=26))
+    topics = [t for t in topics if _topic_keyword_overlap(t, keywords)]
+    topics = _semantic_dedupe(topics, model=model, threshold=0.85, max_items=8)
+
+    print(f"[MM] topics generated: {len(topics)}")
+    if len(topics) < 3:
+        raise ValueError("LLM topics extraction failed")
+
+    _prog(64)
+
+    chunks_for_cluster = [c.strip() for c in (final_chunks[:450] if final_chunks else []) if c and c.strip()]
+    topic_groups, _topic_vecs = _soft_cluster(
+        topics=topics,
+        chunks=chunks_for_cluster,
+        model=model,
+        threshold=0.56,
+    )
+    print("[MM] clustering done")
+
+    _prog(72)
+
+    # Rerank topics theo độ phủ nhóm
+    topics = _rerank_topics(topics, topic_groups, top_n=8)
+
+    # Structure enforcement: luôn có 5 nhánh chuẩn
+    nodes: list[dict] = [{"id": "root", "parent": None, "title": root_title}]
+    structure_ids: dict[str, str] = {}
+    for key, label in STRUCTURE_LABELS:
+        sid = f"s-{key}"
+        structure_ids[key] = sid
+        nodes.append({"id": sid, "parent": "root", "title": label})
+
+    # Bucket topics vào 5 nhánh chuẩn
+    bucketed: dict[str, list[str]] = {k: [] for k, _ in STRUCTURE_LABELS}
+    for t in topics:
+        bucketed[_classify_topic_to_structure(t, model)].append(t)
+
+    topic_ids: dict[str, str] = {}
+    for key, _label in STRUCTURE_LABELS:
+        for ti, topic in enumerate(bucketed.get(key) or []):
+            tid = f"t-{key}-{ti}"
+            topic_ids[topic] = tid
+            nodes.append({"id": tid, "parent": structure_ids[key], "title": topic})
+
+    _prog(78)
+
+    max_nodes = 120
+    auto_level3 = enable_level3 or (len(final_chunks) <= 220)
+
+    for topic in topics:
+        tid = topic_ids.get(topic)
+        if not tid:
+            continue
+        group_chunks = [c for c in (topic_groups.get(topic) or []) if c and c.strip()]
+        group_sample = _select_diverse_chunks(group_chunks, model, k_sim=10, k_rand=4)[:14]
+
+        sys_sub = (
+            "Bạn đang tạo mindmap nhiều tầng.\n"
+            f"Chủ đề chính: {topic}\n\n"
+            "Từ nội dung bên dưới, hãy tạo 3–5 Ý NHỎ (subtopics) thuộc chủ đề này.\n"
+            "YÊU CẦU:\n"
+            "- Mỗi subtopic 3–7 từ\n"
+            "- Break down topic thành các phần có ý nghĩa\n"
+            "- Có liên kết logic, tránh lặp ý / từ mơ hồ\n"
+            "- Nên bám cấu trúc: definition / components / process / examples / issues (nếu phù hợp)\n"
+            "- Không copy nguyên văn câu dài\n"
+            "Chỉ trả về JSON array of strings."
+        )
+        user_sub = "Nội dung:\n\n" + "\n\n---\n\n".join(group_sample) if group_sample else "Nội dung: (không có mẫu rõ ràng)"
+        sub_raw = run_ollama_chat(sys_sub, user_sub, model=SLM_MODEL)
+        subs0 = _dedupe_short(_parse_json_list(sub_raw), max_items=6)
+        subs0 = [s for s in subs0 if _word_count(s) >= 3 and not _is_vague(s)]
+        subs = _semantic_dedupe(subs0, model=model, threshold=0.90, max_items=5)
+        if not subs:
+            subs = _dedupe_short(get_main_branches((group_chunks or final_chunks)[:8], model=SLM_MODEL) or [], max_items=3)
+        if not subs:
+            continue
+
+        for si, sub in enumerate(subs):
+            if len(nodes) >= max_nodes:
+                break
+            sid = f"{tid}-s-{si}"
+            nodes.append({"id": sid, "parent": tid, "title": sub})
+
+            if not auto_level3:
+                continue
+
+            if len(nodes) >= (max_nodes - 4):
+                continue
+            sys_fact = (
+                "Bạn đang tạo mindmap.\n"
+                f"Topic: {topic}\n"
+                f"Subtopic: {sub}\n\n"
+                "Từ nội dung bên dưới, trích xuất 2–3 key points NGẮN, rõ nghĩa.\n"
+                "YÊU CẦU:\n"
+                "- Mỗi point <= 12 từ\n"
+                "- Không lặp ý\n"
+                "- Không copy nguyên văn câu dài\n"
+                "Chỉ trả về JSON array of strings."
+            )
+            user_fact = "Nội dung:\n\n" + "\n\n---\n\n".join(group_sample[:6])
+            facts_raw = run_ollama_chat(sys_fact, user_fact, model=SLM_MODEL)
+            facts0 = _dedupe_short(_parse_json_list(facts_raw), max_items=3)
+            facts0 = [f for f in facts0 if _word_count(f) >= 3 and not _is_vague(f)]
+            facts = _semantic_dedupe(facts0, model=model, threshold=0.90, max_items=3)
+            for fi, fact in enumerate(facts):
+                if len(nodes) >= max_nodes:
+                    break
+                fid = f"{sid}-f-{fi}"
+                nodes.append({"id": fid, "parent": sid, "title": fact})
+
+    print("[MM] subtopics generated")
+
+    # Fail-safe quality check
+    has_sub = any(isinstance(n.get("id"), str) and "-s-" in n.get("id", "") for n in nodes)
+    if not has_sub:
+        raise ValueError("No subtopics generated")
+
+    titles = [str(n.get("title") or "").strip().lower() for n in nodes if isinstance(n, dict)]
+    uniq = len(set([t for t in titles if t]))
+    if uniq < max(10, int(len(titles) * 0.65)):
+        raise ValueError("Too many duplicates in mindmap nodes")
+
+    _prog(86)
+    print(f"[MM] final nodes: {len(nodes)}")
+    return nodes, "advanced_v2"
 
 def run_mindmap_generation(
     index_meta_path: Path,
@@ -170,30 +552,45 @@ def run_mindmap_generation(
             flat_nodes = None
             strategy_used = None
 
-            if strategy_requested in {"cmgn", "semantic", "coreference"}:
-                try:
-                    print(f"   → Thử CMGN strategy...")
-                    flat_nodes = generate_mindmap_cmgn(final_chunks, model=SLM_MODEL)
-                    strategy_used = "cmgn"
-                    print(f"   ✓ CMGN thành công: {len(flat_nodes)} nodes")
-                except Exception as exc:
-                    print(f"   ⚠️ CMGN failed: {exc}, fallback iterative")
+            # NEW: Multilevel pipeline (NotebookLM-like). Nếu fail → fallback về one-shot (giữ tương thích).
+            try:
+                enable_level3 = False  # optional nâng cấp sau
+                flat_nodes, strategy_used = _build_multilevel_mindmap(
+                    root_title=root_title,
+                    final_chunks=final_chunks,
+                    progress_cb=progress_cb,
+                    enable_level3=enable_level3,
+                )
+                print(f"   ✓ Multilevel mindmap thành công: {len(flat_nodes)} nodes")
+            except Exception as exc:
+                print(f"   ⚠️ Multilevel failed: {exc} -> fallback one-shot")
+                flat_nodes = None
+                strategy_used = None
+
+                if strategy_requested in {"cmgn", "semantic", "coreference"}:
                     try:
+                        print(f"   → Thử CMGN strategy...")
+                        flat_nodes = generate_mindmap_cmgn(final_chunks, model=SLM_MODEL)
+                        strategy_used = "cmgn"
+                        print(f"   ✓ CMGN thành công: {len(flat_nodes)} nodes")
+                    except Exception as exc2:
+                        print(f"   ⚠️ CMGN failed: {exc2}, fallback iterative")
+                        try:
+                            flat_nodes = generate_mindmap_flat(final_chunks, model=SLM_MODEL)
+                            strategy_used = "iterative"
+                            print(f"   ✓ Iterative thành công: {len(flat_nodes)} nodes")
+                        except Exception as exc3:
+                            print(f"   ❌ Iterative cũng failed: {exc3}")
+                            flat_nodes = None
+                else:
+                    try:
+                        print(f"   → Thử Iterative strategy...")
                         flat_nodes = generate_mindmap_flat(final_chunks, model=SLM_MODEL)
                         strategy_used = "iterative"
                         print(f"   ✓ Iterative thành công: {len(flat_nodes)} nodes")
-                    except Exception as exc2:
-                        print(f"   ❌ Iterative cũng failed: {exc2}")
+                    except Exception as exc4:
+                        print(f"   ❌ Iterative failed: {exc4}")
                         flat_nodes = None
-            else:
-                try:
-                    print(f"   → Thử Iterative strategy...")
-                    flat_nodes = generate_mindmap_flat(final_chunks, model=SLM_MODEL)
-                    strategy_used = "iterative"
-                    print(f"   ✓ Iterative thành công: {len(flat_nodes)} nodes")
-                except Exception as exc:
-                    print(f"   ❌ Iterative failed: {exc}")
-                    flat_nodes = None
 
             _prog(78)
 

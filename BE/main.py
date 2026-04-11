@@ -818,7 +818,10 @@ def upload_file():
     return jsonify({
         'source_id': source_id,
         'filename': filename,
-        'status': 'processing'
+        'video_stem': source_stem,
+        'status': 'processing',
+        'progress': 0.0,
+        'can_query': False,
     })
 
 
@@ -843,9 +846,26 @@ def get_source_status(source_id: str):
     if not status_info:
         return jsonify({'error': 'Source not found'}), 404
     
+    status = status_info.get('status', 'processing')
+    capabilities = status_info.get('capabilities') if isinstance(status_info, dict) else None
+    if not isinstance(capabilities, dict):
+        capabilities = {}
+
+    # Single source of truth: can_query
+    # TRUE when FAISS is ready (chunk-level search is available). Do NOT wait for memory tree / mindmap / summary.
+    can_query = (
+        status in ("index_ready", "ready")
+        and bool(capabilities.get("chunk_query", True))  # default True for backward compatibility
+        and status != "error"
+    )
+
     response = {
-        'status': status_info.get('status', 'processing'),
+        'status': status,
         'progress': status_info.get('progress', 0.0),
+        'substatus': status_info.get('substatus'),
+        'capabilities': capabilities if capabilities else None,
+        'can_query': bool(can_query),
+        'video_stem': status_info.get('source_stem') or status_info.get('video_stem'),
     }
     
     if status_info.get('error'):
@@ -940,7 +960,8 @@ def list_indexed():
             sources.append({
                 'video': video_stem,  # FE expects stem (không có extension, không có timestamp nếu đã normalize)
                 'chunks': chunks,
-                'num_chunks': len(chunks)
+                'num_chunks': len(chunks),
+                'can_query': True,
             })
 
         return jsonify({'sources': sources})

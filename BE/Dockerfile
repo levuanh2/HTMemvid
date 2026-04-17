@@ -25,8 +25,8 @@ COPY . .
 
 RUN mkdir -p /app/videos /app/index /app/memory /app/input_docs
 
-EXPOSE 8080
+EXPOSE 5000
 
 ENV DATA_DIR=/app
 
-CMD ["sh", "-c", "gunicorn -w ${WEB_CONCURRENCY:-1} -b 0.0.0.0:${PORT:-8080} --timeout ${GUNICORN_TIMEOUT:-300} main:app"]
+CMD ["sh", "-c", "gunicorn -w ${WEB_CONCURRENCY:-1} -b 0.0.0.0:${PORT:-5000} --timeout ${GUNICORN_TIMEOUT:-300} main:app"]

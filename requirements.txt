@@ -21,6 +21,8 @@ requests
 scikit-learn
 scipy
 sentence-transformers
-torch
+# Torch (CPU-only) để tránh kéo CUDA toolkit trong Docker
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.1+cpu
 tqdm
 transformers

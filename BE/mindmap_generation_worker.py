@@ -16,7 +16,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from embedding_model import get_embedding_model
-from ollama_utils import SLM_MODEL, run_ollama_chat
+from ollama_utils import SLM_MODEL_MINDMAP, run_ollama_chat
 from mindmap_utils import generate_mindmap_flat, generate_mindmap_cmgn, get_main_branches
 
 
@@ -264,7 +264,7 @@ def _build_multilevel_mindmap(
         "[\"Topic 1\", \"Topic 2\", ...]"
     )
     user_topics = "Nội dung:\n\n" + "\n\n---\n\n".join(sample_for_topics)
-    topics_raw = run_ollama_chat(sys_topics, user_topics, model=SLM_MODEL)
+    topics_raw = run_ollama_chat(sys_topics, user_topics, model=SLM_MODEL_MINDMAP)
     topics_0 = _dedupe_short(_parse_json_list(topics_raw), max_items=10)
     topics_0 = [t for t in topics_0 if not _is_vague(t)]
     topics = _semantic_dedupe(topics_0, model=model, threshold=0.85, max_items=8)
@@ -339,12 +339,12 @@ def _build_multilevel_mindmap(
             "Chỉ trả về JSON array of strings."
         )
         user_sub = "Nội dung:\n\n" + "\n\n---\n\n".join(group_sample) if group_sample else "Nội dung: (không có mẫu rõ ràng)"
-        sub_raw = run_ollama_chat(sys_sub, user_sub, model=SLM_MODEL)
+        sub_raw = run_ollama_chat(sys_sub, user_sub, model=SLM_MODEL_MINDMAP)
         subs0 = _dedupe_short(_parse_json_list(sub_raw), max_items=6)
         subs0 = [s for s in subs0 if _word_count(s) >= 3 and not _is_vague(s)]
         subs = _semantic_dedupe(subs0, model=model, threshold=0.90, max_items=5)
         if not subs:
-            subs = _dedupe_short(get_main_branches((group_chunks or final_chunks)[:8], model=SLM_MODEL) or [], max_items=3)
+            subs = _dedupe_short(get_main_branches((group_chunks or final_chunks)[:8], model=SLM_MODEL_MINDMAP) or [], max_items=3)
         if not subs:
             continue
 
@@ -371,7 +371,7 @@ def _build_multilevel_mindmap(
                 "Chỉ trả về JSON array of strings."
             )
             user_fact = "Nội dung:\n\n" + "\n\n---\n\n".join(group_sample[:6])
-            facts_raw = run_ollama_chat(sys_fact, user_fact, model=SLM_MODEL)
+            facts_raw = run_ollama_chat(sys_fact, user_fact, model=SLM_MODEL_MINDMAP)
             facts0 = _dedupe_short(_parse_json_list(facts_raw), max_items=3)
             facts0 = [f for f in facts0 if _word_count(f) >= 3 and not _is_vague(f)]
             facts = _semantic_dedupe(facts0, model=model, threshold=0.90, max_items=3)
@@ -570,13 +570,13 @@ def run_mindmap_generation(
                 if strategy_requested in {"cmgn", "semantic", "coreference"}:
                     try:
                         print(f"   → Thử CMGN strategy...")
-                        flat_nodes = generate_mindmap_cmgn(final_chunks, model=SLM_MODEL)
+                        flat_nodes = generate_mindmap_cmgn(final_chunks, model=SLM_MODEL_MINDMAP)
                         strategy_used = "cmgn"
                         print(f"   ✓ CMGN thành công: {len(flat_nodes)} nodes")
                     except Exception as exc2:
                         print(f"   ⚠️ CMGN failed: {exc2}, fallback iterative")
                         try:
-                            flat_nodes = generate_mindmap_flat(final_chunks, model=SLM_MODEL)
+                            flat_nodes = generate_mindmap_flat(final_chunks, model=SLM_MODEL_MINDMAP)
                             strategy_used = "iterative"
                             print(f"   ✓ Iterative thành công: {len(flat_nodes)} nodes")
                         except Exception as exc3:
@@ -585,7 +585,7 @@ def run_mindmap_generation(
                 else:
                     try:
                         print(f"   → Thử Iterative strategy...")
-                        flat_nodes = generate_mindmap_flat(final_chunks, model=SLM_MODEL)
+                        flat_nodes = generate_mindmap_flat(final_chunks, model=SLM_MODEL_MINDMAP)
                         strategy_used = "iterative"
                         print(f"   ✓ Iterative thành công: {len(flat_nodes)} nodes")
                     except Exception as exc4:
@@ -597,7 +597,7 @@ def run_mindmap_generation(
             if not flat_nodes or len(flat_nodes) == 0:
                 print(f"   ⚠️ Tất cả strategies failed, tạo fallback mindmap")
                 try:
-                    mains = get_main_branches(final_chunks[:10], model=SLM_MODEL)
+                    mains = get_main_branches(final_chunks[:10], model=SLM_MODEL_MINDMAP)
                     if mains:
                         flat_nodes = [
                             {"id": "root", "parent": None, "title": root_title}

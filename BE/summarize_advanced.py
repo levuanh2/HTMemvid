@@ -10,7 +10,7 @@ Module tóm tắt tài liệu nâng cao theo các công thức:
 import re
 import json
 from typing import List, Dict, Tuple, Optional
-from ollama_utils import run_ollama_chat, SLM_MODEL
+from ollama_utils import run_ollama_chat, SLM_MODEL_SUMMARY
 from ingest_utils import split_text
 
 
@@ -302,7 +302,7 @@ def advanced_summarize(
     Returns:
         Dict chứa kết quả tóm tắt và metadata
     """
-    model = model or SLM_MODEL
+    model = model or SLM_MODEL_SUMMARY
     
     # D: Data Preprocessing (nếu có sẵn chunk thì dùng lại, tránh tách lần nữa)
     chunks_input = pre_chunks if pre_chunks else preprocess_data(text)

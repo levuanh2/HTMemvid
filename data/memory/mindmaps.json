@@ -1,5 +1,91 @@
 [
   {
+    "id": "69526985-7e1d-4112-85b4-66bc65cacf8e",
+    "title": "BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043",
+    "nodes": [
+      {
+        "id": "root",
+        "parent": null,
+        "title": "BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043"
+      },
+      {
+        "id": "root-0",
+        "parent": "root",
+        "title": "Lịch sử hình thành"
+      },
+      {
+        "id": "root-0-0",
+        "parent": "root-0",
+        "title": "Khái niệm chính"
+      },
+      {
+        "id": "root-0-1",
+        "parent": "root-0",
+        "title": "Khám phá động lực"
+      },
+      {
+        "id": "root-0-1-0",
+        "parent": "root-0-1",
+        "title": "Input Management System"
+      },
+      {
+        "id": "root-0-1-1",
+        "parent": "root-0-1",
+        "title": "Scripting and API System"
+      },
+      {
+        "id": "root-0-1-1-0",
+        "parent": "root-0-1-1",
+        "title": "Scripting (Kịch bản)"
+      },
+      {
+        "id": "root-0-1-2",
+        "parent": "root-0-1",
+        "title": "Real-time Rendering"
+      },
+      {
+        "id": "root-0-1-2-0",
+        "parent": "root-0-1-2",
+        "title": "Input Management System (Hệ thống quản lý đầu vào)"
+      },
+      {
+        "id": "root-0-1-2-1",
+        "parent": "root-0-1-2",
+        "title": "Physics Engine (Công cụ vật lý)"
+      },
+      {
+        "id": "root-0-1-2-2",
+        "parent": "root-0-1-2",
+        "title": "Scripting and API System (Hệ thống Kịch bản và API)"
+      },
+      {
+        "id": "root-0-2",
+        "parent": "root-0",
+        "title": "Ứng dụng thực tế"
+      },
+      {
+        "id": "root-0-2-0",
+        "parent": "root-0-2",
+        "title": "Unity"
+      },
+      {
+        "id": "root-0-3",
+        "parent": "root-0",
+        "title": "Game Engine trong thời đại số"
+      },
+      {
+        "id": "root-0-3-0",
+        "parent": "root-0-3",
+        "title": "Cấu trúc của Game Engine hiện đại"
+      }
+    ],
+    "sources": [
+      "BaoCaoGamEngine_LeVuAnh_2224801030388_docx_20260408_033043"
+    ],
+    "createdAt": "2026-04-17T05:26:11.542676Z",
+    "strategy": "iterative"
+  },
+  {
     "id": "af77746e-d75d-4f97-b65e-765d23f470d1",
     "title": "LAW122_notes_docx_20260411_163146",
     "nodes": [

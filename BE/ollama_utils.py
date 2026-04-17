@@ -6,20 +6,25 @@ import traceback
 from typing import List
 from langdetect import detect
 
-# Default SLM model (thay đổi theo model bạn cài trên Ollama)
-SLM_MODEL = 'gemma4:e4b'  
+# Theo feature: chat Q&A (mặc định nặng hơn), mindmap & summary (nhẹ hơn).
+# Có thể override qua biến môi trường; SLM_MODEL = alias chat để tương thích cũ.
+SLM_MODEL_CHAT = os.environ.get("SLM_MODEL_CHAT", "gemma4:e4b")
+SLM_MODEL_MINDMAP = os.environ.get("SLM_MODEL_MINDMAP", "gemma2:2b")
+SLM_MODEL_SUMMARY = os.environ.get("SLM_MODEL_SUMMARY", "gemma2:2b")
+SLM_MODEL = SLM_MODEL_CHAT
+
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 def _safe_chat(messages: list[dict], model: str = None) -> str:
     """
     Hàm gọi Ollama an toàn (low-level).
     messages: list of {"role":..., "content":...}
-    model: override model (nếu None sẽ dùng SLM_MODEL).
+    model: override model (nếu None sẽ dùng SLM_MODEL_CHAT).
     Trả về raw text (hoặc chuỗi lỗi để debug).
     """
     if os.environ.get("SKIP_MODEL_LOAD") == "1":
         return "[CI MODE] Skipped LLM response"
 
-    model = model or SLM_MODEL
+    model = model or SLM_MODEL_CHAT
     last_err: Exception | None = None
     for attempt in range(1, 4):
         try:
@@ -51,7 +56,7 @@ def _safe_chat(messages: list[dict], model: str = None) -> str:
 def run_ollama_chat(system_prompt: str, user_prompt: str, model: str = None) -> str:
     """
     Wrapper high-level: truyền system + user, có thể override model.
-    SLM-friendly: dùng model nhỏ theo SLM_MODEL nếu không override.
+    SLM-friendly: dùng SLM_MODEL_CHAT nếu không override.
     """
     if os.environ.get("SKIP_MODEL_LOAD") == "1":
         return "[CI MODE] Skipped LLM response"
@@ -65,6 +70,7 @@ def run_ollama_chat(system_prompt: str, user_prompt: str, model: str = None) -> 
 
 def summarize_whole_document(text: str, model: str = None) -> str:
     """Tóm tắt toàn bộ tài liệu bằng ngôn ngữ phù hợp."""
+    model = model or SLM_MODEL_SUMMARY
     try:
         lang = detect(text)
     except:
@@ -110,6 +116,7 @@ def summarize_results(query: str, chunks: List[str], model: str = None) -> str:
     Trả lời câu hỏi dựa trên các đoạn văn đã lưu (fallback khi không có Memory Tree).
     Đảm bảo trả lời bằng tiếng Việt và theo style NotebookLM.
     """
+    model = model or SLM_MODEL_CHAT
     # Base system prompt
     system_prompt = (
         "Bạn là người đã đọc, hiểu và ghi chú toàn bộ nội dung tài liệu thay cho người dùng.\n\n"

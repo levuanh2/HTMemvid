@@ -29,7 +29,7 @@ from faiss_utils import (
     rebuild_chunk_index,
     MODEL_NAME,
 )
-from ollama_utils import summarize_whole_document, summarize_results, SLM_MODEL
+from ollama_utils import summarize_whole_document, summarize_results, SLM_MODEL, SLM_MODEL_SUMMARY
 from mindmap_generation_worker import run_mindmap_generation
 from chunk_processor import process_and_store_chunks
 from summarize_advanced import advanced_summarize
@@ -1288,7 +1288,7 @@ def summarize_documents():
             use_cod=use_cod,
             use_structured=use_structured,
             use_fact_check=use_fact_check,
-            model=SLM_MODEL
+            model=SLM_MODEL_SUMMARY
         )
         result["sources"] = list(normalized_sources)
         return jsonify(result)

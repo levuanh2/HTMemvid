@@ -1,16 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { FiMoreVertical, FiAlertCircle } from "react-icons/fi";
+import { FiMoreVertical, FiAlertCircle, FiX } from "react-icons/fi";
 
-// ============================================
-// Helper functions: Status → UI mapping
-// ============================================
-
-/**
- * Get UI config cho một status
- * @param {string} status - "processing" | "index_ready" | "ready" | "error"
- * @param {string} substatus - Optional substatus
- * @returns {object} UI config
- */
+// ── Status config ──────────────────────────────────────
 const getStatusConfig = (status, substatus, canQuery) => {
   if (canQuery === true) {
     return {
@@ -19,11 +10,11 @@ const getStatusConfig = (status, substatus, canQuery) => {
       showProgress: false,
       checkboxEnabled: true,
       badge: "READY",
-      borderColor: "border-green-300",
-      bgColor: "bg-green-50",
+      badgeStyle: { background: "#052e16", color: "#4ade80", border: "1px solid #166534" },
+      borderColor: "#166534",
+      bgColor: "transparent",
     };
   }
-
   switch (status) {
     case "processing":
       return {
@@ -31,533 +22,299 @@ const getStatusConfig = (status, substatus, canQuery) => {
         showProgress: true,
         checkboxEnabled: false,
         badge: "PROCESSING",
-        borderColor: "border-yellow-200",
-        bgColor: "bg-yellow-50",
+        badgeStyle: { background: "#1c1400", color: "#fbbf24", border: "1px solid #92400e" },
+        borderColor: "#92400e",
+        bgColor: "transparent",
       };
-
     case "index_ready":
       return {
         mainText: "Đang xử lý…",
-        subText: substatus === "building_memory_tree"
-          ? "Đang tối ưu thêm nội dung"
-          : "Đang tối ưu thêm nội dung",
+        subText: "Đang tối ưu thêm nội dung",
         badge: "PROCESSING",
         showProgress: true,
         checkboxEnabled: false,
-        borderColor: "border-yellow-200",
-        bgColor: "bg-yellow-50",
+        badgeStyle: { background: "#1c1400", color: "#fbbf24", border: "1px solid #92400e" },
+        borderColor: "#92400e",
+        bgColor: "transparent",
       };
-
     case "ready":
       return {
         mainText: "Đang xử lý…",
         badge: "PROCESSING",
         showProgress: true,
         checkboxEnabled: false,
-        borderColor: "border-yellow-200",
-        bgColor: "bg-yellow-50",
+        badgeStyle: { background: "#1c1400", color: "#fbbf24", border: "1px solid #92400e" },
+        borderColor: "#92400e",
+        bgColor: "transparent",
       };
-
     case "error":
       return {
         mainText: "Lỗi xử lý tài liệu",
         showProgress: false,
         checkboxEnabled: false,
         badge: "ERROR",
-        borderColor: "border-red-300",
-        bgColor: "bg-red-50",
+        badgeStyle: { background: "#1f0000", color: "#f87171", border: "1px solid #991b1b" },
+        borderColor: "#991b1b",
+        bgColor: "transparent",
         showErrorIcon: true,
       };
-
     default:
-      return {
-        mainText: "Không xác định",
-        showProgress: false,
-        checkboxEnabled: false,
-        badge: null,
-        borderColor: "",
-        bgColor: "",
-      };
+      return { mainText: "Không xác định", showProgress: false, checkboxEnabled: false, badge: null, borderColor: "#374151", bgColor: "transparent" };
   }
 };
 
-export default function SidebarLeft({ selectedSources, setSelectedSources, onSourcesChange }) {
-  // Source state: { source_id, filename, status, progress, video_stem?, substatus?, capabilities?, error? }
+const formatFileName = (name = "") => name.replace(/\.(mp4|avi|mov|mkv|webm|mp3|wav|pdf|txt|docx)$/i, "");
+
+export default function SidebarLeft({ selectedSources, setSelectedSources, onSourcesChange, onClose }) {
   const [sources, setSources] = useState([]);
   const [menuOpen, setMenuOpen] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [deletingFile, setDeletingFile] = useState(null);
   const fileInputRef = useRef(null);
-  const pollingIntervalsRef = useRef({}); // Track polling intervals per source_id
+  const pollingIntervalsRef = useRef({});
 
-  // Poll status cho một source
   const pollSourceStatus = (sourceId) => {
-    if (pollingIntervalsRef.current[sourceId]) {
-      return; // Already polling
-    }
-
+    if (pollingIntervalsRef.current[sourceId]) return;
     const poll = async () => {
       try {
         const res = await fetch(`/api/sources/${sourceId}/status`);
-        if (!res.ok) {
-          // Source not found hoặc error -> stop polling
-          stopPolling(sourceId);
-          return;
-        }
+        if (!res.ok) { stopPolling(sourceId); return; }
         const data = await res.json();
-
-        // Update source với tất cả fields từ API: status, progress, substatus, capabilities, error
-        setSources((prev) =>
-          prev.map((s) =>
-            s.source_id === sourceId
-              ? {
-                ...s,
-                status: data.status,
-                progress: data.progress ?? s.progress, // Giữ progress cũ nếu không có
-                substatus: data.substatus,
-                capabilities: data.capabilities,
-                can_query: data.can_query === true,
-                video_stem: data.video_stem ?? s.video_stem,
-                error: data.error
-              }
-              : s
-          )
-        );
-
-        // Stop polling nếu ready hoặc error
-        // index_ready: tiếp tục poll để chờ ready (Memory Tree đang build)
+        setSources((prev) => prev.map((s) => s.source_id === sourceId ? { ...s, status: data.status, progress: data.progress ?? s.progress, substatus: data.substatus, capabilities: data.capabilities, can_query: data.can_query === true, video_stem: data.video_stem ?? s.video_stem, error: data.error } : s));
         if (data.status === "ready" || data.status === "error") {
           stopPolling(sourceId);
-          // Nếu ready, refresh sources từ backend để sync
-          if (data.status === "ready") {
-            setTimeout(() => fetchSourcesFromBackend(), 500);
-          }
+          if (data.status === "ready") setTimeout(() => fetchSourcesFromBackend(), 500);
         }
-        // index_ready: không stop polling, tiếp tục poll để chờ ready
-      } catch (err) {
-        console.error(`Error polling status for ${sourceId}:`, err);
-        stopPolling(sourceId);
-      }
+      } catch (err) { console.error(`Error polling status for ${sourceId}:`, err); stopPolling(sourceId); }
     };
-
-    // Poll ngay lập tức, sau đó mỗi 1.5s
     poll();
     pollingIntervalsRef.current[sourceId] = setInterval(poll, 1500);
   };
 
   const stopPolling = (sourceId) => {
-    if (pollingIntervalsRef.current[sourceId]) {
-      clearInterval(pollingIntervalsRef.current[sourceId]);
-      delete pollingIntervalsRef.current[sourceId];
-    }
+    if (pollingIntervalsRef.current[sourceId]) { clearInterval(pollingIntervalsRef.current[sourceId]); delete pollingIntervalsRef.current[sourceId]; }
   };
 
-  // Fetch sources từ backend (legacy sources đã ready)
   const fetchSourcesFromBackend = () => {
     fetch(`/api/list-indexed`)
       .then((res) => res.json())
       .then((data) => {
         const backendSources = data.sources || [];
-
-        // Merge với sources đang processing/index_ready
         setSources((prev) => {
-          const activeSources = prev.filter((s) =>
-            s.status === "processing" || s.status === "index_ready"
-          );
-          const readySources = backendSources.map((s) => ({
-            source_id: null, // Legacy source không có source_id
-            filename: formatFileName(s.video),
-            video_stem: s.video,
-            status: "ready",
-            progress: 1.0,
-            substatus: "memory_tree_ready",
-            capabilities: { chunk_query: true, memory_query: true },
-            can_query: true,
-            num_chunks: s.num_chunks,
-          }));
-
-          // Combine: active sources (processing/index_ready) + ready sources (loại bỏ duplicate)
+          const activeSources = prev.filter((s) => s.status === "processing" || s.status === "index_ready");
+          const readySources = backendSources.map((s) => ({ source_id: null, filename: formatFileName(s.video), video_stem: s.video, status: "ready", progress: 1.0, substatus: "memory_tree_ready", capabilities: { chunk_query: true, memory_query: true }, can_query: true, num_chunks: s.num_chunks }));
           const combined = [...activeSources];
-          readySources.forEach((rs) => {
-            const exists = combined.some(
-              (ps) => ps.video_stem === rs.video_stem || ps.filename === rs.filename
-            );
-            if (!exists) {
-              combined.push(rs);
-            }
-          });
-
+          readySources.forEach((rs) => { if (!combined.some((ps) => ps.video_stem === rs.video_stem || ps.filename === rs.filename)) combined.push(rs); });
           return combined;
         });
-
-        // Clean up selected sources nếu không còn tồn tại
-        setSelectedSources((prev) =>
-          prev.filter((p) => {
-            const exists = backendSources.some((s) => s.video === p);
-            return exists;
-          })
-        );
+        setSelectedSources((prev) => prev.filter((p) => backendSources.some((s) => s.video === p)));
       })
       .catch((err) => console.error("Error fetching sources:", err));
   };
 
-  useEffect(() => {
-    fetchSourcesFromBackend();
-  }, []);
-
-  // Notify parent component khi sources thay đổi
-  useEffect(() => {
-    if (onSourcesChange) {
-      onSourcesChange(sources);
-    }
-  }, [sources, onSourcesChange]);
-
-  // Cleanup polling intervals khi unmount
-  useEffect(() => {
-    return () => {
-      Object.values(pollingIntervalsRef.current).forEach((interval) =>
-        clearInterval(interval)
-      );
-    };
-  }, []);
+  useEffect(() => { fetchSourcesFromBackend(); }, []);
+  useEffect(() => { if (onSourcesChange) onSourcesChange(sources); }, [sources, onSourcesChange]);
 
   const handleAddFiles = async (e) => {
-    const files = e.target.files;
+    const files = Array.from(e.target.files || []);
     if (!files.length) return;
-
     setUploading(true);
-    const uploadedSources = [];
-
-    // Upload từng file (optimistic UI)
-    for (let file of files) {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      try {
-        const res = await fetch(`/api/upload`, {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          throw new Error(`Upload failed for ${file.name}`);
-        }
-
+    try {
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); console.error("Upload failed:", d); continue; }
         const data = await res.json();
-        const newSource = {
-          source_id: data.source_id,
-          filename: data.filename,
-          video_stem: data.video_stem,
-          status: data.status || "processing",
-          progress: 0.0,
-          can_query: data.can_query === true,
-        };
-
-        // Optimistic UI: Thêm vào list ngay
-        setSources((prev) => [...prev, newSource]);
-        uploadedSources.push(data.source_id);
-
-        // Bắt đầu polling status
-        pollSourceStatus(data.source_id);
-      } catch (err) {
-        console.error(`Error uploading ${file.name}:`, err);
-        // Thêm source với status error
-        setSources((prev) => [
-          ...prev,
-          {
-            source_id: null,
-            filename: file.name,
-            status: "error",
-            progress: 0.0,
-            error: err.message,
-          },
-        ]);
+        const newSource = { source_id: data.source_id, filename: formatFileName(file.name), video_stem: data.video_stem, status: data.status || "processing", progress: 0, can_query: false };
+        setSources((prev) => [newSource, ...prev]);
+        if (data.source_id) pollSourceStatus(data.source_id);
       }
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  };
 
-    setUploading(false);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+  const handleDeleteSource = async (src) => {
+    const key = src.video_stem || src.video;
+    if (!window.confirm(`Xóa "${src.filename}"?`)) return;
+    setMenuOpen(null);
+    setDeletingFile(key);
+    try {
+      const url = src.source_id ? `/api/sources/${src.source_id}` : `/api/sources/by-stem/${encodeURIComponent(key)}`;
+      const res = await fetch(url, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setSources((prev) => prev.filter((s) => (s.video_stem || s.video) !== key));
+      setSelectedSources((prev) => prev.filter((p) => p !== key));
+    } catch (err) { console.error("Delete source error:", err); alert("Không xóa được tài liệu, kiểm tra console!"); }
+    finally { setDeletingFile(null); }
+  };
+
+  const toggleSelect = (src) => {
+    const key = src.video_stem || src.video;
+    setSelectedSources((prev) => prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key]);
   };
 
   const handleSelectAll = (checked) => {
-    if (checked) {
-      // Chọn sources có thể query ngay (single source of truth: can_query)
-      const readySources = sources
-        .filter((s) => {
-          const isSelectable = s?.can_query === true;
-          return isSelectable && (s.video_stem || s.video);
-        })
-        .map((s) => s.video_stem || s.video);
-      setSelectedSources(readySources);
-    } else {
-      setSelectedSources([]);
-    }
+    if (checked) setSelectedSources(sources.filter((s) => s.can_query).map((s) => s.video_stem || s.video));
+    else setSelectedSources([]);
   };
 
-  const toggleSelect = (source) => {
-    const isSelectable = source?.can_query === true;
-    const key = source?.video_stem || source?.video;
-
-    // Cho phép select độc lập theo từng document
-    if (!isSelectable || !key) {
-      return;
-    }
-
-    setSelectedSources((prev) =>
-      prev.includes(key)
-        ? prev.filter((v) => v !== key)
-        : [...prev, key]
-    );
-  };
-
-  const handleDeleteSource = async (source) => {
-    const videoStem = source.video_stem || source.video;
-    if (!videoStem) return;
-
-    setDeletingFile(videoStem);
-    setMenuOpen(null);
-
-    // Stop polling nếu đang processing
-    if (source.source_id) {
-      stopPolling(source.source_id);
-    }
-
-    try {
-      await fetch(`/api/delete-source`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video: videoStem }),
-      });
-
-      // Remove từ local state
-      setSources((prev) => prev.filter((s) => s.video_stem !== videoStem));
-      setSelectedSources((prev) => prev.filter((v) => v !== videoStem));
-    } catch (err) {
-      console.error("Error deleting source:", err);
-    }
-
-    setDeletingFile(null);
-  };
-
-  // 👉 helper format tên file
-  const formatFileName = (videoPath) => {
-    if (!videoPath) return "";
-    const rawName = videoPath.split("/").pop().replace(/\.mp4$/, "");
-    const parts = rawName.split("_");
-
-    const timePart = parts[parts.length - 1];
-    let displayTime = "";
-    if (timePart && timePart.length === 6) {
-      displayTime = `${timePart.slice(0, 2)}:${timePart.slice(2, 4)}:${timePart.slice(4, 6)}`;
-    }
-
-    return parts.slice(0, -1).join("_") + (displayTime ? ` (${displayTime})` : "");
-  };
+  const readySources = sources.filter((s) => s.can_query);
+  const allSelected = readySources.length > 0 && readySources.every((s) => selectedSources.includes(s.video_stem || s.video));
 
   return (
-    <div className="p-4 flex flex-col h-full relative bg-white">
-      <h2 className="text-xl font-bold mb-6 text-gray-800">Tài liệu</h2>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#111827" }}>
+      {/* Header */}
+      <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #1e2d3d", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+        <div>
+          <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "#4b5563", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Tài liệu</div>
+          <div style={{ fontSize: "0.75rem", color: "#6b7280" }}>{sources.length} files · {selectedSources.length} đang chọn</div>
+        </div>
+        <button onClick={onClose} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#6b7280", padding: 4, display: "flex", borderRadius: 8 }} className="md:hidden" aria-label="Đóng">
+          <FiX size={18} />
+        </button>
+      </div>
 
-      {/* Select all */}
-      <label className="flex items-center space-x-3 mb-3 px-2">
-        <input
-          type="checkbox"
-          checked={
-            selectedSources.length === sources.length && sources.length > 0
-          }
-          onChange={(e) => handleSelectAll(e.target.checked)}
-          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
-        />
-        <span className="text-sm font-medium text-gray-700">Chọn tất cả</span>
-      </label>
+      {/* Controls */}
+      <div style={{ padding: "10px 12px 8px", flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+        {/* Select all */}
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "2px 4px" }}>
+          <input
+            type="checkbox"
+            checked={allSelected}
+            onChange={(e) => handleSelectAll(e.target.checked)}
+            style={{ width: 14, height: 14, accentColor: "#4f46e5", cursor: "pointer" }}
+          />
+          <span style={{ fontSize: "0.78rem", color: "#9ca3af", fontWeight: 500 }}>Chọn tất cả</span>
+        </label>
 
-      {/* Add button */}
-      <label
-        className={`px-4 py-2.5 rounded-lg mb-4 text-center cursor-pointer flex items-center justify-center space-x-2 font-medium transition-all duration-200 ${uploading
-          ? "bg-gray-400 cursor-not-allowed"
-          : "bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-700 hover:to-blue-600 shadow hover:shadow-md"
-          }`}
-      >
-        {uploading ? (
-          <>
-            <svg
-              className="animate-spin h-4 w-4 text-white"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-                fill="none"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8v8z"
-              />
-            </svg>
-            <span>Uploading...</span>
-          </>
-        ) : (
-          <span>+ Thêm</span>
-        )}
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleAddFiles}
-          disabled={uploading}
-        />
-
-      </label>
+        {/* Upload button */}
+        <label
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            background: uploading ? "#374151" : "linear-gradient(135deg, #2563eb, #4f46e5)",
+            color: uploading ? "#9ca3af" : "#fff",
+            borderRadius: 10, padding: "9px 14px",
+            cursor: uploading ? "not-allowed" : "pointer",
+            fontWeight: 600, fontSize: "0.82rem",
+            transition: "all 0.2s",
+            boxShadow: uploading ? "none" : "0 4px 12px rgba(37,99,235,0.25)",
+            userSelect: "none",
+          }}
+        >
+          {uploading ? (
+            <>
+              <span style={{ width: 14, height: 14, border: "2px solid #6b7280", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />
+              Đang tải lên…
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: "1rem" }}>+</span> Thêm tài liệu
+            </>
+          )}
+          <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleAddFiles} disabled={uploading} style={{ display: "none" }} />
+        </label>
+      </div>
 
       {/* Sources list */}
-      <div className="flex-1 overflow-auto space-y-2">
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 12px 12px", display: "flex", flexDirection: "column", gap: 6, scrollbarWidth: "thin", scrollbarColor: "#374151 transparent" }}>
+        {sources.length === 0 && (
+          <div style={{ textAlign: "center", padding: "40px 16px", color: "#6b7280" }}>
+            <div style={{ fontSize: "2rem", marginBottom: 10 }}>📂</div>
+            <p style={{ fontSize: "0.8rem" }}>Chưa có tài liệu nào.</p>
+            <p style={{ fontSize: "0.75rem", color: "#4b5563", marginTop: 4 }}>Nhấn "Thêm tài liệu" để bắt đầu.</p>
+          </div>
+        )}
+
         {sources.map((src, idx) => {
           const displayName = src.filename || formatFileName(src.video || "");
           const isDeleting = deletingFile === (src.video_stem || src.video);
           const isSelected = selectedSources.includes(src.video_stem || src.video);
-
-          // Get UI config từ status
           const isSelectable = src?.can_query === true;
           const statusConfig = getStatusConfig(src.status, src.substatus, isSelectable);
-          const showProgress = statusConfig.showProgress;
           const checkboxEnabled = statusConfig.checkboxEnabled && isSelectable && !isDeleting;
 
           return (
             <div
               key={src.source_id || src.video_stem || idx}
               onClick={() => checkboxEnabled && toggleSelect(src)}
-              className={`p-3 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col transition-all duration-200 ${isDeleting ? "opacity-50" : "card-hover"
-                } ${isSelected ? "ring-2 ring-blue-500 border-blue-500 bg-blue-50" : ""
-                } ${statusConfig.borderColor} ${statusConfig.bgColor} ${checkboxEnabled ? "cursor-pointer" : "cursor-default"
-                }`}
+              style={{
+                background: isSelected ? "#1e1b4b" : "#1f2937",
+                border: `1.5px solid ${isSelected ? "#4f46e5" : statusConfig.borderColor}`,
+                borderRadius: 12,
+                padding: "10px 12px",
+                cursor: checkboxEnabled ? "pointer" : "default",
+                transition: "all 0.15s",
+                opacity: isDeleting ? 0.5 : 1,
+                boxShadow: isSelected ? "0 0 0 2px rgba(79,70,229,0.2)" : "none",
+              }}
             >
-              <div className="flex justify-between items-start">
-                <div className="flex items-start space-x-3 flex-1 min-w-0">
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      toggleSelect(src);
-                    }}
-                    disabled={!checkboxEnabled}
-                    className="mt-1 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                  />
-                  <div className="flex-1 min-w-0">
-                    {/* Filename */}
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="text-sm font-semibold text-gray-800 truncate"
-                        title={displayName}
-                      >
-                        {displayName}
-                      </div>
-                      {/* Error icon */}
-                      {statusConfig.showErrorIcon && (
-                        <FiAlertCircle className="text-red-500 flex-shrink-0" size={16} />
-                      )}
-                    </div>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={(e) => { e.stopPropagation(); toggleSelect(src); }}
+                  disabled={!checkboxEnabled}
+                  style={{ marginTop: 2, width: 14, height: 14, accentColor: "#4f46e5", cursor: checkboxEnabled ? "pointer" : "not-allowed", flexShrink: 0 }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#e5e7eb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }} title={displayName}>
+                      {displayName}
+                    </span>
+                    {statusConfig.showErrorIcon && <FiAlertCircle color="#f87171" size={13} style={{ flexShrink: 0 }} />}
+                  </div>
 
-                    {/* Status text và badge */}
-                    <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-gray-600 font-medium">
-                        {statusConfig.mainText}
-                      </span>
-                      {statusConfig.badge && (
-                        <span className="text-xs px-2.5 py-0.5 bg-gradient-to-r from-blue-50 to-blue-100 text-blue-700 rounded-full font-medium">
-                          {statusConfig.badge}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Sub text (cho index_ready) */}
-                    {statusConfig.subText && (
-                      <div className="text-xs text-gray-500 mt-1">
-                        {statusConfig.subText}
-                      </div>
-                    )}
-
-                    {/* Progress bar - chỉ hiển thị khi showProgress = true và status != ready */}
-                    {showProgress && (
-                      <div className="mt-2">
-                        <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
-                          <div
-                            className="bg-gradient-to-r from-blue-500 to-blue-600 h-1.5 rounded-full transition-all duration-500 ease-out relative"
-                            style={{ width: `${(src.progress || 0) * 100}%` }}
-                          >
-                            <div className="absolute inset-0 bg-white/30 animate-pulse"></div>
-                          </div>
-                        </div>
-                        <div className="text-xs text-gray-600 font-medium mt-1">
-                          {Math.round((src.progress || 0) * 100)}%
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Ready status với num_chunks */}
-                    {src.status === "ready" && src.num_chunks && (
-                      <div className="text-xs text-gray-500 mt-1 font-medium">
-                        📄 {src.num_chunks} chunks
-                      </div>
-                    )}
-
-                    {/* Error message */}
-                    {src.status === "error" && src.error && (
-                      <div className="text-xs text-red-600 mt-1 bg-red-50 p-2 rounded">
-                        {src.error}
-                      </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
+                    <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>{statusConfig.mainText}</span>
+                    {statusConfig.badge && (
+                      <span style={{ fontSize: "0.65rem", padding: "1px 6px", borderRadius: 99, fontWeight: 700, ...statusConfig.badgeStyle }}>{statusConfig.badge}</span>
                     )}
                   </div>
+
+                  {statusConfig.subText && (
+                    <div style={{ fontSize: "0.7rem", color: "#6b7280", marginTop: 2 }}>{statusConfig.subText}</div>
+                  )}
+
+                  {statusConfig.showProgress && (
+                    <div style={{ marginTop: 7 }}>
+                      <div style={{ background: "#374151", borderRadius: 99, height: 4, overflow: "hidden" }}>
+                        <div style={{ width: `${(src.progress || 0) * 100}%`, height: "100%", background: "linear-gradient(90deg, #2563eb, #4f46e5)", borderRadius: 99, transition: "width 0.5s ease-out" }} />
+                      </div>
+                      <div style={{ fontSize: "0.67rem", color: "#6b7280", marginTop: 3 }}>{Math.round((src.progress || 0) * 100)}%</div>
+                    </div>
+                  )}
+
+                  {src.status === "ready" && src.num_chunks && (
+                    <div style={{ fontSize: "0.7rem", color: "#6b7280", marginTop: 3 }}>📄 {src.num_chunks} chunks</div>
+                  )}
+
+                  {src.status === "error" && src.error && (
+                    <div style={{ fontSize: "0.7rem", color: "#f87171", marginTop: 4, background: "#1f0000", padding: "5px 8px", borderRadius: 6 }}>{src.error}</div>
+                  )}
                 </div>
 
                 {/* Menu */}
-                <div className="relative ml-2" onClick={(e) => e.stopPropagation()}>
+                <div style={{ position: "relative", flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                   {isDeleting ? (
-                    <svg
-                      className="animate-spin h-5 w-5 text-gray-400"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                        fill="none"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8v8z"
-                      />
-                    </svg>
+                    <span style={{ width: 16, height: 16, border: "2px solid #6b7280", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />
                   ) : (
                     <>
                       <button
-                        onClick={() =>
-                          setMenuOpen(menuOpen === idx ? null : idx)
-                        }
-                        className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors duration-150"
+                        onClick={() => setMenuOpen(menuOpen === idx ? null : idx)}
+                        style={{ background: "transparent", border: "none", cursor: "pointer", padding: 4, color: "#6b7280", borderRadius: 6, display: "flex" }}
                       >
-                        <FiMoreVertical className="text-gray-600" />
+                        <FiMoreVertical size={15} />
                       </button>
-
                       {menuOpen === idx && (
-                        <div className="absolute right-0 top-8 bg-white border border-gray-200 rounded-lg shadow-lg text-sm z-10 min-w-[120px]">
+                        <div style={{ position: "absolute", right: 0, top: 26, background: "#1f2937", border: "1px solid #374151", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", zIndex: 20, minWidth: 110 }}>
                           <button
                             onClick={() => handleDeleteSource(src)}
-                            className="block px-4 py-2 hover:bg-red-50 text-red-600 w-full text-left rounded-lg transition-colors duration-150 font-medium"
+                            style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", background: "transparent", border: "none", color: "#f87171", fontSize: "0.82rem", cursor: "pointer", fontWeight: 600, borderRadius: 10 }}
                           >
-                            Xóa
+                            🗑 Xóa
                           </button>
                         </div>
                       )}
@@ -569,6 +326,12 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
           );
         })}
       </div>
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .md\\:hidden { display: flex; }
+        @media (min-width: 768px) { .md\\:hidden { display: none !important; } }
+      `}</style>
     </div>
   );
 }

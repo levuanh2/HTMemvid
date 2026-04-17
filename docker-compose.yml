@@ -6,10 +6,10 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - memvid_videos:/app/videos
-      - memvid_index:/app/index
-      - memvid_memory:/app/memory
-      - memvid_input_docs:/app/input_docs
+      - ./data/videos:/app/videos
+      - ./data/index:/app/index
+      - ./data/memory:/app/memory
+      - ./data/input_docs:/app/input_docs
     environment:
       DATA_DIR: /app
       OLLAMA_HOST: http://host.docker.internal:11434
@@ -34,8 +34,3 @@ services:
       - backend
     restart: always
 
-volumes:
-  memvid_videos:
-  memvid_index:
-  memvid_memory:
-  memvid_input_docs:

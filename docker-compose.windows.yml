@@ -1,0 +1,16 @@
+services:
+  backend:
+    # Windows Docker Desktop đôi khi lỗi bind-mount ổ E: (WSL2 file sharing).
+    # Dùng named volumes để chạy local ổn định.
+    volumes:
+      - memvid_videos:/app/videos
+      - memvid_index:/app/index
+      - memvid_memory:/app/memory
+      - memvid_input_docs:/app/input_docs
+
+volumes:
+  memvid_videos:
+  memvid_index:
+  memvid_memory:
+  memvid_input_docs:
+

@@ -29,4 +29,4 @@ EXPOSE 5000
 
 ENV DATA_DIR=/app
 
-CMD ["sh", "-c", "gunicorn -w ${WEB_CONCURRENCY:-1} -b 0.0.0.0:${PORT:-5000} --timeout ${GUNICORN_TIMEOUT:-300} main:app"]
+CMD ["sh", "-c", "gunicorn -w ${WEB_CONCURRENCY:-1} -b 0.0.0.0:${PORT:-5000} --timeout ${GUNICORN_TIMEOUT:-300} --pythonpath BE main:app"]

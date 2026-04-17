@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
+import { apiFetch } from "../../utils/api";
 
 // ── Icons ──────────────────────────────────────────────
 const SendIcon = () => (
@@ -228,7 +229,7 @@ export default function ChatArea({ selectedSources, sources = [], onOpenLeft, on
       // Kiểm tra nếu đã bị cancel
       if (cancelledRef.current) throw new Error("CANCELLED");
       if (Date.now() - start > timeoutMs) throw new Error("⚠️ Quá thời gian chờ phản hồi (timeout). Vui lòng thử lại.");
-      const res = await fetch(`/api/query-status/${encodeURIComponent(jobId)}`, {
+      const res = await apiFetch(`/api/query-status/${encodeURIComponent(jobId)}`, {
         method: "GET",
         headers: { "Content-Type": "application/json" },
         signal: abortControllerRef.current?.signal,
@@ -269,7 +270,7 @@ export default function ChatArea({ selectedSources, sources = [], onOpenLeft, on
       const payloadSources = Array.isArray(selectedSources)
         ? selectedSources.map((s) => (typeof s === "string" ? s : s.name || s.id || s))
         : undefined;
-      const res = await fetch(`/api/query`, {
+      const res = await apiFetch(`/api/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ q: userMsg.content, sources: payloadSources?.length ? payloadSources : null }),

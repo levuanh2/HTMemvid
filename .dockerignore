@@ -1,7 +1,4 @@
 **/node_modules
-**/.git
-**/.github
-**/.vscode
 **/__pycache__
 **/*.pyc
 **/*.pyo
@@ -10,6 +7,8 @@
 **/.mypy_cache
 **/.ruff_cache
 **/.DS_Store
+**/.vscode
+**/.idea
 
 # Frontend build output
 FE/dist
@@ -34,9 +33,6 @@ node_modules/
 *.pt
 *.bin
 *.gguf
-
-.git
-.gitignore
 
 # Legacy / existing generated locations in this repo
 BE/videos

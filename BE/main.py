@@ -41,11 +41,21 @@ from memory_tree import (
     _normalize_video_stem,
 )
 app = Flask(__name__)
+
+# CORS:
+# - Mặc định giữ hành vi hiện tại (cho phép tất cả origins) để không phá flow/FE.
+# - Khi deploy (Railway + Vercel) nên set CORS_ORIGINS để allowlist domain Vercel.
+_cors_origins_raw = (os.environ.get("CORS_ORIGINS") or "*").strip()
+if _cors_origins_raw == "*":
+    _cors_origins: str | list[str] = "*"
+else:
+    _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+
 CORS(
     app,
-    resources={r"/*": {"origins": "*"}},
+    resources={r"/*": {"origins": _cors_origins}},
     methods=["GET", "POST", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type"]
+    allow_headers=["Content-Type"],
 )
 
 

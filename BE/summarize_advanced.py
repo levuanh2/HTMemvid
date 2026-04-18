@@ -10,8 +10,12 @@ Module tóm tắt tài liệu nâng cao theo các công thức:
 import re
 import json
 from typing import List, Dict, Tuple, Optional
-from ollama_utils import run_ollama_chat, SLM_MODEL_SUMMARY
+import os
+from ai_provider import ask_ai
 from ingest_utils import split_text
+
+# Chỉ dùng cho local Ollama (Gemini sẽ bỏ qua model).
+SLM_MODEL_SUMMARY = os.environ.get("SLM_MODEL_SUMMARY", "gemma2:2b")
 
 
 def preprocess_data(text: str) -> List[str]:
@@ -50,7 +54,7 @@ def extract_entities(text: str, model: str = None) -> List[str]:
     
     user_prompt = f"Văn bản:\n{text}\n\nDanh sách thực thể quan trọng:"
     
-    response = run_ollama_chat(system_prompt, user_prompt, model=model)
+    response = ask_ai(user_prompt, system_prompt=system_prompt, model=model)
     
     # Parse response thành list
     entities = []
@@ -88,7 +92,7 @@ def summarize_with_entity_chain(text: str, entities: List[str], model: str = Non
         "Tạo bản tóm tắt dựa trên các thực thể trên:"
     )
     
-    return run_ollama_chat(system_prompt, user_prompt, model=model)
+    return ask_ai(user_prompt, system_prompt=system_prompt, model=model)
 
 
 def chain_of_density(text: str, initial_summary: str = "", iterations: int = 5, model: str = None) -> str:
@@ -113,7 +117,7 @@ def chain_of_density(text: str, initial_summary: str = "", iterations: int = 5, 
             "Thực thể/quan niệm quan trọng chưa có trong tóm tắt:"
         )
         
-        new_entities = run_ollama_chat(system_prompt, user_prompt, model=model)
+        new_entities = ask_ai(user_prompt, system_prompt=system_prompt, model=model)
         new_entities_list = [e.strip() for e in new_entities.split('\n') if e.strip()][:3]
         
         if not new_entities_list:
@@ -134,7 +138,7 @@ def chain_of_density(text: str, initial_summary: str = "", iterations: int = 5, 
             "Bản tóm tắt mới (cùng độ dài, tích hợp thực thể mới):"
         )
         
-        current_summary = run_ollama_chat(system_prompt2, user_prompt2, model=model)
+        current_summary = ask_ai(user_prompt2, system_prompt=system_prompt2, model=model)
     
     return current_summary
 
@@ -163,7 +167,7 @@ def divide_and_conquer_summarize(text: str, model: str = None, pre_chunks: Optio
             "Bạn là một chuyên gia tóm tắt.\n"
             "Nhiệm vụ: Tóm tắt phần văn bản này một cách súc tích, tập trung vào ý chính."
         )
-        summary = run_ollama_chat(system_prompt, f"Phần văn bản:\n{section}", model=model)
+        summary = ask_ai(f"Phần văn bản:\n{section}", system_prompt=system_prompt, model=model)
         section_summaries.append(summary)
     
     # Tổng hợp
@@ -178,7 +182,7 @@ def divide_and_conquer_summarize(text: str, model: str = None, pre_chunks: Optio
         "Loại bỏ sự trùng lặp, kết nối các ý tưởng một cách tự nhiên."
     )
     
-    final_summary = run_ollama_chat(system_prompt, f"Các phần tóm tắt:\n{combined}", model=model)
+    final_summary = ask_ai(f"Các phần tóm tắt:\n{combined}", system_prompt=system_prompt, model=model)
     return final_summary
 
 
@@ -206,7 +210,7 @@ def structured_extraction(text: str, summary: str, model: str = None) -> Dict:
         "Chuyển đổi sang JSON có cấu trúc:"
     )
     
-    response = run_ollama_chat(system_prompt, user_prompt, model=model)
+    response = ask_ai(user_prompt, system_prompt=system_prompt, model=model)
     
     # Parse JSON từ response
     try:
@@ -259,7 +263,7 @@ def fact_check(source_text: str, summary: str, model: str = None) -> Dict:
         "Kiểm tra tính nhất quán:"
     )
     
-    response = run_ollama_chat(system_prompt, user_prompt, model=model)
+    response = ask_ai(user_prompt, system_prompt=system_prompt, model=model)
     
     try:
         json_match = re.search(r'\{.*\}', response, re.DOTALL)
@@ -315,7 +319,7 @@ def advanced_summarize(
     else:
         # Tóm tắt đơn giản
         system_prompt = "Bạn là chuyên gia tóm tắt. Tóm tắt văn bản một cách súc tích, tập trung vào ý chính."
-        base_summary = run_ollama_chat(system_prompt, f"Văn bản:\n{processed_text[:3000]}", model=model)
+        base_summary = ask_ai(f"Văn bản:\n{processed_text[:3000]}", system_prompt=system_prompt, model=model)
     
     # Bước 2: Entity Chain Planning (nếu bật)
     final_summary = base_summary

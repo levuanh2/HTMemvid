@@ -14,6 +14,18 @@ SLM_MODEL_SUMMARY = os.environ.get("SLM_MODEL_SUMMARY", "gemma2:2b")
 SLM_MODEL = SLM_MODEL_CHAT
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+
+
+def ask_ollama(prompt: str, model: str = None) -> str:
+    """
+    Wrapper đơn giản: chỉ gửi 1 user prompt.
+    Dùng để ai_provider có thể alias ask_ollama -> ask_ai khi chạy local.
+    """
+    if os.environ.get("SKIP_MODEL_LOAD") == "1":
+        return "[CI MODE] Skipped LLM response"
+
+    messages = [{"role": "user", "content": prompt}]
+    return _safe_chat(messages, model=model)
 def _safe_chat(messages: list[dict], model: str = None) -> str:
     """
     Hàm gọi Ollama an toàn (low-level).

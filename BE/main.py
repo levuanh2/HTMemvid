@@ -29,7 +29,11 @@ from faiss_utils import (
     rebuild_chunk_index,
     MODEL_NAME,
 )
-from ollama_utils import summarize_whole_document, summarize_results, SLM_MODEL, SLM_MODEL_SUMMARY
+from ai_provider import ask_ai, summarize_whole_document, summarize_results
+
+# Chỉ dùng cho local Ollama (Gemini sẽ bỏ qua model).
+SLM_MODEL = os.environ.get("SLM_MODEL_CHAT", os.environ.get("SLM_MODEL", "gemma4:e4b"))
+SLM_MODEL_SUMMARY = os.environ.get("SLM_MODEL_SUMMARY", "gemma2:2b")
 from mindmap_generation_worker import run_mindmap_generation
 from chunk_processor import process_and_store_chunks
 from summarize_advanced import advanced_summarize

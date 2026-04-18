@@ -1,6 +1,7 @@
 faiss-cpu
 flask
 flask-cors
+google-generativeai
 gunicorn
 langchain
 langchain-experimental

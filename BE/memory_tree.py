@@ -11,8 +11,12 @@ import faiss
 import numpy as np
 from embedding_model import get_embedding_model
 
-from ollama_utils import run_ollama_chat, SLM_MODEL
+import os
+from ai_provider import ask_ai
 from faiss_utils import MODEL_NAME
+
+# Chỉ dùng cho local Ollama (Gemini sẽ bỏ qua model).
+SLM_MODEL = os.environ.get("SLM_MODEL_CHAT", os.environ.get("SLM_MODEL", "gemma4:e4b"))
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -129,7 +133,7 @@ def _classify_intent_type(text: str, title: str = "") -> str:
     user_prompt = f"Tiêu đề: {title}\n\nNội dung: {combined[:500]}\n\nLoại intent:"
     
     try:
-        result = run_ollama_chat(system_prompt, user_prompt, model=SLM_MODEL).strip().lower()
+        result = ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL).strip().lower()
         # Validate kết quả
         valid = {"definition", "procedure", "argument", "comparison", "reference"}
         for v in valid:
@@ -158,7 +162,7 @@ def _llm_summarize_for_memory(text: str, level: str) -> str:
         "- Ưu tiên các mục tiêu, khái niệm, giải pháp chính.\n"
     )
     user_prompt = f"Văn bản nguồn:\n{text[:6000]}\n\nHãy tóm tắt ở cấp {level}:"
-    return run_ollama_chat(system_prompt, user_prompt, model=SLM_MODEL)
+    return ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL)
 
 
 def _load_index_meta() -> Dict[str, Any]:
@@ -623,7 +627,7 @@ def _classify_query_type(query: str) -> str:
     user_prompt = f"Câu hỏi: {query}\n\nLoại query:"
 
     try:
-        result = run_ollama_chat(system_prompt, user_prompt, model=SLM_MODEL).strip()
+        result = ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL).strip()
         # Parse JSON
         import re
         match = re.search(r'\{[^}]*"query_type\"[^}]*\}', result, re.IGNORECASE)
@@ -771,7 +775,7 @@ def generate_notebooklm_style_answer(question: str, human_context: str, intent_t
         "Hãy trả lời trực tiếp vào câu hỏi, viết như đang giải thích lại cho người khác một cách tự nhiên, mạch lạc."
     )
     
-    return run_ollama_chat(system_prompt, user_prompt, model=SLM_MODEL)
+    return ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL)
 
 
 def query_with_memory_tree(query: str, selected_sources: Optional[List[str]] = None, top_k: int = 5) -> Optional[Dict[str, Any]]:
@@ -1014,7 +1018,7 @@ def _generate_narrative_glue(summaries: List[str], snippets: List[str]) -> str:
     )
     
     try:
-        glue = run_ollama_chat(system_prompt, user_prompt, model=SLM_MODEL).strip()
+        glue = ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL).strip()
         # Giới hạn độ dài, loại bỏ dấu xuống dòng thừa
         glue = " ".join(glue.split())[:200]
         return glue

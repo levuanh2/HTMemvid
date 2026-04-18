@@ -13,8 +13,12 @@ Mỗi bước đều vận hành hoàn toàn bằng JSON để dễ parse/verify
 import re
 import json
 import ast
+import os
 from collections import deque
-from ollama_utils import run_ollama_chat, SLM_MODEL_MINDMAP
+from ai_provider import ask_ai
+
+# Chỉ dùng cho local Ollama (Gemini sẽ bỏ qua model).
+SLM_MODEL_MINDMAP = os.environ.get("SLM_MODEL_MINDMAP", "gemma2:2b")
 
 
 MAX_SEGMENTS_FOR_MINDMAP = 24
@@ -347,7 +351,7 @@ def _generate_coreference_graph(sentences: list[dict], model: str | None) -> dic
         "Hãy dựng đồ thị tham chiếu đồng ngữ theo hướng dẫn CMGN.",
     ])
 
-    raw = run_ollama_chat(system_prompt, user_prompt, model=model or SLM_MODEL_MINDMAP)
+    raw = ask_ai(user_prompt, system_prompt=system_prompt, model=model or SLM_MODEL_MINDMAP)
     graph_obj = extract_json_tree(raw)
     return _sanitize_coreference_graph(graph_obj, sentences)
 
@@ -428,7 +432,7 @@ def _generate_mindmap_from_coreference_graph(
         "Hãy xuất mindmap hoàn chỉnh, cân đối 4-7 nhánh cấp 1 nếu có đủ nội dung.",
     ])
 
-    raw = run_ollama_chat(system_prompt, user_prompt, model=model or SLM_MODEL_MINDMAP)
+    raw = ask_ai(user_prompt, system_prompt=system_prompt, model=model or SLM_MODEL_MINDMAP)
     tree_obj = extract_json_tree(raw)
     sanitized_tree = _sanitize_tree(tree_obj, noise_terms)
     if not sanitized_tree.get("children"):
@@ -505,7 +509,7 @@ def _detect_noise_terms(content_segments: list[str], model: str | None) -> set[s
     ])
 
     try:
-        raw = run_ollama_chat(system_prompt, user_prompt, model=model or SLM_MODEL_MINDMAP)
+        raw = ask_ai(user_prompt, system_prompt=system_prompt, model=model or SLM_MODEL_MINDMAP)
         parsed = extract_json_tree(raw)
     except Exception:
         parsed = None
@@ -672,7 +676,7 @@ def _generate_root_topic(content_segments: list[str], noise_terms: set[str], mod
         "Không dùng các cụm liên quan đến chấm điểm, giảng viên, hay metadata hành chính." ,
     ])
 
-    raw = run_ollama_chat(system_prompt, user_prompt, model=model or SLM_MODEL_MINDMAP)
+    raw = ask_ai(user_prompt, system_prompt=system_prompt, model=model or SLM_MODEL_MINDMAP)
     try:
         root_obj = extract_json_tree(raw)
     except Exception as exc:
@@ -764,7 +768,7 @@ def _expand_leaf_node(
             )
             user_prompt_current += "\n\n⚠️ Bổ sung: JSON lần trước lỗi, hãy trả về đúng schema {\"expand\": bool, \"children\": [...]}"
 
-        raw = run_ollama_chat(system_prompt_current, user_prompt_current, model=model or SLM_MODEL_MINDMAP)
+        raw = ask_ai(user_prompt_current, system_prompt=system_prompt_current, model=model or SLM_MODEL_MINDMAP)
         try:
             result = extract_json_tree(raw)
             break
@@ -936,7 +940,7 @@ def _expand_tree(tree: dict, bullet_block: str, model: str | None, noise_terms: 
 
 
     try:
-        raw = run_ollama_chat(system_prompt, user_prompt, model=model or SLM_MODEL_MINDMAP)
+        raw = ask_ai(user_prompt, system_prompt=system_prompt, model=model or SLM_MODEL_MINDMAP)
         expanded_obj = extract_json_tree(raw)
         return _sanitize_tree(expanded_obj, noise_terms)
     except Exception as e:
@@ -979,7 +983,7 @@ def _build_mindmap_single_shot(content_segments: list[str], noise_terms: set[str
                 + "). Chỉ trả về block ```json ...``` chứa mindmap hợp lệ, không thêm text khác."
             )
 
-        raw = run_ollama_chat(system_prompt_final, base_user_prompt, model=model or SLM_MODEL_MINDMAP)
+        raw = ask_ai(base_user_prompt, system_prompt=system_prompt_final, model=model or SLM_MODEL_MINDMAP)
         try:
             tree_obj = extract_json_tree(raw)
             break
@@ -1119,7 +1123,7 @@ def _run_critic(system_prompt: str, user_prompt: str, noise_terms: set[str] | No
             )
             user_prompt_current += "\n\n⚠️ JSON lần trước lỗi, hãy trả về đúng block ```json``` duy nhất cho mindmap (tiếng Việt 100%)."
 
-        raw = run_ollama_chat(system_prompt_current, user_prompt_current, model=model or SLM_MODEL_MINDMAP)
+        raw = ask_ai(user_prompt_current, system_prompt=system_prompt_current, model=model or SLM_MODEL_MINDMAP)
         try:
             candidate = extract_json_tree(raw)
             return _sanitize_tree(candidate, noise_terms)
@@ -1299,7 +1303,7 @@ def get_main_branches(chunks: list[str], model: str = None) -> list[str]:
     )
     user_prompt = "Liệt kê 3-5 mục chính (ngắn gọn 2-4 từ) từ nội dung:\n\n" + "\n\n".join(chunks[:6])
 
-    raw = run_ollama_chat(system_prompt, user_prompt, model=model or SLM_MODEL_MINDMAP)
+    raw = ask_ai(user_prompt, system_prompt=system_prompt, model=model or SLM_MODEL_MINDMAP)
 
     m = re.search(r"(\[.*?\])", raw or "", flags=re.S)
     try:

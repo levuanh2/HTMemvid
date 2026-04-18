@@ -16,8 +16,12 @@ from typing import Callable, Optional
 import numpy as np
 
 from embedding_model import get_embedding_model
-from ollama_utils import SLM_MODEL_MINDMAP, run_ollama_chat
+import os
+from ai_provider import ask_ai
 from mindmap_utils import generate_mindmap_flat, generate_mindmap_cmgn, get_main_branches
+
+# Chỉ dùng cho local Ollama (Gemini sẽ bỏ qua model).
+SLM_MODEL_MINDMAP = os.environ.get("SLM_MODEL_MINDMAP", "gemma2:2b")
 
 
 STRUCTURE_LABELS: list[tuple[str, str]] = [
@@ -264,7 +268,7 @@ def _build_multilevel_mindmap(
         "[\"Topic 1\", \"Topic 2\", ...]"
     )
     user_topics = "Nội dung:\n\n" + "\n\n---\n\n".join(sample_for_topics)
-    topics_raw = run_ollama_chat(sys_topics, user_topics, model=SLM_MODEL_MINDMAP)
+    topics_raw = ask_ai(user_topics, system_prompt=sys_topics, model=SLM_MODEL_MINDMAP)
     topics_0 = _dedupe_short(_parse_json_list(topics_raw), max_items=10)
     topics_0 = [t for t in topics_0 if not _is_vague(t)]
     topics = _semantic_dedupe(topics_0, model=model, threshold=0.85, max_items=8)
@@ -339,7 +343,7 @@ def _build_multilevel_mindmap(
             "Chỉ trả về JSON array of strings."
         )
         user_sub = "Nội dung:\n\n" + "\n\n---\n\n".join(group_sample) if group_sample else "Nội dung: (không có mẫu rõ ràng)"
-        sub_raw = run_ollama_chat(sys_sub, user_sub, model=SLM_MODEL_MINDMAP)
+        sub_raw = ask_ai(user_sub, system_prompt=sys_sub, model=SLM_MODEL_MINDMAP)
         subs0 = _dedupe_short(_parse_json_list(sub_raw), max_items=6)
         subs0 = [s for s in subs0 if _word_count(s) >= 3 and not _is_vague(s)]
         subs = _semantic_dedupe(subs0, model=model, threshold=0.90, max_items=5)
@@ -371,7 +375,7 @@ def _build_multilevel_mindmap(
                 "Chỉ trả về JSON array of strings."
             )
             user_fact = "Nội dung:\n\n" + "\n\n---\n\n".join(group_sample[:6])
-            facts_raw = run_ollama_chat(sys_fact, user_fact, model=SLM_MODEL_MINDMAP)
+            facts_raw = ask_ai(user_fact, system_prompt=sys_fact, model=SLM_MODEL_MINDMAP)
             facts0 = _dedupe_short(_parse_json_list(facts_raw), max_items=3)
             facts0 = [f for f in facts0 if _word_count(f) >= 3 and not _is_vague(f)]
             facts = _semantic_dedupe(facts0, model=model, threshold=0.90, max_items=3)

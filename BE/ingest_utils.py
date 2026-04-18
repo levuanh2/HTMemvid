@@ -12,7 +12,7 @@ tesseract_path = shutil.which('tesseract') or r"C:\Program Files\Tesseract-OCR\t
 if tesseract_path and os.path.exists(tesseract_path):
     pytesseract.pytesseract.tesseract_cmd = tesseract_path
 else:
-    print("⚠️ Tesseract not found - OCR will fail for images.")
+    print("[WARN] Tesseract not found - OCR will fail for images.")
     
 FRAME_DIR = "qr_frames"
 os.makedirs(FRAME_DIR, exist_ok=True)

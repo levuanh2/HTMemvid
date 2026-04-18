@@ -41,7 +41,7 @@ def ask_ai(prompt: str, system_prompt: str | None = None, model: str | None = No
             raise RuntimeError("Missing GEMINI_API_KEY (required when OLLAMA_HOST is not set).")
 
         genai.configure(api_key=api_key)
-        _gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+        _gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 
     if system_prompt:
         full_prompt = f"SYSTEM:\n{system_prompt}\n\nUSER:\n{prompt}"

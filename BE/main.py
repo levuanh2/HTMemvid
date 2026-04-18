@@ -46,6 +46,11 @@ from memory_tree import (
 )
 app = Flask(__name__)
 
+# Debug log AI mode (không in ra API key thật)
+print("=== AI MODE ===")
+print("OLLAMA_HOST:", os.getenv("OLLAMA_HOST"))
+print("GEMINI_API_KEY:", "SET" if os.getenv("GEMINI_API_KEY") else "MISSING")
+
 # CORS:
 # - Mặc định giữ hành vi hiện tại (cho phép tất cả origins) để không phá flow/FE.
 # - Khi deploy (Railway + Vercel) nên set CORS_ORIGINS để allowlist domain Vercel.

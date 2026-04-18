@@ -5,10 +5,12 @@ USE_OLLAMA = os.getenv("OLLAMA_HOST") is not None
 
 if USE_OLLAMA:
     # Local/offline
-    from ollama_utils import ask_ollama as _ask_ollama  # noqa: F401
-    from ollama_utils import run_ollama_chat as _run_ollama_chat  # noqa: F401
-    from ollama_utils import summarize_whole_document as _summarize_whole_document  # noqa: F401
-    from ollama_utils import summarize_results as _summarize_results  # noqa: F401
+    from ollama_utils import ask_ollama as _ask_ollama
+    from ollama_utils import run_ollama_chat as _run_ollama_chat
+    from ollama_utils import summarize_whole_document as _summarize_whole_document
+    from ollama_utils import summarize_results as _summarize_results
+else:
+    _gemini_model = None
 
 
 def ask_ai(prompt: str, system_prompt: str | None = None, model: str | None = None) -> str:
@@ -24,21 +26,29 @@ def ask_ai(prompt: str, system_prompt: str | None = None, model: str | None = No
             return _run_ollama_chat(system_prompt, prompt, model=model)
         return _ask_ollama(prompt, model=model)
 
-    import google.generativeai as genai
+    global _gemini_model
+    if _gemini_model is None:
+        try:
+            import google.generativeai as genai
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Gemini mode requires package 'google-generativeai'. "
+                "Install it or set OLLAMA_HOST for local mode."
+            ) from exc
 
-    api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
-    if not api_key:
-        raise RuntimeError("Missing GEMINI_API_KEY (required when OLLAMA_HOST is not set).")
+        api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
+        if not api_key:
+            raise RuntimeError("Missing GEMINI_API_KEY (required when OLLAMA_HOST is not set).")
 
-    genai.configure(api_key=api_key)
-    gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+        genai.configure(api_key=api_key)
+        _gemini_model = genai.GenerativeModel("gemini-1.5-flash")
 
     if system_prompt:
         full_prompt = f"SYSTEM:\n{system_prompt}\n\nUSER:\n{prompt}"
     else:
         full_prompt = prompt
 
-    response = gemini_model.generate_content(full_prompt)
+    response = _gemini_model.generate_content(full_prompt)
     return (getattr(response, "text", None) or "").strip()
 
 

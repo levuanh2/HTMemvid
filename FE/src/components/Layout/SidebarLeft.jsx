@@ -78,7 +78,7 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
     if (pollingIntervalsRef.current[sourceId]) return;
     const poll = async () => {
       try {
-        const res = await apiFetch(`/api/sources/${sourceId}/status`);
+        const res = await apiFetch(`/sources/${sourceId}/status`);
         if (!res.ok) { stopPolling(sourceId); return; }
         const data = await res.json();
         setSources((prev) => prev.map((s) => s.source_id === sourceId ? { ...s, status: data.status, progress: data.progress ?? s.progress, substatus: data.substatus, capabilities: data.capabilities, can_query: data.can_query === true, video_stem: data.video_stem ?? s.video_stem, error: data.error } : s));
@@ -97,7 +97,7 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
   };
 
   const fetchSourcesFromBackend = () => {
-    apiFetch(`/api/list-indexed`)
+    apiFetch(`/list-indexed`)
       .then((res) => res.json())
       .then((data) => {
         const backendSources = data.sources || [];
@@ -124,7 +124,7 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
       for (const file of files) {
         const fd = new FormData();
         fd.append("file", file);
-        const res = await apiFetch("/api/upload", { method: "POST", body: fd });
+        const res = await apiFetch("/upload", { method: "POST", body: fd });
         if (!res.ok) { const d = await res.json().catch(() => ({})); console.error("Upload failed:", d); continue; }
         const data = await res.json();
         const newSource = { source_id: data.source_id, filename: formatFileName(file.name), video_stem: data.video_stem, status: data.status || "processing", progress: 0, can_query: false };
@@ -143,7 +143,7 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
     setMenuOpen(null);
     setDeletingFile(key);
     try {
-      const url = src.source_id ? `/api/sources/${src.source_id}` : `/api/sources/by-stem/${encodeURIComponent(key)}`;
+      const url = src.source_id ? `/sources/${src.source_id}` : `/sources/by-stem/${encodeURIComponent(key)}`;
       const res = await apiFetch(url, { method: "DELETE" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setSources((prev) => prev.filter((s) => (s.video_stem || s.video) !== key));

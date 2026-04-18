@@ -146,7 +146,7 @@ export default function SidebarRight({ selectedSources, onClose }) {
   // ── Fetchers (logic không đổi) ─────────────────────
   const fetchMindMaps = useCallback(async () => {
     try {
-      const res = await apiFetch(`/api/mindmaps`);
+      const res = await apiFetch(`/mindmaps`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setMindMaps(Array.isArray(data?.mindmaps) ? data.mindmaps : []);
@@ -156,7 +156,7 @@ export default function SidebarRight({ selectedSources, onClose }) {
 
   const fetchSummaries = useCallback(async () => {
     try {
-      const res = await apiFetch(`/api/summaries`);
+      const res = await apiFetch(`/summaries`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setSummaries(Array.isArray(data?.summaries) ? data.summaries : []);
@@ -170,7 +170,7 @@ export default function SidebarRight({ selectedSources, onClose }) {
     const start = Date.now();
     while (true) {
       if (Date.now() - start > timeoutMs) throw new Error("Quá thời gian chờ tạo Mind Map.");
-      const res = await apiFetch(`/api/mindmap-status/${encodeURIComponent(jobId)}`, { method: "GET", headers: { "Content-Type": "application/json" } });
+      const res = await apiFetch(`/mindmap-status/${encodeURIComponent(jobId)}`, { method: "GET", headers: { "Content-Type": "application/json" } });
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
       const data = await res.json();
       if (data.status === "done") return data.result;
@@ -183,7 +183,7 @@ export default function SidebarRight({ selectedSources, onClose }) {
     if (!selectedSources?.length) { alert("Vui lòng chọn ít nhất một file để tạo Mind Map!"); return; }
     setLoading(true);
     try {
-      const res = await apiFetch(`/api/generate-mindmap`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources: selectedSources, q: "tóm tắt tài liệu" }) });
+      const res = await apiFetch(`/generate-mindmap`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources: selectedSources, q: "tóm tắt tài liệu" }) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const startData = await res.json();
       if (startData.error) throw new Error(startData.error);
@@ -199,7 +199,7 @@ export default function SidebarRight({ selectedSources, onClose }) {
   const handleDeleteMap = async (id) => {
     if (!window.confirm("Xóa mind map này?")) return;
     try {
-      const res = await apiFetch(`/api/mindmaps/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/mindmaps/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setMindMaps((prev) => prev.filter((m) => m.id !== id));
       await fetchMindMaps();
@@ -210,7 +210,7 @@ export default function SidebarRight({ selectedSources, onClose }) {
     if (!selectedSources?.length) { alert("Vui lòng chọn ít nhất một file để tóm tắt!"); return; }
     setSummaryLoading(true);
     try {
-      const res = await apiFetch(`/api/summarize-documents`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources: selectedSources, use_dancer: true, use_entity_chain: true, use_cod: true, use_structured: true, use_fact_check: true }) });
+      const res = await apiFetch(`/summarize-documents`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources: selectedSources, use_dancer: true, use_entity_chain: true, use_cod: true, use_structured: true, use_fact_check: true }) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -221,7 +221,7 @@ export default function SidebarRight({ selectedSources, onClose }) {
 
   const handleSaveSummary = async (payload) => {
     try {
-      const res = await apiFetch(`/api/summaries`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const res = await apiFetch(`/summaries`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchSummaries();
     } catch (err) { console.error("Save summary error:", err); alert("Không lưu được tóm tắt!"); }
@@ -231,7 +231,7 @@ export default function SidebarRight({ selectedSources, onClose }) {
     if (!id) { alert("Không xác định được ID tóm tắt"); return; }
     if (!window.confirm("Xóa tóm tắt này?")) return;
     try {
-      const res = await apiFetch(`/api/summaries/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/summaries/${id}`, { method: "DELETE" });
       if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);
       await fetchSummaries();
     } catch (err) { console.error("Delete summary error:", err); alert("Không xóa được tóm tắt!"); }

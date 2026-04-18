@@ -1,5 +1,3 @@
-# Build context: thư mục gốc repo (docker compose / CI / Railway với Dockerfile BE/Dockerfile).
-# Sao chép chỉ mã backend vào /app để `gunicorn main:app` tìm đúng module main.py.
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -18,10 +16,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY BE/requirements.txt requirements.txt
+# ✅ SỬA Ở ĐÂY
+COPY requirements.txt .
+
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY BE/ .
+# ✅ SỬA Ở ĐÂY
+COPY . .
 
 RUN mkdir -p /app/videos /app/index /app/memory /app/input_docs
 

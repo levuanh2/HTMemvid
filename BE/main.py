@@ -1933,4 +1933,5 @@ def get_memory_tree(source_stem: str):
 if __name__ == '__main__':
     debug_env = (os.environ.get("DEBUG", "0") or "").strip().lower()
     debug = debug_env in {"1", "true", "yes", "y", "on"}
-    app.run(host='0.0.0.0', port=5000, debug=debug, use_reloader=debug)
+    port = int(os.environ.get("PORT", "8080"))
+    app.run(host="0.0.0.0", port=port, debug=debug, use_reloader=debug)

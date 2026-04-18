@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: BE/Dockerfile
     ports:
-      - "5000:5000"
+      - "8080:8080"
     volumes:
       - ./data/videos:/app/videos
       - ./data/index:/app/index
@@ -12,12 +12,13 @@ services:
       - ./data/input_docs:/app/input_docs
     environment:
       DATA_DIR: /app
+      PORT: "8080"
       OLLAMA_HOST: http://host.docker.internal:11434
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:5000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -27,7 +28,7 @@ services:
       context: .
       dockerfile: FE/Dockerfile
       args:
-        VITE_API_BASE: http://backend:5000
+        VITE_API_BASE: http://backend:8080
     ports:
       - "3000:3000"
     depends_on:

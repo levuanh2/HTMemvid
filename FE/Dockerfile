@@ -2,7 +2,7 @@ FROM node:18-slim AS build
 
 WORKDIR /app
 
-ARG VITE_API_BASE=http://localhost:5000
+ARG VITE_API_BASE=http://localhost:8080
 ENV VITE_API_BASE=$VITE_API_BASE
 
 COPY FE/package*.json ./

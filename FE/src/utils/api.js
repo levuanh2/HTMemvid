@@ -6,7 +6,7 @@ export const apiFetch = (path, options = {}) => {
     .replace(/\/+$/, "")
     .replace(/\/api$/, "");
   if (!base && import.meta.env.DEV) {
-    base = "http://localhost:5000";
+    base = "http://localhost:8080";
   }
   const p = path.startsWith("/") ? path : `/${path}`;
   const url = base ? `${base}${p}` : p;

@@ -7,7 +7,7 @@ let baseURL = String(API ?? "")
   .replace(/\/+$/, "")
   .replace(/\/api$/, "");
 if (!baseURL && import.meta.env.DEV) {
-  baseURL = "http://localhost:5000";
+  baseURL = "http://localhost:8080";
 }
 
 const client = axios.create({

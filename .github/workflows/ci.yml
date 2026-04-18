@@ -54,7 +54,7 @@ jobs:
           echo "Waiting for backend to be ready..."
 
           for i in {1..30}; do
-            if curl -fsS http://localhost:5000/health > /dev/null; then
+            if curl -fsS http://localhost:8080/health > /dev/null; then
               echo "Backend is up!"
               break
             fi
@@ -63,7 +63,7 @@ jobs:
           done
 
           echo "Final health check..."
-          curl -fsS http://localhost:5000/health
+          curl -fsS http://localhost:8080/health
 
           kill $pid || true
 
@@ -98,7 +98,7 @@ jobs:
         run: |
           echo "Waiting for backend to be ready..."
           for i in {1..40}; do
-            if curl -fsS http://localhost:5000/health > /dev/null; then
+            if curl -fsS http://localhost:8080/health > /dev/null; then
               echo "Backend is up!"
               exit 0
             fi
@@ -109,7 +109,7 @@ jobs:
           exit 1
 
       - name: Healthcheck
-        run: curl -fsS http://localhost:5000/health
+        run: curl -fsS http://localhost:8080/health
 
       - name: Logs on failure
         if: failure()

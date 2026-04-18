@@ -1,21 +1,14 @@
-// Ưu tiên biến bạn set trên Vercel: VITE_API_URL.
-// Hỗ trợ thêm VITE_API_BASE (nếu bạn dùng tên cũ).
+// Chỉ dùng biến Vite (prefix VITE_), đọc qua import.meta.env.
 const RAW_BASE = (
-  import.meta.env?.VITE_API_URL ||
-  import.meta.env?.VITE_API_BASE ||
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE ||
   ""
 ).trim();
-// Normalize base:
-// - remove trailing slashes
-// - if user accidentally sets ".../api" (from old proxy pattern), strip it
-let API_BASE = RAW_BASE
-  .replace(/\/+$/, "")
-  .replace(/\/api$/, "");
+// Chuẩn hoá base: bỏ dấu / cuối; nếu lỡ set ".../api" thì gỡ để tránh /api/api/...
+let API_BASE = RAW_BASE.replace(/\/+$/, "").replace(/\/api$/, "");
 
-// Local dev (vite) tiện dụng:
-// - Nếu bạn chạy FE bằng `npm run dev` và backend chạy ở :5000,
-//   nhưng bạn quên set env, thì tự fallback về localhost:5000.
-if (!API_BASE && import.meta.env?.DEV) {
+// Local dev: nếu chưa set env, fallback backend mặc định (cùng pattern /api/... trên server).
+if (!API_BASE && import.meta.env.DEV) {
   API_BASE = "http://localhost:5000";
 }
 
@@ -24,23 +17,21 @@ function isAbsoluteUrl(u = "") {
 }
 
 /**
- * Chuẩn hoá đường dẫn API theo môi trường:
- * - Local Docker (nginx proxy): gọi "/api/..." (relative) để nginx proxy sang backend.
- * - Production (Vercel -> Railway): ghép với VITE_API_URL và tự bỏ prefix "/api" (vì backend không có prefix này).
+ * Chuẩn hoá URL gọi API:
+ * - Có VITE_API_URL (vd: deploy Vercel → Railway): `${VITE_API_URL}/api/...`
+ * - Không có base (vd: Docker + nginx proxy): giữ relative `/api/...`
  */
 export function apiUrl(path = "") {
   if (!path) return API_BASE || "";
   if (isAbsoluteUrl(path)) return path;
 
-  let p = path.startsWith("/") ? path : `/${path}`;
+  const p = path.startsWith("/") ? path : `/${path}`;
 
-  // Nếu có API_BASE (prod) thì bỏ "/api" để trỏ đúng endpoint backend
   if (API_BASE) {
-    p = p.replace(/^\/api(?=\/)/, "");
-    return `${API_BASE}${p}`;
+    const base = API_BASE.replace(/\/+$/, "");
+    return `${base}${p}`;
   }
 
-  // Không có base (local) → giữ nguyên relative (vd: /api/...)
   return p;
 }
 

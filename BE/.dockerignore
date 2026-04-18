@@ -1,0 +1,9 @@
+__pycache__
+*.pyc
+.env
+venv/
+videos/
+index/
+memory/
+.git
+node_modules/

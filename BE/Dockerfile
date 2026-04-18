@@ -16,12 +16,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# ✅ SỬA Ở ĐÂY
 COPY requirements.txt .
-
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ✅ SỬA Ở ĐÂY
 COPY . .
 
 RUN mkdir -p /app/videos /app/index /app/memory /app/input_docs

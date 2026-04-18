@@ -75,7 +75,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Docker build backend
-        run: docker build -t memvid-backend -f BE/Dockerfile .
+        run: docker build -t memvid-backend -f BE/Dockerfile ./BE
 
       - name: Docker build frontend
         run: docker build -t memvid-frontend -f FE/Dockerfile .

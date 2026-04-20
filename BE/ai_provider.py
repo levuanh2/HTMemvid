@@ -60,7 +60,7 @@ def ask_groq(prompt: str) -> str:
         _groq_client = Groq(api_key=api_key)
 
     res = _groq_client.chat.completions.create(
-        model="llama3-8b-8192",
+        model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
     )
     return (res.choices[0].message.content or "").strip()

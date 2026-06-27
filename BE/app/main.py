@@ -245,13 +245,20 @@ def _cleanup_old_mindmap_jobs() -> None:
             mindmap_jobs.pop(jid, None)
 
 
-def _make_query_cache_key(q: str, selected_sources: list, use_memory_tree: bool) -> str:
+def _make_query_cache_key(q: str, selected_sources: list, use_memory_tree: bool, filters: dict | None = None) -> str:
     # Normalize list để key ổn định theo thứ tự chọn
     sources_norm = selected_sources or []
     sources_norm = [str(s) for s in sources_norm if s is not None]
     sources_norm = sorted(sources_norm)
+    f = filters or {}
     return json.dumps(
-        {"q": (q or "").strip(), "sources": sources_norm, "use_memory_tree": bool(use_memory_tree)},
+        {
+            "q": (q or "").strip(),
+            "sources": sources_norm,
+            "use_memory_tree": bool(use_memory_tree),
+            "category": (f.get("category") or None),
+            "language": (f.get("language") or None),
+        },
         ensure_ascii=False,
         sort_keys=True
     )
@@ -1096,6 +1103,8 @@ def query():
     selected_sources = data.get('sources') or []
     use_memory_tree = data.get('use_memory_tree', True)
     session_id = (data.get("session_id") or "").strip()
+    f_category = (data.get('category') or '').strip() or None
+    f_language = (data.get('language') or '').strip() or None
 
     if not (q or "").strip():
         return jsonify({'error': 'Missing query'}), 400
@@ -1121,7 +1130,7 @@ def query():
             "created_at": time.time(),
         }
 
-    def process_query_job(jid: str, question: str, sources: list, use_mem: bool) -> None:
+    def process_query_job(jid: str, question: str, sources: list, use_mem: bool, category: str | None = None, language: str | None = None) -> None:
         start_ts = time.time()
         try:
             with query_jobs_lock:
@@ -1149,6 +1158,8 @@ def query():
                 "q": question,
                 "selected_sources": sources or [],
                 "use_memory_tree": bool(use_mem),
+                "category": category,
+                "language": language,
                 "retrieved_chunks": [],
                 "retrieved_sources": [],
                 "context": "",
@@ -1219,7 +1230,7 @@ def query():
 
     thread = threading.Thread(
         target=process_query_job,
-        args=(job_id, q, selected_sources, use_memory_tree),
+        args=(job_id, q, selected_sources, use_memory_tree, f_category, f_language),
         daemon=True
     )
     thread.start()

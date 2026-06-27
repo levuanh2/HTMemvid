@@ -37,6 +37,8 @@ class QueryState(TypedDict):
     q: str
     selected_sources: list
     use_memory_tree: bool
+    category: NotRequired[Optional[str]]
+    language: NotRequired[Optional[str]]
     retrieved_chunks: list
     retrieved_sources: NotRequired[list]
     context: str

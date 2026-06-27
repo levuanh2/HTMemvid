@@ -12,7 +12,7 @@ from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from pydantic import ConfigDict, Field
 
-from app.domains.retrieval.hybrid import HybridRetriever, RetrievedChunk
+from app.domains.retrieval.hybrid import HybridRetriever, RetrievedChunk, _meta_match
 
 class _HybridSubRetriever(BaseRetriever):
     """Bridge HybridRetriever → LangChain retriever (một kênh BM25 hoặc FAISS)."""
@@ -48,6 +48,8 @@ def hybrid_retrieve_with_ensemble(
     top_k: int = 6,
     bm25_weight: Optional[float] = None,
     faiss_weight: Optional[float] = None,
+    category: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> List[RetrievedChunk]:
     """
     Trả về danh sách RetrievedChunk sau khi EnsembleRetriever gộp hai kênh.
@@ -67,6 +69,12 @@ def hybrid_retrieve_with_ensemble(
     if not isinstance(docs, list):
         docs = []
 
+    # Map chunk_id -> metadata (category/language) để lọc; chỉ cần khi có filter.
+    meta_by_id = {}
+    if category or language:
+        hybrid._ensure_loaded()
+        meta_by_id = {c.chunk_id: c for c in hybrid._chunks}
+
     seen: set[int] = set()
     ordered: List[RetrievedChunk] = []
     for d in docs:
@@ -78,11 +86,17 @@ def hybrid_retrieve_with_ensemble(
         if cid in seen:
             continue
         seen.add(cid)
+        if category or language:
+            src = meta_by_id.get(cid)
+            if src is None or not _meta_match(src, category, language):
+                continue
         ordered.append(
             RetrievedChunk(
                 chunk_id=cid,
                 text=d.page_content or "",
                 video_stem=str(meta.get("video_stem") or ""),
+                category=(meta_by_id.get(cid).category if meta_by_id.get(cid) else None),
+                language=(meta_by_id.get(cid).language if meta_by_id.get(cid) else None),
             )
         )
         if len(ordered) >= top_k:

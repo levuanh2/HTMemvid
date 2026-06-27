@@ -116,7 +116,12 @@ def build_query_graph(
             if state.get("conversation_history"):
                 return {**state, "cache_key": None, "progress": 5, "current_node": "CacheLookup", "error": None}
 
-            cache_key = make_cache_key(state["q"], state.get("selected_sources") or [], bool(state.get("use_memory_tree")))
+            cache_key = make_cache_key(
+                state["q"],
+                state.get("selected_sources") or [],
+                bool(state.get("use_memory_tree")),
+                {"category": state.get("category"), "language": state.get("language")},
+            )
             cached = get_cached(cache_key)
             if cached and isinstance(cached, dict) and cached.get("payload"):
                 payload = cached["payload"]
@@ -135,6 +140,10 @@ def build_query_graph(
         try:
             _set_job(state["job_id"], progress=15, current_node="RetrieveMemory")
             if not state.get("use_memory_tree", True):
+                return {**state, "progress": 15, "current_node": "RetrieveMemory", "error": None}
+            # Có filter metadata (category/language) -> bỏ qua memory tree, ép truy hồi chunk
+            # ở RetrieveFAISS (nơi áp được filter); memory tree chỉ lọc theo nguồn.
+            if state.get("category") or state.get("language"):
                 return {**state, "progress": 15, "current_node": "RetrieveMemory", "error": None}
 
             # Ch\u1ea1y memory tree v\u1edbi timeout ri\u00eang \u2014 n\u1ebfu v\u01b0\u1ee3t th\u00ec fallback FAISS
@@ -168,6 +177,8 @@ def build_query_graph(
         try:
             _set_job(state["job_id"], progress=20, current_node="RetrieveFAISS")
             selected_sources = state.get("selected_sources") or []
+            f_category = state.get("category") or None
+            f_language = state.get("language") or None
 
             def _do_hybrid_retrieve():
                 if USE_LC_ENSEMBLE:
@@ -176,11 +187,15 @@ def build_query_graph(
                         state["q"],
                         selected_sources=selected_sources,
                         top_k=HYBRID_TOP_K,
+                        category=f_category,
+                        language=f_language,
                     )
                 return retriever.retrieve(
                     state["q"],
                     selected_sources=selected_sources,
                     top_k=HYBRID_TOP_K,
+                    category=f_category,
+                    language=f_language,
                 )
 
             hist_patch: dict = {}

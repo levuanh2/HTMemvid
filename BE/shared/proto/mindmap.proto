@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package memvid.mindmap;
+
+// mindmap-service: tách workload nặng nhất (KMeans/TF-IDF + nhiều lần ask_ai).
+// Thay callback run_mindmap_generation + progress_cb + append_mindmap.
+service MindmapService {
+  // Một streaming RPC vừa chạy generation vừa stream progress, kết thúc bằng result/error.
+  rpc Generate (GenerateRequest) returns (stream GenerateEvent);
+}
+
+message GenerateRequest {
+  string job_id = 1;
+  string index_meta_path = 2;       // service đọc index.json qua shared FS (read-only)
+  repeated string source_names = 3;
+  string strategy = 4;              // "auto" | "cmgn" | "mindmap_v2" | ...
+  string generation_mode = 5;       // "fast" | "balanced" | "quality"
+}
+
+message GenerateEvent {
+  oneof event {
+    Progress progress = 1;          // -> jobs_store.update_job (monolith ghi, KHÔNG phải service)
+    MindmapResult result = 2;       // terminal success
+    string error = 3;               // terminal failure
+  }
+}
+
+message Progress {
+  int32 percent = 1;
+  string message = 2;               // thông điệp tiếng Việt hiển thị cho user
+}
+
+message MindmapResult {
+  // Record mindmap lồng sâu, schema mềm -> truyền JSON string thay vì ép proto message
+  // (tránh schema-drift; graphs/mindmap_graph.py vốn xử lý nó như dict).
+  string record_json = 1;
+}

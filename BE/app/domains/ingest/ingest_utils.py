@@ -5,8 +5,10 @@ from typing import List
 import pytesseract
 from PIL import Image
 import shutil  # Để tìm tesseract trong PATH
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_experimental.text_splitter import SemanticChunker
+# NOTE: langchain_huggingface / langchain_experimental được import lazy bên trong
+# các hàm dùng tới chúng (xem _get_semantic_embeddings / split_text). Lý do:
+# import top-level kéo theo cả stack nặng ngay cả khi SKIP_MODEL_LOAD=1 (CI/test),
+# làm vỡ test khi phiên bản langchain_core lệch. Lazy import = khởi động nhanh + test được.
 # Auto-detect Tesseract path (portable cho Windows/Linux/Mac)
 tesseract_path = shutil.which('tesseract') or r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 if tesseract_path and os.path.exists(tesseract_path):
@@ -81,6 +83,7 @@ def _get_semantic_embeddings():
     if os.getenv("SKIP_MODEL_LOAD") == "1":
         return None
     if _semantic_embeddings is None:
+        from langchain_huggingface import HuggingFaceEmbeddings
         _semantic_embeddings = HuggingFaceEmbeddings(model_name=_EMBEDDING_MODEL_NAME)
     return _semantic_embeddings
 
@@ -96,6 +99,7 @@ def split_text(text: str) -> List[str]:
     if emb is None:
         raise RuntimeError("Embedding model not available (CI mode)")
     #tao semantic
+    from langchain_experimental.text_splitter import SemanticChunker
     text_splitter=SemanticChunker(
         emb,
         breakpoint_threshold_type="percentile",

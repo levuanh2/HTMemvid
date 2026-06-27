@@ -8,7 +8,8 @@ from pathlib import Path
 import hashlib
 
 # DATA_DIR=/app (docker-compose) hoặc mặc định chạy local
-DATA_DIR_DEFAULT = str(Path(__file__).resolve().parent)
+from shared.paths import BE_ROOT
+DATA_DIR_DEFAULT = str(BE_ROOT)
 DATA_DIR = Path(os.environ.get("DATA_DIR", DATA_DIR_DEFAULT))
 VIDEO_DIR = Path(os.environ.get("VIDEO_DIR", str(DATA_DIR / "videos")))
 VIDEOS_DIR = str(VIDEO_DIR)

@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package memvid.common;
+
+// Tham số sinh của LLM (ánh xạ num_predict/temperature/num_ctx của Ollama,
+// hoặc max_tokens/temperature của Gemini/Groq).
+message LlmOptions {
+  int32 num_predict = 1;
+  double temperature = 2;
+  int32 num_ctx = 3;
+}
+
+message Empty {}

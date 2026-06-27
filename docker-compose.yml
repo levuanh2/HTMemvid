@@ -14,14 +14,97 @@ services:
       DATA_DIR: /app
       PORT: "8080"
       OLLAMA_HOST: http://host.docker.internal:11434
+      SLM_MODEL_CHAT: qwen3.5:9b
+      SLM_MODEL: qwen3.5:9b
+      OLLAMA_REASONING: "0"
+      LLM_MAX_TOKENS: "8192"
+      HYBRID_TOP_K: "6"
+      SESSION_TTL_HOURS: "24"
+      SSE_TIMEOUT_SEC: "300"
+      ENABLE_QUERY_CITATION_PROMPT: "1"
+      USE_LC_VECTOR_STORE: "1"
+      USE_LC_QA_CHAIN: "1"
+      USE_LC_ENSEMBLE: "1"
+      USE_LC_INGEST: "1"
+      LLM_GATEWAY_ADDR: llm-gateway:50051
+      MINDMAP_SERVICE_ADDR: mindmap-service:50052
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - llm-gateway
+      - mindmap-service
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 10
+
+  llm-gateway:
+    build:
+      context: ./BE
+      dockerfile: Dockerfile
+    command: ["python", "-m", "services.llm_gateway.server"]
+    expose:
+      - "50051"
+    volumes:
+      - ./data/videos:/app/videos
+      - ./data/index:/app/index
+      - ./data/memory:/app/memory
+      - ./data/input_docs:/app/input_docs
+    environment:
+      DATA_DIR: /app
+      OLLAMA_HOST: http://host.docker.internal:11434
+      SLM_MODEL_CHAT: qwen3.5:9b
+      SLM_MODEL: qwen3.5:9b
+      OLLAMA_REASONING: "0"
+      LLM_MAX_TOKENS: "8192"
+      HYBRID_TOP_K: "6"
+      SESSION_TTL_HOURS: "24"
+      SSE_TIMEOUT_SEC: "300"
+      ENABLE_QUERY_CITATION_PROMPT: "1"
+      USE_LC_VECTOR_STORE: "1"
+      USE_LC_QA_CHAIN: "1"
+      USE_LC_ENSEMBLE: "1"
+      USE_LC_INGEST: "1"
+      LLM_GATEWAY_PORT: "50051"
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  mindmap-service:
+    build:
+      context: ./BE
+      dockerfile: Dockerfile
+    command: ["python", "-m", "services.mindmap.server"]
+    expose:
+      - "50052"
+    volumes:
+      - ./data/index:/app/index
+      - ./data/memory:/app/memory
+    environment:
+      DATA_DIR: /app
+      OLLAMA_HOST: http://host.docker.internal:11434
+      SLM_MODEL_CHAT: qwen3.5:9b
+      SLM_MODEL: qwen3.5:9b
+      OLLAMA_REASONING: "0"
+      LLM_MAX_TOKENS: "8192"
+      HYBRID_TOP_K: "6"
+      SESSION_TTL_HOURS: "24"
+      SSE_TIMEOUT_SEC: "300"
+      ENABLE_QUERY_CITATION_PROMPT: "1"
+      USE_LC_VECTOR_STORE: "1"
+      USE_LC_QA_CHAIN: "1"
+      USE_LC_ENSEMBLE: "1"
+      USE_LC_INGEST: "1"
+      MINDMAP_SERVICE_PORT: "50052"
+      # mindmap-service cũng là client của llm-gateway (dùng chung 1 model embedding + policy provider)
+      LLM_GATEWAY_ADDR: llm-gateway:50051
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - llm-gateway
 
   frontend:
     build:
@@ -34,4 +117,3 @@ services:
     depends_on:
       - backend
     restart: always
-

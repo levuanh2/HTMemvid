@@ -9,17 +9,22 @@ from typing import List, Dict, Any, Optional, Tuple
 
 import faiss
 import numpy as np
-from embedding_model import get_embedding_model
-
-import os
-from ai_provider import ask_ai
-from faiss_utils import MODEL_NAME
+from app.clients.llm_factory import ask_ai, get_embedding_model
+from app.domains.vectorstore.store import MODEL_NAME
+from app.domains.vectorstore.embedding_utils import normalize_embeddings_array, safe_stack_vectors
+try:
+    from shared.env_loader import load_project_env
+    load_project_env(override=False)
+except Exception:
+    pass
 
 # Chỉ dùng cho local Ollama (Gemini sẽ bỏ qua model).
-SLM_MODEL = os.environ.get("SLM_MODEL_CHAT", os.environ.get("SLM_MODEL", "gemma4:e4b"))
+SLM_MODEL = os.environ.get("SLM_MODEL_CHAT", os.environ.get("SLM_MODEL", "qwen3.6:35b-a3b"))
+SLM_MODEL_INTENT = os.environ.get("SLM_MODEL_INTENT", "gemma2:2b")
 
 
-BASE_DIR = Path(__file__).resolve().parent
+from shared.paths import BE_ROOT
+BASE_DIR = BE_ROOT
 # Ưu tiên DATA_DIR=/app trong Docker (volume mount sẽ cung cấp /app/*)
 DATA_DIR_DEFAULT = str(BASE_DIR)
 DATA_DIR = Path(os.environ.get("DATA_DIR", DATA_DIR_DEFAULT))
@@ -133,7 +138,7 @@ def _classify_intent_type(text: str, title: str = "") -> str:
     user_prompt = f"Tiêu đề: {title}\n\nNội dung: {combined[:500]}\n\nLoại intent:"
     
     try:
-        result = ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL).strip().lower()
+        result = ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL_INTENT).strip().lower()
         # Validate kết quả
         valid = {"definition", "procedure", "argument", "comparison", "reference"}
         for v in valid:
@@ -166,14 +171,21 @@ def _llm_summarize_for_memory(text: str, level: str) -> str:
 
 
 def _load_index_meta() -> Dict[str, Any]:
-    if not INDEX_META_PATH.exists():
-        return {}
+    # Đọc index.json QUA seam VectorStore.load_meta() thay vì mở file trực tiếp —
+    # gỡ coupling-file ngầm giữa memory_tree và vector store (vẫn in-process).
     try:
-        with open(INDEX_META_PATH, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as exc:
-        print(f"⚠️ Không thể đọc index metadata: {exc}")
-        return {}
+        from app.domains.vectorstore.store import load_meta as _vs_load_meta
+        return _vs_load_meta()
+    except Exception:
+        # Fallback an toàn nếu vector_store không import được vì lý do gì đó.
+        if not INDEX_META_PATH.exists():
+            return {}
+        try:
+            with open(INDEX_META_PATH, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:
+            print(f"⚠️ Không thể đọc index metadata: {exc}")
+            return {}
 
 
 def _load_memory_trees() -> List[Dict[str, Any]]:
@@ -373,13 +385,26 @@ def build_memory_tree_for_sources(source_stems: List[str]) -> Dict[str, Any]:
             chunks_by_src[stem].append(m_with_id)
 
     trees = _load_memory_trees()
+    current_model = _get_current_model_name()
+    current_dim = _get_current_embedding_dim()
     new_trees: List[Dict[str, Any]] = []
 
+    # Filter: giữ lại trees KHÔNG trong norm_sources VÀ phải khớp model hiện tại
+    kept_trees: List[Dict[str, Any]] = []
     for tree in trees:
-        if tree.get("source_stem") not in norm_sources:
-            new_trees.append(tree)
+        if tree.get("source_stem") in norm_sources:
+            # Tree này sẽ được rebuild, bỏ qua
+            continue
+        # Kiểm tra tree cũ có embedding model/dim khác không
+        if not _tree_matches_current_embedding(tree, current_model, current_dim):
+            print(f"[memory_tree] Drop legacy tree for {tree.get('source_stem')}: "
+                  f"model={tree.get('embedding_model_name', '?')} dim={tree.get('embedding_dim', '?')} "
+                  f"!= current model={current_model} dim={current_dim}")
+            continue
+        kept_trees.append(tree)
 
     built_for: List[str] = []
+    new_trees: List[Dict[str, Any]] = []
 
     for stem, chunks in chunks_by_src.items():
         if not chunks:
@@ -418,6 +443,8 @@ def build_memory_tree_for_sources(source_stems: List[str]) -> Dict[str, Any]:
             "built_at": _now_iso(),
             "version": "1.0",
             "status": "building",  # building → completed
+            "embedding_model_name": _get_current_model_name(),
+            "embedding_dim": _get_current_embedding_dim(),
             "nodes": [asdict(doc_node)],
         }
         # Lưu partial tree ngay để frontend có thể hiển thị document node
@@ -428,23 +455,41 @@ def build_memory_tree_for_sources(source_stems: List[str]) -> Dict[str, Any]:
         section_specs = _simple_section_group(chunks_sorted)
         section_nodes: List[Dict[str, Any]] = []
         
-        # Chuẩn bị summaries và titles để batch embedding
-        section_data = []  # List of (idx, spec, sec_chunks, sec_summary, sec_title)
-        
+        # Chuẩn bị texts và titles để generate summary
+        section_raw_data = []
         for idx, spec in enumerate(section_specs):
             sec_chunks = [c for c in chunks_sorted if c["chunk_id"] in spec["chunk_ids"]]
             if not sec_chunks:
                 continue
             sec_text = _join_chunk_text(sec_chunks, max_chars=4000)
-            sec_summary = _llm_summarize_for_memory(sec_text, level="section")
             sec_title = spec.get("title") or f"Section {idx + 1}"
-            
-            section_data.append((idx, spec, sec_chunks, sec_summary, sec_title))
+            section_raw_data.append((idx, spec, sec_chunks, sec_text, sec_title))
+
+        # Gọi LLM tóm tắt song song để tăng tốc
+        section_data = []
+        import concurrent.futures
+        
+        # Hàm worker để tóm tắt
+        def _summarize_section(item):
+            idx, spec, sec_chunks, sec_text, sec_title = item
+            sec_summary = _llm_summarize_for_memory(sec_text, level="section")
+            return (idx, spec, sec_chunks, sec_summary, sec_title)
+
+        # Số lượng worker vừa phải để tránh quá tải Ollama local hoặc chạm limit API
+        max_workers = min(4, int(os.environ.get("MAX_SUMMARIZE_WORKERS", "3")))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for result in executor.map(_summarize_section, section_raw_data):
+                section_data.append(result)
+        
+        # Sắp xếp lại theo idx cho chắc chắn vì ThreadPoolExecutor.map trả về theo thứ tự input,
+        # nhưng code cũ append tuần tự. Map giữ đúng thứ tự, nên không lo.
+
         
         # Batch embedding cho tất cả section summaries
         if section_data:
             section_summaries = [data[3] for data in section_data]  # Extract summaries
-            section_embeddings = _embed_batch(section_summaries, batch_size=32)
+            batch_sz = int(os.environ.get("EMBED_BATCH_SIZE", "64"))
+            section_embeddings = _embed_batch(section_summaries, batch_size=batch_sz)
         else:
             section_embeddings = []
         
@@ -488,33 +533,89 @@ def build_memory_tree_for_sources(source_stems: List[str]) -> Dict[str, Any]:
     if not built_for:
         return {"error": "No chunks found for given sources"}
 
-    # Lưu lại toàn bộ trees (đã có partial trees từ bước 1 và 2)
-    _save_memory_trees(new_trees)
+    # CRITICAL FIX: KHÔNG load lại all_trees từ file
+    # Dùng kept_trees + new_trees đã được lọc sạch theo current model/dim
+    final_trees = kept_trees + new_trees
+    _save_memory_trees(final_trees)
     
-    # Rebuild memory index chỉ khi build xong toàn bộ trees
-    # (để query có thể dùng summary-level embeddings)
-    all_trees = _load_memory_trees()
-    _rebuild_memory_index(all_trees)
-    print(f"🔍 [Build] Đã rebuild memory index với {len(all_trees)} trees")
+    # Rebuild memory index với final_trees đã lọc - KHÔNG load lại từ file
+    _rebuild_memory_index(final_trees)
+    print(f"🔍 [Build] Da rebuild memory index voi {len(final_trees)} trees (kept={len(kept_trees)} + new={len(new_trees)})")
     
-    return {"built_for": built_for, "num_trees": len(new_trees)}
+    return {"built_for": built_for, "num_trees": len(final_trees)}
+
+
+def _tree_matches_current_embedding(tree: Dict[str, Any], current_model: str, current_dim: int) -> bool:
+    """
+    Kiểm tra tree có embedding model và dim khớp với model hiện tại không.
+    Trees cũ (legacy) thiếu metadata sẽ bị coi là không khớp.
+    """
+    tree_model = tree.get("embedding_model_name") or tree.get("model_name") or ""
+    tree_dim = tree.get("embedding_dim", 0)
+
+    # Legacy tree: không có metadata
+    if not tree_model or tree_dim == 0:
+        return False
+
+    # Model name khác
+    if tree_model != current_model:
+        return False
+
+    # Dimension khác
+    if current_dim > 0 and tree_dim != current_dim:
+        return False
+
+    return True
 
 
 def _rebuild_memory_index(trees: List[Dict[str, Any]]) -> None:
     """
     Rebuild toàn bộ memory_index.faiss và metadata từ danh sách trees.
+    Bỏ qua nodes có embedding dim không khớp với model hiện tại.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    current_model = _get_current_model_name()
+    current_dim = _get_current_embedding_dim()
+    logger.info("[memory_index] rebuild: model=%s dim=%d trees=%d", current_model, current_dim, len(trees))
+
     vectors: List[np.ndarray] = []
     meta_rows: List[Dict[str, Any]] = []
+    skipped_mismatched = 0
+    skipped_empty = 0
+    skipped_tree_mismatch = 0
 
     for tree in trees:
         tree_id = tree.get("tree_id")
         source_stem = tree.get("source_stem")
+
+        # Bỏ qua tree có model/dim khác
+        if not _tree_matches_current_embedding(tree, current_model, current_dim):
+            skipped_tree_mismatch += 1
+            logger.warning(
+                "[memory_index] skip tree %s (source=%s): model=%s dim=%s != current model=%s dim=%s",
+                tree_id, source_stem,
+                tree.get("embedding_model_name", "?"),
+                tree.get("embedding_dim", "?"),
+                current_model, current_dim
+            )
+            continue
+
         for node in tree.get("nodes", []):
             emb = node.get("embedding") or []
             if not emb:
+                skipped_empty += 1
                 continue
-            vec = np.array(emb, dtype="float32")
+            vec = np.asarray(emb, dtype="float32")
+            emb_dim = vec.shape[-1] if vec.ndim > 0 else 0
+            if current_dim > 0 and emb_dim != current_dim:
+                logger.warning(
+                    "[memory_index] skip node %s: embedding_dim=%d != current_dim=%d",
+                    node.get("memory_id"), emb_dim, current_dim
+                )
+                skipped_mismatched += 1
+                continue
             vectors.append(vec)
             meta_rows.append({
                 "memory_id": node["memory_id"],
@@ -524,6 +625,9 @@ def _rebuild_memory_index(trees: List[Dict[str, Any]]) -> None:
                 "source_stem": source_stem,
             })
 
+    logger.info("[memory_index] vectors=%d skipped_tree_mismatch=%d skipped_empty=%d skipped_mismatched=%d",
+                len(vectors), skipped_tree_mismatch, skipped_empty, skipped_mismatched)
+
     if not vectors:
         # clear index & meta
         if MEMORY_INDEX_PATH.exists():
@@ -532,7 +636,17 @@ def _rebuild_memory_index(trees: List[Dict[str, Any]]) -> None:
             MEMORY_INDEX_META_PATH.unlink()
         return
 
-    xb = np.stack(vectors, axis=0)
+    # Dùng safe_stack_vectors thay vì np.stack trực tiếp
+    xb = safe_stack_vectors(vectors, expected_dim=current_dim if current_dim > 0 else None, context="memory_index_rebuild")
+    if xb is None:
+        logger.warning("[memory_index] no valid vectors after filtering")
+        if MEMORY_INDEX_PATH.exists():
+            MEMORY_INDEX_PATH.unlink()
+        if MEMORY_INDEX_META_PATH.exists():
+            MEMORY_INDEX_META_PATH.unlink()
+        return
+
+    logger.info("[memory_index] stacked shape=%s", xb.shape)
     dim = xb.shape[1]
 
     index = faiss.IndexFlatL2(dim)
@@ -543,9 +657,12 @@ def _rebuild_memory_index(trees: List[Dict[str, Any]]) -> None:
         "index_built_at": _now_iso(),
         "dim": dim,
         "nodes": meta_rows,
+        "embedding_model_name": current_model,
+        "embedding_dim": current_dim,
     }
     with open(MEMORY_INDEX_META_PATH, "w", encoding="utf-8") as f:
         json.dump(meta_obj, f, ensure_ascii=False, indent=2)
+    logger.info("[memory_index] saved: dim=%d vectors=%d", dim, len(vectors))
 
 
 def rebuild_memory_index() -> None:
@@ -557,7 +674,23 @@ def rebuild_memory_index() -> None:
     _rebuild_memory_index(trees)
 
 
+def _get_current_embedding_dim() -> int:
+    """Lấy embedding dimension thực tế từ model hiện tại (tránh hard-code)."""
+    model = _require_mem_model()
+    dummy = model.encode(["dimension_check"], convert_to_numpy=True, show_progress_bar=False)
+    return int(dummy.shape[1])
+
+
+def _get_current_model_name() -> str:
+    """Lấy embedding model name hiện tại."""
+    return os.environ.get("EMBEDDING_MODEL_NAME", MODEL_NAME)
+
+
 def _load_memory_index():
+    """
+    Load memory index với validation model/dim.
+    Nếu mismatch thì bỏ qua (return None) để trigger rebuild.
+    """
     if os.getenv("SKIP_MODEL_LOAD") == "1":
         return None, None
     if not MEMORY_INDEX_PATH.exists() or not MEMORY_INDEX_META_PATH.exists():
@@ -566,6 +699,28 @@ def _load_memory_index():
         index = faiss.read_index(str(MEMORY_INDEX_PATH))
         with open(MEMORY_INDEX_META_PATH, encoding="utf-8") as f:
             meta = json.load(f)
+        
+        stored_dim = meta.get("dim", 0)
+        stored_model = meta.get("embedding_model_name", "")
+        current_model = _get_current_model_name()
+        current_dim = _get_current_embedding_dim()
+        
+        # Check dimension mismatch
+        if stored_dim and stored_dim != index.d:
+            print(
+                f"[MEMORY] Dimension mismatch: index có {index.d}, model yêu cầu {stored_dim}. "
+                f"Sẽ rebuild memory_index."
+            )
+            return None, None
+        
+        # Check model name mismatch
+        if stored_model and stored_model != current_model:
+            print(
+                f"[MEMORY] Model mismatch: index dùng '{stored_model}', "
+                f"hiện tại là '{current_model}'. Sẽ rebuild memory_index."
+            )
+            return None, None
+        
         return index, meta
     except Exception as exc:
         print(f"⚠️ Không thể đọc memory_index: {exc}")
@@ -578,70 +733,64 @@ def _load_memory_index():
 
 def _classify_query_type(query: str) -> str:
     """
-    Phân loại query_type bằng LLM.
+    Phân loại query_type chỉ bằng heuristic / regex (~1ms). Không gọi LLM.
     Trả về một trong:
       "overview" | "main_points" | "detail" | "how" | "why" | "compare" | "locate" | "fact"
     """
-    q_lower = query.lower().strip()
+    import logging
+    import re
 
-    # Heuristic nhanh trước cho các câu hỏi UI phổ biến
+    logger = logging.getLogger(__name__)
+    q = (query or "").strip()
+    q_lower = q.lower()
+
+    # UI phổ biến
     if "file này là gì" in q_lower or "tài liệu này là gì" in q_lower:
-        return "overview"
+        out = "overview"
+        logger.info("[classify_query_type] %s q=%r", out, q[:120])
+        return out
     if "nội dung chính" in q_lower or "ý chính" in q_lower:
-        return "main_points"
-    if "chi tiết hơn" in q_lower or "chi tiết hơn về" in q_lower:
-        return "detail"
+        out = "main_points"
+        logger.info("[classify_query_type] %s q=%r", out, q[:120])
+        return out
+    if "chi tiết hơn" in q_lower:
+        out = "detail"
+        logger.info("[classify_query_type] %s q=%r", out, q[:120])
+        return out
 
-    if any(kw in q_lower for kw in ["tóm tắt", "tổng quan", "overview", "khái quát"]):
-        return "overview"
-    if any(kw in q_lower for kw in ["ý chính", "nội dung chính", "main points"]):
-        return "main_points"
-    if any(kw in q_lower for kw in ["chi tiết", "detail", "phân tích kỹ"]):
-        return "detail"
-    if any(kw in q_lower for kw in ["ở đâu", "nằm ở", "vị trí", "locate", "where", "position"]):
-        return "locate"
-    if any(kw in q_lower for kw in ["như thế nào", "cách", "how", "làm sao", "quy trình"]):
-        return "how"
-    if any(kw in q_lower for kw in ["so sánh", "khác nhau", "compare", "versus", "đối chiếu"]):
-        return "compare"
-    if any(kw in q_lower for kw in ["tại sao", "vì sao", "why", "lý do", "nguyên nhân"]):
-        return "why"
-    if any(kw in q_lower for kw in ["là", "có phải", "fact", "thông tin"]):
-        return "fact"
+    overview_kw = ["tóm tắt", "tổng quan", "overview", "khái quát", "giới thiệu", "summary"]
+    main_kw = ["ý chính", "nội dung chính", "main points", "bullet", "điểm chính"]
+    detail_kw = ["chi tiết", "detail", "phân tích kỹ", "cụ thể", "elaborate"]
+    locate_kw = ["ở đâu", "nằm ở", "vị trí", "locate", "where", "position", "trang nào", "mục nào"]
+    how_kw = ["như thế nào", "cách ", "how ", "làm sao", "quy trình", "how to"]
+    compare_kw = ["so sánh", "khác nhau", "compare", "versus", "đối chiếu", "khác biệt"]
+    why_kw = ["tại sao", "vì sao", "why ", "why?", "lý do", "nguyên nhân", "explain why"]
 
-    # Nếu heuristic không rõ, dùng LLM nhẹ
-    system_prompt = (
-        "Bạn là hệ thống phân loại câu hỏi.\n"
-        "Phân loại câu hỏi này vào 1 trong 8 loại:\n"
-        "- overview: Hỏi tổng quan, \"file này là gì\", \"tài liệu nói về gì\"\n"
-        "- main_points: Hỏi các ý chính, \"nội dung chính là gì\"\n"
-        "- detail: Hỏi chi tiết hơn về một phần\n"
-        "- how: Hỏi cách làm, quy trình, \"Làm thế nào để X?\"\n"
-        "- why: Hỏi lý do, nguyên nhân, \"Tại sao X?\"\n"
-        "- compare: So sánh, đối chiếu, \"X khác Y như thế nào?\"\n"
-        "- locate: Tìm vị trí, \"X ở đâu?\"\n"
-        "- fact: Hỏi sự thật, thông tin cụ thể, \"X có phải là Y?\"\n"
-        "Trả về JSON: {\"query_type\": \"...\"}\n"
-        "Chỉ trả về JSON, không giải thích thêm."
-    )
-    user_prompt = f"Câu hỏi: {query}\n\nLoại query:"
+    if any(kw in q_lower for kw in overview_kw):
+        out = "overview"
+    elif any(kw in q_lower for kw in main_kw):
+        out = "main_points"
+    elif any(kw in q_lower for kw in detail_kw):
+        out = "detail"
+    elif any(kw in q_lower for kw in locate_kw):
+        out = "locate"
+    elif any(kw in q_lower for kw in how_kw):
+        out = "how"
+    elif any(kw in q_lower for kw in compare_kw):
+        out = "compare"
+    elif any(kw in q_lower for kw in why_kw):
+        out = "why"
+    elif re.search(r"\b(là gì|bao nhiêu|khi nào|ai là|có phải|thông tin)\b", q_lower):
+        out = "fact"
+    elif re.search(r"\b(what is|how many|when |who is|is it true)\b", q_lower):
+        out = "fact"
+    elif re.search(r"\b(why|explain|analyze|evaluate)\b", q_lower):
+        out = "why"
+    else:
+        out = "fact"
 
-    try:
-        result = ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL).strip()
-        # Parse JSON
-        import re
-        match = re.search(r'\{[^}]*"query_type\"[^}]*\}', result, re.IGNORECASE)
-        if match:
-            parsed = json.loads(match.group(0))
-            qtype = parsed.get("query_type", "").lower()
-            valid = {"overview", "main_points", "detail", "how", "why", "compare", "locate", "fact"}
-            if qtype in valid:
-                return qtype
-        # Fallback: mặc định fact
-        return "fact"
-    except Exception as exc:
-        print(f"⚠️ Lỗi classify query_type: {exc}")
-        return "fact"  # fallback
+    logger.info("[classify_query_type] %s q=%r", out, q[:120])
+    return out
 
 
 # =========================
@@ -775,7 +924,7 @@ def generate_notebooklm_style_answer(question: str, human_context: str, intent_t
         "Hãy trả lời trực tiếp vào câu hỏi, viết như đang giải thích lại cho người khác một cách tự nhiên, mạch lạc."
     )
     
-    return ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL)
+    return ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL, feature="chat")
 
 
 def query_with_memory_tree(query: str, selected_sources: Optional[List[str]] = None, top_k: int = 5) -> Optional[Dict[str, Any]]:
@@ -992,45 +1141,9 @@ def query_with_memory_tree(query: str, selected_sources: Optional[List[str]] = N
     }
 
 
-def _generate_narrative_glue(summaries: List[str], snippets: List[str]) -> str:
-    """
-    Tạo "narrative glue" - 1-2 câu nối logic giữa summary và evidence.
-    Chỉ diễn giải lại, không thêm thông tin mới.
-    """
-    if not summaries or not snippets:
-        return ""
-    
-    # Ghép summary và snippet đầu tiên để LLM hiểu context
-    summary_text = " ".join(summaries[:3])[:500]
-    first_snippet = snippets[0][:300] if snippets else ""
-    
-    system_prompt = (
-        "Bạn là hệ thống tạo 'narrative glue' - đoạn văn ngắn nối logic giữa tóm tắt và trích đoạn.\n"
-        "- Viết 1-2 câu ngắn gọn, tự nhiên.\n"
-        "- Chỉ diễn giải lại mạch nội dung, KHÔNG thêm thông tin mới.\n"
-        "- Mục đích: giúp người đọc hiểu mối liên hệ giữa ý chính và chi tiết.\n"
-        "Chỉ trả về 1-2 câu, không giải thích thêm."
-    )
-    user_prompt = (
-        f"Tóm tắt ý chính:\n{summary_text}\n\n"
-        f"Trích đoạn chi tiết:\n{first_snippet}\n\n"
-        "Viết 1-2 câu nối logic giữa hai phần trên:"
-    )
-    
-    try:
-        glue = ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL).strip()
-        # Giới hạn độ dài, loại bỏ dấu xuống dòng thừa
-        glue = " ".join(glue.split())[:200]
-        return glue
-    except Exception as exc:
-        print(f"⚠️ Lỗi generate narrative glue: {exc}")
-        return ""  # Fallback: không có glue
-
-
 def build_human_context(top_nodes: List[Dict[str, Any]], evidence_chunks: List[Dict[str, Any]], max_len: int = 4000) -> str:
     """
-    Làm sạch context gửi vào LLM: chỉ giữ ý chính và trích đoạn ngắn, không lộ metadata kỹ thuật.
-    Thêm "narrative glue" để nối logic giữa summary và evidence.
+    Làm sạch context gửi vào LLM: ý chính + trích đoạn ngắn, không lộ metadata kỹ thuật.
     """
     main_points: List[str] = []
     for n in top_nodes:
@@ -1052,20 +1165,9 @@ def build_human_context(top_nodes: List[Dict[str, Any]], evidence_chunks: List[D
 
     parts: List[str] = []
     if main_points:
-        parts.append("Tài liệu đề cập đến:\n- " + "\n- ".join(main_points[:5]))
-    
-    # Thêm narrative glue nếu có cả summary và evidence
-    if main_points and snippets:
-        glue = _generate_narrative_glue(main_points, snippets)
-        if glue:
-            parts.append(glue)
-    
+        parts.append("Ý chính tài liệu:\n- " + "\n- ".join(main_points[:5]))
+
     if snippets:
-        parts.append("Một vài trích đoạn:\n- " + "\n- ".join(snippets[:5]))
+        parts.append("Trích đoạn liên quan:\n- " + "\n- ".join(snippets[:5]))
 
     return "\n\n".join(parts)
-
-
-# Duplicate function removed - using the one above with intent_type support
-
-

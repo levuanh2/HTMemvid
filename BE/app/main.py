@@ -1,15 +1,26 @@
 import os
+from pathlib import Path
+
+# Load .env early so all modules see env vars (Windows/dev friendly).
+try:
+    from shared.env_loader import load_project_env
+    load_project_env(override=False)
+except Exception:
+    pass
+
 import unicodedata
 import json
 import re
 import uuid
 import threading
 import time
+import logging
+import signal
+import sys
 from collections import OrderedDict
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Callable
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
 
 # File locking (Unix only, fallback on Windows)
@@ -19,9 +30,9 @@ try:
 except ImportError:
     HAS_FCNTL = False
 
-from ingest_utils import extract_text, split_text
-from video_utils import  save_qr_frames_to_video
-from faiss_utils import (
+from app.domains.ingest.ingest_utils import extract_text, split_text
+from app.domains.ingest.video_utils import  save_qr_frames_to_video
+from app.domains.vectorstore.store import (
     append_to_index,
     search_index,
     delete_source_from_index,
@@ -29,15 +40,38 @@ from faiss_utils import (
     rebuild_chunk_index,
     MODEL_NAME,
 )
-from ai_provider import ask_ai, summarize_whole_document, summarize_results
-
+from app.clients.llm_factory import ask_ai, summarize_whole_document, summarize_results
 # Chỉ dùng cho local Ollama (Gemini sẽ bỏ qua model).
-SLM_MODEL = os.environ.get("SLM_MODEL_CHAT", os.environ.get("SLM_MODEL", "gemma4:e4b"))
+SLM_MODEL = os.environ.get("SLM_MODEL_CHAT", os.environ.get("SLM_MODEL", "qwen3.6:35b-a3b"))
 SLM_MODEL_SUMMARY = os.environ.get("SLM_MODEL_SUMMARY", "gemma2:2b")
-from mindmap_generation_worker import run_mindmap_generation
-from chunk_processor import process_and_store_chunks
-from summarize_advanced import advanced_summarize
-from memory_tree import (
+from services.mindmap.worker import (
+    attach_mindmap_job_context,
+    run_mindmap_generation,
+    MODE_FAST,
+    MODE_BALANCED,
+    MODE_QUALITY,
+    VALID_MODES,
+    DEFAULT_MODE,
+    get_llm_timeout_for_mode,
+    get_job_timeout_for_mode,
+    get_llm_call_budget_for_mode,
+    get_mindmap_model_for_mode,
+)
+
+# Valid strategies for mindmap generation
+VALID_STRATEGIES = {
+    "auto",
+    "single_call_schema",
+    "mindmap_v2",
+    "cmgn_light",
+    "cmgn",
+    "multilevel_fast",
+    "multilevel",
+    "iterative",
+}
+from app.domains.ingest.chunk_processor import process_and_store_chunks
+from app.domains.summary.summarize_advanced import advanced_summarize
+from app.domains.memory.tree import (
     build_memory_tree_for_sources,
     query_with_memory_tree,
     delete_memory_tree_by_source,
@@ -45,6 +79,14 @@ from memory_tree import (
     _normalize_video_stem,
 )
 app = Flask(__name__)
+
+# Init SQLite job store (idempotent). Chưa thay logic endpoint ở bước này.
+try:
+    from app.domains.jobs.jobs_store import init_db as _jobs_init_db, migrate_from_dict as _jobs_migrate_from_dict, mark_interrupted_jobs as _jobs_mark_interrupted
+    _jobs_init_db()
+except Exception:
+    _jobs_migrate_from_dict = None
+    _jobs_mark_interrupted = None
 
 # Debug log AI mode (không in ra API key thật)
 print("=== AI MODE ===")
@@ -68,7 +110,8 @@ CORS(
 )
 
 
-BASE_DIR = Path(__file__).resolve().parent
+from shared.paths import BE_ROOT
+BASE_DIR = BE_ROOT
 
 DATA_DIR_DEFAULT = str(BASE_DIR)
 DATA_DIR = Path(os.environ.get("DATA_DIR", DATA_DIR_DEFAULT))
@@ -92,9 +135,35 @@ os.makedirs(VIDEOS_DIR, exist_ok=True)
 os.makedirs(MEMORY_DIR, exist_ok=True)
 os.makedirs(INDEX_DIR, exist_ok=True)
 
+# LangGraph ingest pipeline (Bước 2) sẽ được khởi tạo sau khi các helper (vd: _update_source_status) sẵn sàng.
+INGEST_GRAPH = None
+QUERY_GRAPH = None
+MINDMAP_GRAPH = None
+QUERY_GRAPH_BUILD_ERROR: Optional[str] = None
+
+_jobs_update_job = None
+_jobs_create_job = None
+try:
+    from app.domains.jobs.jobs_store import update_job as _jobs_update_job, create_job as _jobs_create_job
+except Exception:
+    pass
+
+
+def _handle_sigterm(*_args):
+    # best-effort: mark running jobs interrupted để tránh trạng thái mồ côi
+    try:
+        if _jobs_mark_interrupted is not None:
+            _jobs_mark_interrupted()
+    finally:
+        sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
+signal.signal(signal.SIGINT, _handle_sigterm)
+
 # Lightweight in-memory query cache (phù hợp offline, giảm gọi Ollama)
-QUERY_CACHE_MAX_SIZE = int(os.environ.get("QUERY_CACHE_MAX_SIZE", "128"))
-QUERY_CACHE_TTL_SEC = int(os.environ.get("QUERY_CACHE_TTL_SEC", "300"))
+QUERY_CACHE_MAX_SIZE = int(os.environ.get("QUERY_CACHE_MAX_SIZE", "200"))
+QUERY_CACHE_TTL_SEC = int(os.environ.get("CACHE_TTL_SEC", os.environ.get("QUERY_CACHE_TTL_SEC", "1800")))
 _query_cache: "OrderedDict[str, dict]" = OrderedDict()
 _query_cache_lock = threading.Lock()
 
@@ -105,6 +174,13 @@ REBUILD_LOCK_PATH = INDEX_DIR / ".rebuild.lock"
 jobs: Dict[str, Dict[str, Any]] = {}
 jobs_lock = threading.Lock()
 JOB_TTL_MINUTES = int(os.environ.get("JOB_TTL_MINUTES", "30"))
+
+# Migrate legacy in-memory jobs dict sang SQLite (idempotent, best-effort)
+try:
+    if _jobs_migrate_from_dict is not None:
+        _jobs_migrate_from_dict(jobs, job_type="rebuild")
+except Exception:
+    pass
 
 def _cleanup_old_jobs() -> None:
     # Lazily cleanup on request (per-process, per gunicorn worker)
@@ -124,6 +200,13 @@ QUERY_JOB_TIMEOUT_SEC = int(os.environ.get("QUERY_JOB_TIMEOUT_SEC", str(5 * 60))
 QUERY_MAX_CONCURRENT = int(os.environ.get("QUERY_MAX_CONCURRENT", "4"))
 _query_semaphore = threading.Semaphore(max(1, QUERY_MAX_CONCURRENT))
 
+# Migrate legacy in-memory query_jobs dict sang SQLite (idempotent)
+try:
+    if _jobs_migrate_from_dict is not None:
+        _jobs_migrate_from_dict(query_jobs, job_type="query")
+except Exception:
+    pass
+
 def _cleanup_old_query_jobs() -> None:
     if QUERY_JOB_TTL_MINUTES <= 0:
         return
@@ -140,6 +223,13 @@ def _cleanup_old_query_jobs() -> None:
 mindmap_jobs: Dict[str, Dict[str, Any]] = {}
 mindmap_jobs_lock = threading.Lock()
 MINDMAP_JOB_TTL_MINUTES = int(os.environ.get("MINDMAP_JOB_TTL_MINUTES", "30"))
+
+# Migrate legacy in-memory mindmap_jobs dict sang SQLite (idempotent)
+try:
+    if _jobs_migrate_from_dict is not None:
+        _jobs_migrate_from_dict(mindmap_jobs, job_type="mindmap")
+except Exception:
+    pass
 
 
 def _cleanup_old_mindmap_jobs() -> None:
@@ -193,10 +283,16 @@ def home():
 
 @app.get('/health')
 def health():
-    return jsonify({
+    payload: Dict[str, Any] = {
         "status": "ok",
         "mode": "ci" if os.environ.get("SKIP_MODEL_LOAD") == "1" else "normal",
-    }), 200
+        "query_graph_ready": QUERY_GRAPH is not None,
+        "ingest_graph_ready": INGEST_GRAPH is not None,
+    }
+    err = globals().get("QUERY_GRAPH_BUILD_ERROR")
+    if err:
+        payload["query_graph_error"] = err[:800]
+    return jsonify(payload), 200
 
 @app.get('/stats')
 def stats():
@@ -287,8 +383,7 @@ def rebuild_index_from_video():
                         if "num_chunks" in extra and extra["num_chunks"] is not None:
                             jobs[jid]["num_chunks"] = int(extra["num_chunks"])
 
-            from rebuild_index_from_video import rebuild_faiss_index_from_videos
-
+            from app.scripts.rebuild_index_from_video import rebuild_faiss_index_from_videos
             result = rebuild_faiss_index_from_videos(progress_cb=progress_cb)
             with jobs_lock:
                 if jid in jobs:
@@ -455,13 +550,11 @@ def _get_source_status_by_stem(source_stem: str) -> Optional[Dict]:
     """
     registry = _load_source_registry()
     for source_id, info in registry.items():
-        # Ưu tiên dùng source_stem đã lưu, fallback normalize filename
         stored_stem = info.get("source_stem")
         if stored_stem:
             if stored_stem == source_stem:
                 return info
         else:
-            # Fallback: normalize filename
             filename = info.get("filename", "")
             normalized = _normalize_video_stem(filename)
             if normalized == source_stem:
@@ -481,9 +574,54 @@ def _check_sources_status(selected_sources: List[str]) -> Dict[str, str]:
         if status_info:
             status_map[stem] = status_info.get("status", "ready")
         else:
-            # Nếu không tìm thấy trong registry, coi như ready (legacy source)
             status_map[stem] = "ready"
     return status_map
+
+
+# LangGraph pipelines được dựng tập trung ở app/wiring.py — gọi ở CUỐI khối init
+# (sau khi mọi callback/helper như _append_mindmap đã sẵn sàng).
+
+def _get_session_history_safe(session_id: str, limit: int) -> list:
+    try:
+        from app.domains.jobs.sessions_store import get_history as _gh
+        return _gh(session_id, limit_messages=limit)
+    except Exception:
+        return []
+
+
+def _warmup_ollama_background() -> None:
+    if (os.getenv("OLLAMA_WARMUP", "1") or "").strip().lower() in ("0", "false", "no", "off"):
+        return
+    host = (os.getenv("OLLAMA_HOST") or "").strip().rstrip("/")
+    if not host:
+        return
+    model = os.getenv("SLM_MODEL_CHAT", os.getenv("OLLAMA_MODEL", "qwen3.5:9b"))
+
+    def _run():
+        try:
+            import requests
+
+            r = requests.post(
+                f"{host}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": "Hi",
+                    "stream": False,
+                    "options": {"num_predict": 1, "temperature": 0},
+                },
+                timeout=120,
+            )
+            if r.status_code == 200:
+                print(f"[warmup] Ollama model {model!r} ready")
+            else:
+                print(f"[warmup] Ollama HTTP {r.status_code}")
+        except Exception as e:
+            print(f"[warmup] Ollama warmup failed: {e}")
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+_warmup_ollama_background()
 
 
 def _load_mindmaps() -> list[dict]:
@@ -519,14 +657,75 @@ def _mindmap_response(record: dict) -> dict:
     nodes = record.get("nodes")
     if not isinstance(nodes, list):
         nodes = []
-    return {
+    diagram = record.get("diagram")
+    print(f"[mindmap response] nodes={len(nodes)}, diagram_nodes={len((diagram or {}).get('nodes') or [])}")
+    response = {
         "id": record.get("id"),
         "title": record.get("title"),
         "nodes": nodes,
+        "diagram": diagram,  # Include visual diagram for Napkin AI
         "sources": record.get("sources", []),
         "createdAt": record.get("createdAt"),
         "strategy": record.get("strategy") or "iterative",
+        "mode": record.get("mode") or DEFAULT_MODE,
     }
+    # Thêm visualDiagramMode nếu có
+    if "visualDiagramMode" in record:
+        response["visualDiagramMode"] = record["visualDiagramMode"]
+    return response
+
+
+# === Dựng toàn bộ LangGraph pipeline qua wiring tập trung (T4) ===
+from app.wiring import build_graphs as _build_graphs
+from app.clients.mindmap_factory import get_mindmap_runner as _get_mindmap_runner
+
+_graphs = _build_graphs(
+    data_dir=DATA_DIR,
+    index_meta_path=INDEX_META_JSON_PATH,
+    update_source_status=lambda sid, status="processing", **kw: _update_source_status(sid, status, **kw),
+    extract_text=extract_text,
+    split_text=split_text,
+    process_and_store_chunks=process_and_store_chunks,
+    append_to_index=append_to_index,
+    build_memory_tree_for_sources=build_memory_tree_for_sources,
+    jobs_update=_jobs_update_job,
+    make_cache_key=_make_query_cache_key,
+    get_cached=_get_cached_query,
+    set_cached=_set_cached_query,
+    check_sources_status=_check_sources_status,
+    get_source_status_by_stem=_get_source_status_by_stem,
+    search_index=search_index,
+    summarize_results=summarize_results,
+    query_with_memory_tree=query_with_memory_tree,
+    get_session_history=_get_session_history_safe,
+    run_mindmap_generation=_get_mindmap_runner(),
+    append_mindmap=_append_mindmap,
+)
+INGEST_GRAPH = _graphs.ingest
+QUERY_GRAPH = _graphs.query
+QUERY_GRAPH_BUILD_ERROR = _graphs.query_build_error
+MINDMAP_GRAPH = _graphs.mindmap
+
+
+def _langgraph_invoke(graph: Any, state: dict, *, thread_id: str) -> dict:
+    """Graph compile với SqliteSaver yêu cầu configurable.thread_id."""
+    tid = (thread_id or "").strip() or str(uuid.uuid4())
+    try:
+        return graph.invoke(state, config={"configurable": {"thread_id": tid}})
+    except Exception as e:
+        # LangGraph / thư viện đôi khi ném exception str() rỗng — bọc để job/SSE có nội dung.
+        if not str(e).strip():
+            raise RuntimeError(_job_error_text(e)) from e
+        raise
+
+
+def _job_error_text(exc: BaseException) -> str:
+    """Nhiều built-in (TimeoutError, RuntimeError…) có str(exc)==''; không bao giờ trả chuỗi rỗng."""
+    msg = str(exc).strip()
+    if msg:
+        return msg
+    name = getattr(type(exc), "__name__", None) or type(exc).__qualname__ or "Exception"
+    return f"{name}: không có nội dung chi tiết (xem traceback trong log server)."
 
 
 def _load_summaries() -> list[dict]:
@@ -591,165 +790,46 @@ def _trigger_memory_tree_build(source_stems: List[str]):
     print(f"🚀 [Background] Đã trigger build Memory Tree cho: {source_stems}")
 
 
-def _background_process_source(source_id: str, file_path: str, filename: str):
-    """
-    Background worker: Xử lý toàn bộ ingest pipeline cho một source theo kiến trúc async 2-phase.
-    
-    Phase 1 (critical path - chạy trong thread này):
-    - Extract → Chunking → Video → Embedding + FAISS
-    - Sau khi xong: status = "index_ready", progress = 0.7, substatus = "faiss_ready"
-    - capabilities: {chunk_query: true, memory_query: false}
-    
-    Phase 2 (background thread - không block):
-    - Build Memory Tree (Document + Section nodes)
-    - Trong quá trình build: status = "index_ready", progress = 0.8, substatus = "building_memory_tree"
-    - Sau khi xong: status = "ready", progress = 1.0, substatus = "memory_tree_ready"
-    - capabilities: {chunk_query: true, memory_query: true}
-    
-    Status lifecycle: processing → index_ready → ready
-    (TUYỆT ĐỐI không quay lại processing sau index_ready)
-    """
-    try:
-        print(f"🔄 [Background] Bắt đầu xử lý source: {source_id}")
-        
-        # ============================================
-        # PHASE 1: CRITICAL PATH (Extract → FAISS)
-        # ============================================
-        
-        # Step 1: Extract text (progress 0.1)
-        _update_source_status(source_id, "processing", progress=0.1)
-        text = extract_text(file_path)
-        if not text.strip():
-            raise ValueError("Cannot read file content")
-        print(f"[INGEST] source={source_id} extracted_chars={len(text)}")
-        
-        # Step 2: Semantic chunking (progress 0.3)
-        _update_source_status(source_id, "processing", progress=0.3)
-        chunks = split_text(text)
-        if not chunks:
-            raise ValueError("No chunks generated")
-        print(f"[INGEST] source={source_id} semantic_chunks={len(chunks)}")
-        
-        # Step 3: Process chunks và tạo video (progress 0.4)
-        _update_source_status(source_id, "processing", progress=0.4)
-        video_name = f"{filename.replace('.', '_')}"
-        timestamp = datetime.now().isoformat()
-        video_path, metadata_entries = process_and_store_chunks(
-            chunks=chunks,
-            video_name=video_name,
-            timestamp=timestamp
-        )
-        print(f"[INGEST] source={source_id} video={video_path} frames={len(metadata_entries)}")
-        
-        # Step 4: Embedding + FAISS index (progress 0.5 → 0.7)
-        _update_source_status(source_id, "processing", progress=0.5)
-        
-        # Batch append để tối ưu tốc độ
-        all_chunks = [entry["text"] for entry in metadata_entries]
-        all_metadata = [{
-            "parent_id": entry.get("parent_id"),
-            "sub_order": entry.get("sub_order"),
-            "total_parts": entry.get("total_parts"),
-            "is_subchunk": entry.get("is_subchunk", False)
-        } for entry in metadata_entries]
-        
-        append_to_index(
-            chunks=all_chunks,
-            video_name=video_path,
-            custom_metadata=all_metadata,
-            batch_size=32
-        )
-        
-        # Step 5: Phase 1 hoàn thành - Index ready
-        # status = "index_ready", progress = 0.7, substatus = "faiss_ready"
-        # capabilities: chunk_query = true, memory_query = false
-        source_stem = Path(video_name).stem.lower()
-        _update_source_status(
-            source_id, 
-            status="index_ready", 
-            progress=0.7,
-            substatus="faiss_ready",
-            capabilities={"chunk_query": True, "memory_query": False}
-        )
-        print(f"✅ [Background] Phase 1 hoàn thành - FAISS index ready cho source: {source_id}")
-        print(f"   → Có thể query chunk-level ngay bây giờ")
-        
-        # ============================================
-        # PHASE 2: BACKGROUND THREAD (Memory Tree)
-        # ============================================
-        
-        def build_memory_tree_async():
-            """
-            Phase 2: Build Memory Tree trong thread phụ.
-            KHÔNG block _background_process_source, KHÔNG join thread.
-            """
-            try:
-                # Bắt đầu build Memory Tree
-                # Giữ status = "index_ready", chỉ update progress và substatus
-                _update_source_status(
-                    source_id,
-                    status="index_ready",  # GIỮ NGUYÊN status, không quay lại processing
-                    progress=0.8,
-                    substatus="building_memory_tree"
-                )
-                print(f"🔄 [Background] Phase 2 bắt đầu - Build Memory Tree cho source: {source_id}")
-                
-                # Build Memory Tree (Document + Section nodes)
-                build_memory_tree_for_sources([source_stem])
-                
-                # Phase 2 hoàn thành
-                # status = "ready", progress = 1.0, substatus = "memory_tree_ready"
-                # capabilities: chunk_query = true, memory_query = true
-                _update_source_status(
-                    source_id,
-                    status="ready",
-                    progress=1.0,
-                    substatus="memory_tree_ready",
-                    capabilities={"chunk_query": True, "memory_query": True}
-                )
-                print(f"✅ [Background] Phase 2 hoàn thành - Memory Tree ready cho source: {source_id}")
-                print(f"   → Có thể query cả chunk-level và memory-level")
-                
-            except Exception as exc:
-                import traceback
-                traceback.print_exc()
-                error_msg = f"Memory Tree build failed: {str(exc)}"
-                # Nếu Memory Tree build fail, vẫn giữ index_ready để query chunk-level
-                # Nhưng ghi error message vào registry
-                _update_source_status(
-                    source_id,
-                    status="index_ready",  # Giữ nguyên status index_ready
-                    progress=0.7,
-                    substatus="faiss_ready",  # Quay lại substatus faiss_ready
-                    error=error_msg
-                )
-                print(f"⚠️ [Background] Memory Tree build failed cho {source_id}, nhưng index_ready: {error_msg}")
-        
-        # Trigger Memory Tree build trong thread riêng (daemon=True, không join)
-        memory_tree_thread = threading.Thread(target=build_memory_tree_async, daemon=True)
-        memory_tree_thread.start()
-        print(f"🚀 [Background] Đã trigger Phase 2 (Memory Tree build) cho source: {source_id}")
-        
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        error_msg = str(exc)
-        # Bất kỳ lỗi nào trong Phase 1 → status = "error"
-        _update_source_status(source_id, "error", progress=0.0, error=error_msg)
-        print(f"❌ [Background] Lỗi xử lý source {source_id}: {error_msg}")
-
-
 def _trigger_background_ingest(source_id: str, file_path: str, filename: str):
     """
-    Trigger background task để xử lý ingest (non-blocking).
+    Trigger ingest qua LangGraph (Phase 5 — không còn pipeline thread legacy).
     """
-    thread = threading.Thread(
-        target=_background_process_source,
-        args=(source_id, file_path, filename),
-        daemon=True
-    )
+    if INGEST_GRAPH is None or _jobs_create_job is None:
+        print("[INGEST] INGEST_GRAPH hoặc jobs_store không khả dụng — không thể xử lý upload.")
+        try:
+            _update_source_status(source_id, "error", progress=0.0, error="Ingest LangGraph unavailable")
+        except Exception:
+            pass
+        return
+
+    job_id = source_id  # re-use source_id làm job_id để FE polling đơn giản
+    try:
+        _jobs_create_job(job_id, job_type="ingest", status="pending", progress=0, current_node="Queued")
+    except Exception:
+        pass
+
+    def run_graph():
+        try:
+            init_state = {
+                "job_id": job_id,
+                "source_id": source_id,
+                "file_path": file_path,
+                "filename": filename,
+                "progress": 0,
+                "current_node": "Queued",
+                "artifacts": {},
+                "error": None,
+            }
+            _langgraph_invoke(INGEST_GRAPH, init_state, thread_id=job_id)
+        except Exception as exc:
+            try:
+                _update_source_status(source_id, "error", progress=0.0, error=_job_error_text(exc))
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=run_graph, daemon=True)
     thread.start()
-    print(f"🚀 [Background] Đã trigger ingest cho source: {source_id}")
+    print(f"🚀 [Background] (LangGraph) Đã trigger ingest cho source: {source_id}")
 
 
 # -------------------------
@@ -969,7 +1049,7 @@ def list_indexed():
             # Normalize video path: có thể là đường dẫn đầy đủ hoặc chỉ tên file
             # Ví dụ: "videos/file_pdf_20260109_001635.mp4" hoặc "file_pdf_20260109_001635.mp4"
             video_normalized = Path(video).name  # Lấy tên file (bỏ đường dẫn nếu có)
-            video_stem = Path(video_normalized).stem  # Bỏ extension
+            video_stem = Path(video_normalized).stem.lower()  # Đồng bộ với hybrid._norm_stem (FAISS meta)
             
             text = item.get('text', '')
             video_map.setdefault(video_stem, []).append(text)
@@ -998,134 +1078,8 @@ def serve_video(name):
     return send_from_directory(VIDEOS_DIR, name)
 
 
-def _legacy_query_flat_chunks(q: str, selected_sources: list[str] | None = None):
-    """
-    Logic query cũ: search trực tiếp trên chunk-level, dùng tóm tắt kết quả.
-    Giữ lại làm fallback khi chưa có Memory Tree.
-    """
-    selected_sources = selected_sources or []
-    all_chunks = search_index(q)
-    chunks_with_file: list[str] = []
-
-    try:
-        with open(INDEX_META_JSON_PATH, encoding='utf-8') as f:
-            meta = json.load(f)
-    except Exception as e:
-        return {'error': 'No index metadata found', 'detail': str(e)}, 500
-
-    meta_norm = {}
-    for k, m in meta.items():
-        if not isinstance(k, str) or not k.isdigit():
-            continue
-        if not isinstance(m, dict):
-            continue
-        video_raw = m.get('video', '').strip()
-        video_name = Path(video_raw).name
-        video_stem = unicodedata.normalize('NFKD', Path(video_name).stem).replace('\u00a0', ' ').lower()
-        meta_norm[k] = {
-            'text': m.get('text', ''),
-            'video_stem': video_stem
-        }
-
-    selected_norm = set()
-    for s in selected_sources:
-        try:
-            selected_norm.add(
-                unicodedata.normalize('NFKD', Path(s).stem).replace('\u00a0', ' ').lower()
-            )
-        except Exception as e:
-            print("⚠️ Lỗi normalize source:", s, e)
-
-    for chunk in all_chunks:
-        for k, m_norm in meta_norm.items():
-            if m_norm['text'] == chunk:
-                if not selected_sources or m_norm['video_stem'] in selected_norm:
-                    chunks_with_file.append(f"[FILE: {m_norm['video_stem']}]\n{chunk}")
-                break
-
-    if not chunks_with_file:
-        if selected_sources:
-            for m_norm in meta_norm.values():
-                if m_norm['video_stem'] in selected_norm:
-                    chunks_with_file.append(f"[FILE: {m_norm['video_stem']}]\n{m_norm['text']}")
-        else:
-            for m_norm in meta_norm.values():
-                chunks_with_file.append(f"[FILE: {m_norm['video_stem']}]\n{m_norm['text']}")
-
-    if not chunks_with_file:
-        return {'answer': "Không tìm thấy dữ liệu phù hợp trong file đã chọn."}, 200
-
-    answer = summarize_results(q, chunks_with_file, model=SLM_MODEL)
-    return {'answer': answer}, 200
-
-
-def _run_query_pipeline(q: str, selected_sources: list[str] | None, use_memory_tree: bool) -> tuple[dict, int]:
-    """
-    Giữ nguyên logic /query hiện tại nhưng trả về (payload, status_code).
-    Dùng cho async background job để tránh block request.
-    """
-    selected_sources = selected_sources or []
-    q = (q or "").strip()
-    if not q:
-        return {"error": "Missing query"}, 400
-
-    # Check source status nếu có selected_sources
-    processing_message = None
-    if selected_sources:
-        sources_status = _check_sources_status(selected_sources)
-
-        # Nếu có source đang error -> trả error message
-        error_sources = [s for s, status in sources_status.items() if status == "error"]
-        if error_sources:
-            error_info = _get_source_status_by_stem(error_sources[0])
-            error_msg = error_info.get("error", "Source processing error") if error_info else "Source processing error"
-            return {
-                "error": f"Một hoặc nhiều tài liệu đã gặp lỗi: {error_msg}",
-                "answer": None
-            }, 400
-
-        # Nếu có source đang processing -> cho phép query nhưng thông báo
-        processing_sources = [s for s, status in sources_status.items() if status == "processing"]
-        if processing_sources:
-            processing_message = "Một số tài liệu đang được xử lý, mình sẽ trả lời đầy đủ hơn khi xong."
-
-    cache_key: Optional[str] = None
-    if not processing_message:
-        cache_key = _make_query_cache_key(q, selected_sources, use_memory_tree)
-        cached = _get_cached_query(cache_key)
-        if cached and isinstance(cached, dict) and cached.get("payload"):
-            payload = cached["payload"]
-            status = int(cached.get("status", 200))
-            return payload, status
-
-    # 1) Thử query qua Memory Tree trước
-    if use_memory_tree:
-        try:
-            print(f"[QUERY] q={q!r} use_memory_tree={use_memory_tree} selected_sources={selected_sources}")
-            mem_result = query_with_memory_tree(q, selected_sources=selected_sources)
-        except Exception:
-            import traceback
-            traceback.print_exc()
-            mem_result = None
-
-        if mem_result and isinstance(mem_result, dict) and mem_result.get("answer"):
-            if processing_message:
-                mem_result["processing_message"] = processing_message
-            if cache_key:
-                _set_cached_query(cache_key, {"payload": mem_result, "status": 200})
-            return mem_result, 200
-
-    # 2) Fallback: logic chunk-level cũ
-    payload, status = _legacy_query_flat_chunks(q, selected_sources)
-    if processing_message and isinstance(payload, dict):
-        payload["processing_message"] = processing_message
-    if cache_key and isinstance(payload, dict) and payload.get("answer"):
-        _set_cached_query(cache_key, {"payload": payload, "status": status})
-    return payload, status
-
-
 # -------------------------
-# 🔍 Query (Memory Tree first, fallback chunk)
+# 🔍 Query — chỉ LangGraph (QUERY_GRAPH)
 # -------------------------
 @app.post('/query')
 def query():
@@ -1141,6 +1095,7 @@ def query():
     q = data.get('q') or data.get('question') or ''
     selected_sources = data.get('sources') or []
     use_memory_tree = data.get('use_memory_tree', True)
+    session_id = (data.get("session_id") or "").strip()
 
     if not (q or "").strip():
         return jsonify({'error': 'Missing query'}), 400
@@ -1151,6 +1106,13 @@ def query():
         return jsonify({"error": "Too many concurrent queries, please retry."}), 429
 
     job_id = str(uuid.uuid4())
+    if not session_id:
+        session_id = str(uuid.uuid4())
+    try:
+        from app.domains.jobs.jobs_store import create_job as _js_create
+        _js_create(job_id, job_type="query", status="pending", progress=0, current_node="Queued")
+    except Exception:
+        pass
     with query_jobs_lock:
         query_jobs[job_id] = {
             "status": "pending",
@@ -1166,7 +1128,48 @@ def query():
                 if jid in query_jobs:
                     query_jobs[jid]["status"] = "running"
 
-            payload, status = _run_query_pipeline(question, sources, use_mem)
+            if QUERY_GRAPH is None:
+                raise RuntimeError("QUERY_GRAPH chưa khởi tạo — kiểm tra logs khởi động.")
+
+            try:
+                from app.domains.jobs.jobs_store import clear_token_buffer as _js_tb_clear
+                _js_tb_clear(jid)
+            except Exception:
+                pass
+
+            try:
+                from app.domains.jobs.sessions_store import get_history as _ss_get
+                history = _ss_get(session_id, limit_messages=8)
+            except Exception:
+                history = []
+            init_state = {
+                "job_id": jid,
+                "session_id": session_id,
+                "conversation_history": history,
+                "q": question,
+                "selected_sources": sources or [],
+                "use_memory_tree": bool(use_mem),
+                "retrieved_chunks": [],
+                "retrieved_sources": [],
+                "context": "",
+                "answer": "",
+                "retry_count": 0,
+                "low_confidence": False,
+                "progress": 0,
+                "current_node": "Queued",
+                "error": None,
+            }
+            out = _langgraph_invoke(QUERY_GRAPH, init_state, thread_id=session_id or jid)
+            raw_pl = out.get("payload")
+            payload = dict(raw_pl) if isinstance(raw_pl, dict) else {}
+            ans_state = (out.get("answer") or "").strip()
+            if ans_state and not (payload.get("answer") or "").strip():
+                payload["answer"] = out["answer"]
+            has_ans = bool((payload.get("answer") or "").strip())
+            has_err = bool((payload.get("error") or "").strip())
+            if not has_ans and not has_err:
+                payload["error"] = out.get("error") or "Unknown error"
+            status = int(out.get("status_code") or 200)
             result_obj = {
                 "payload": payload,
                 "status": status,
@@ -1176,12 +1179,38 @@ def query():
                 if jid in query_jobs:
                     query_jobs[jid]["status"] = "done"
                     query_jobs[jid]["result"] = result_obj
+
+            if _jobs_update_job:
+                try:
+                    _jobs_update_job(
+                        jid,
+                        status="done",
+                        progress=100,
+                        current_node="Finalize",
+                        result=result_obj,
+                    )
+                except Exception:
+                    pass
+
+            # Persist conversation history (best-effort)
+            try:
+                if isinstance(payload, dict) and payload.get("answer"):
+                    from app.domains.jobs.sessions_store import append_messages as _ss_append
+                    _ss_append(session_id, [{"role": "user", "content": question}, {"role": "assistant", "content": str(payload.get("answer"))}])
+            except Exception:
+                pass
         except Exception as exc:
+            err_txt = _job_error_text(exc)
             with query_jobs_lock:
                 if jid in query_jobs:
                     query_jobs[jid]["status"] = "error"
-                    query_jobs[jid]["error"] = str(exc)
-            print(f"[QUERY_JOB] job_id={jid} failed: {exc}")
+                    query_jobs[jid]["error"] = err_txt
+            if _jobs_update_job:
+                try:
+                    _jobs_update_job(jid, status="error", error_text=err_txt)
+                except Exception:
+                    pass
+            logging.exception("[QUERY_JOB] job_id=%s failed: %s", jid, err_txt)
         finally:
             elapsed = time.time() - start_ts
             if elapsed > QUERY_JOB_TIMEOUT_SEC:
@@ -1196,12 +1225,25 @@ def query():
     thread.start()
 
     # Return immediately (no blocking)
-    return jsonify({"job_id": job_id, "status": "pending"}), 202
+    return jsonify({"job_id": job_id, "status": "pending", "session_id": session_id}), 202
 
 
 @app.get('/query-status/<job_id>')
 def query_status(job_id: str):
     _cleanup_old_query_jobs()
+    # Ưu tiên SQLite jobs store nếu bật
+    if (os.getenv("USE_SQLITE_JOBS", "1") or "").strip() not in ("0", "false", "False"):
+        try:
+            from app.domains.jobs.jobs_store import get_job as _js_get
+            j = _js_get(job_id)
+            if j and j.get("job_type") in ("query", None):
+                return jsonify({
+                    "status": j.get("status"),
+                    "result": j.get("result"),
+                    "error": j.get("error"),
+                }), 200
+        except Exception:
+            pass
     with query_jobs_lock:
         job = query_jobs.get(job_id)
         if not job:
@@ -1211,6 +1253,71 @@ def query_status(job_id: str):
             "result": job.get("result"),
             "error": job.get("error"),
         }), 200
+
+
+@app.get("/query-stream/<job_id>")
+def query_stream(job_id: str):
+    """
+    SSE: stream trạng thái job query realtime (thay polling).
+    Dữ liệu đọc từ jobs_store (SQLite) nếu có.
+    Phase 2C: header chuẩn proxy + timeout SSE_TIMEOUT_SEC.
+    """
+    sse_timeout = int(os.getenv("SSE_TIMEOUT_SEC", "300"))
+
+    def generate():
+        waited = 0.0
+        interval = float(os.getenv("SSE_POLL_INTERVAL_SEC", "0.4"))
+        last_token_len = 0
+        while waited < sse_timeout:
+            try:
+                from app.domains.jobs.jobs_store import get_job as _js_get
+                j = _js_get(job_id) or {}
+            except Exception:
+                j = {}
+
+            buf = j.get("token_buffer") or ""
+            if isinstance(buf, str) and len(buf) > last_token_len:
+                delta = buf[last_token_len:]
+                last_token_len = len(buf)
+                yield f"data: {json.dumps({'type': 'token', 'content': delta, 'job_id': job_id}, ensure_ascii=False)}\n\n"
+
+            st = j.get("status")
+            err_raw = j.get("error")
+            if isinstance(err_raw, str):
+                err_sse = err_raw.strip()
+            elif err_raw is not None:
+                err_sse = str(err_raw).strip()
+            else:
+                err_sse = ""
+            if st == "error" and not err_sse:
+                err_sse = "Lỗi không xác định khi xử lý truy vấn."
+
+            payload = {
+                "type": "status",
+                "job_id": job_id,
+                "status": st,
+                "progress": j.get("progress"),
+                "current_node": j.get("current_node"),
+                "result": j.get("result"),
+                "error": err_sse or None,
+            }
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            if st in ("done", "error", "interrupted"):
+                return
+            time.sleep(interval)
+            waited += interval
+
+        yield f"data: {json.dumps({'job_id': job_id, 'error': 'SSE timeout', 'status': 'error', 'type': 'status'}, ensure_ascii=False)}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 # -------------------------
 # 📝 Summarize file
@@ -1433,7 +1540,7 @@ def delete_source():
             return jsonify({'message': 'No matching source found', 'removed': 0})
 
         removed_total = 0
-        # Gọi delete_source_from_index cho từng stored name (faiss_utils sẽ rebuild index)
+        # Gọi delete_source_from_index cho từng stored name (vector_store sẽ rebuild index)
         for stored in stored_names:
             delete_source_from_index(stored)
             # count removed in meta by checking previous entries (best-effort)
@@ -1452,28 +1559,30 @@ def delete_source():
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-def run_mindmap_job(job_id: str, source_names: list[str], strategy_requested: str) -> None:
+def run_mindmap_job(job_id: str, source_names: list[str], generation_mode: str) -> None:
     """Background: sinh mindmap + lưu file; cập nhật mindmap_jobs thread-safe."""
-
-    def set_progress(p: int) -> None:
-        with mindmap_jobs_lock:
-            j = mindmap_jobs.get(job_id)
-            if j is not None:
-                j["progress"] = min(100, max(0, int(p)))
-
+    attach_mindmap_job_context(job_id)
     try:
         with mindmap_jobs_lock:
             if job_id in mindmap_jobs:
                 mindmap_jobs[job_id]["status"] = "running"
                 mindmap_jobs[job_id]["progress"] = max(int(mindmap_jobs[job_id].get("progress") or 0), 5)
+                mindmap_jobs[job_id]["current_node"] = f"Chế độ: {generation_mode}"
 
-        record = run_mindmap_generation(
-            INDEX_META_JSON_PATH,
-            source_names,
-            strategy_requested,
-            _append_mindmap,
-            progress_cb=set_progress,
-        )
+        if MINDMAP_GRAPH is None:
+            raise RuntimeError("MINDMAP_GRAPH chưa khởi tạo — kiểm tra logs khởi động.")
+
+        init_state = {
+            "job_id": job_id,
+            "source_names": source_names,
+            "strategy": generation_mode,  # strategy = mode để worker hiểu
+            "result": {},
+            "progress": 0,
+            "current_node": f"Chế độ: {generation_mode}",
+            "error": None,
+        }
+        out = _langgraph_invoke(MINDMAP_GRAPH, init_state, thread_id=job_id)
+        record = out.get("result") or {}
 
         with mindmap_jobs_lock:
             if job_id in mindmap_jobs:
@@ -1488,6 +1597,8 @@ def run_mindmap_job(job_id: str, source_names: list[str], strategy_requested: st
                 mindmap_jobs[job_id]["status"] = "error"
                 mindmap_jobs[job_id]["error"] = str(exc)
         print(f"[MINDMAP_JOB] job_id={job_id} failed: {exc}")
+    finally:
+        attach_mindmap_job_context(None)
 
 
 # -------------------------
@@ -1518,11 +1629,50 @@ def generate_mindmap():
         if not source_names:
             return jsonify({"error": "No sources selected"}), 400
 
-        strategy_requested = (
-            data.get("strategy") or data.get("mode") or data.get("method") or "iterative"
-        ).strip().lower()
+        # ========== PHASE 1: Parse mode and strategy SEPARATELY ==========
+        # Parse generation_mode: fast | balanced | quality
+        raw_mode = (data.get("mode") or data.get("generation_mode") or "").strip().lower()
+        if raw_mode and raw_mode in VALID_MODES:
+            generation_mode = raw_mode
+        else:
+            generation_mode = os.getenv("MINDMAP_GENERATION_MODE", "balanced")
+            if generation_mode not in VALID_MODES:
+                generation_mode = "balanced"
+
+        # Parse strategy_requested: auto | single_call_schema | mindmap_v2 | ...
+        raw_strategy = (data.get("strategy") or data.get("method") or "auto").strip().lower()
+        if raw_strategy in VALID_STRATEGIES:
+            strategy_requested = raw_strategy
+        else:
+            strategy_requested = "auto"
+
+        # ========== PHASE 2: Guard iterative ==========
+        # Block iterative for non-quality modes
+        if strategy_requested == "iterative" and generation_mode != "quality":
+            print(f"[MindMap Guard] iterative requested with mode={generation_mode}, downgrading to auto")
+            strategy_requested = "auto"
+
+        if generation_mode in {"fast", "balanced"} and strategy_requested in {"cmgn", "iterative"}:
+            print(f"[MindMap Guard] strategy={strategy_requested} is too slow for mode={generation_mode}, downgrading to auto")
+            strategy_requested = "auto"
+
+        # ========== PHASE 3: Log request ==========
+        job_timeout = get_job_timeout_for_mode(generation_mode)
+        llm_timeout = get_llm_timeout_for_mode(generation_mode)
+        print("[MindMap Request]", {
+            "mode": generation_mode,
+            "strategy_requested": strategy_requested,
+            "jobTimeout": job_timeout,
+            "llmTimeoutPerCall": llm_timeout,
+            "sources_count": len(source_names),
+        })
 
         job_id = str(uuid.uuid4())
+        try:
+            from app.domains.jobs.jobs_store import create_job as _js_create
+            _js_create(job_id, job_type="mindmap", status="pending", progress=0, current_node="Queued")
+        except Exception:
+            pass
         with mindmap_jobs_lock:
             mindmap_jobs[job_id] = {
                 "status": "pending",
@@ -1534,12 +1684,16 @@ def generate_mindmap():
 
         thread = threading.Thread(
             target=run_mindmap_job,
-            args=(job_id, source_names, strategy_requested),
+            args=(job_id, source_names, generation_mode),
             daemon=True,
         )
         thread.start()
 
-        return jsonify({"job_id": job_id, "status": "started"}), 202
+        return jsonify({
+            "job_id": job_id,
+            "status": "started",
+            "generation_mode": generation_mode,
+        }), 202
 
     except Exception as e:
         import traceback
@@ -1550,10 +1704,51 @@ def generate_mindmap():
 @app.get("/mindmap-status/<job_id>")
 def mindmap_status(job_id: str):
     _cleanup_old_mindmap_jobs()
+    # Uu tien SQLite jobs store neu bat
+    if (os.getenv("USE_SQLITE_JOBS", "1") or "").strip() not in ("0", "false", "False"):
+        try:
+            from app.domains.jobs.jobs_store import get_job as _js_get
+            j = _js_get(job_id)
+            if j and j.get("job_type") in ("mindmap", None):
+                # HARD TIMEOUT: Neu job running qua jobTimeout + 10s, mark timeout
+                if j.get("status") == "running":
+                    started = j.get("started_at", 0)
+                    timeout = j.get("jobTimeout", 180)
+                    if started > 0:
+                        elapsed = time_module.time() - started
+                        if elapsed > timeout + 10:
+                            # Mark as timeout
+                            j["status"] = "timeout"
+                            j["progress"] = 100
+                            j["error"] = f"Mindmap job exceeded timeout: {elapsed:.1f}s > {timeout}s"
+                            try:
+                                from app.domains.jobs.jobs_store import update_job as _js_update
+                                _js_update(job_id, j)
+                            except Exception:
+                                pass
+                return jsonify({
+                    "status": j.get("status"),
+                    "progress": j.get("progress", 0),
+                    "result": j.get("result"),
+                    "error": j.get("error"),
+                }), 200
+        except Exception:
+            pass
     with mindmap_jobs_lock:
         job = mindmap_jobs.get(job_id)
         if not job:
             return jsonify({"error": "Job not found"}), 404
+        # HARD TIMEOUT: Neu job running qua jobTimeout + 10s, mark timeout
+        if job.get("status") == "running":
+            started = job.get("started_at", 0)
+            timeout = job.get("jobTimeout", 180)
+            if started > 0:
+                elapsed = time_module.time() - started
+                if elapsed > timeout + 10:
+                    job["status"] = "timeout"
+                    job["progress"] = 100
+                    job["error"] = f"Mindmap job exceeded timeout: {elapsed:.1f}s > {timeout}s"
+                    print(f"[MindMap Status] Job {job_id} marked timeout: {elapsed:.1f}s > {timeout}s")
         return jsonify({
             "status": job.get("status"),
             "progress": job.get("progress", 0),
@@ -1588,8 +1783,7 @@ def memory_tree_status():
     Trả về danh sách source với status chi tiết: "none" | "building" | "completed"
     """
     try:
-        from memory_tree import _load_memory_trees, _normalize_video_stem
-        
+        from app.domains.memory.tree import _load_memory_trees, _normalize_video_stem        
         trees = _load_memory_trees()
         tree_map = {}
         for t in trees:
@@ -1780,7 +1974,7 @@ def _validate_source_exists(source_id: str, source_stem: str) -> Tuple[bool, Opt
     
     # Kiểm tra trong memory_trees.json
     try:
-        from memory_tree import _load_memory_trees
+        from app.domains.memory.tree import _load_memory_trees
         trees = _load_memory_trees()
         for t in trees:
             stem = _normalize_video_stem(t.get("source_stem", ""))
@@ -1905,8 +2099,7 @@ def get_memory_tree(source_stem: str):
     Trả về tree với nodes (có thể là partial nếu đang building).
     """
     try:
-        from memory_tree import _load_memory_trees, _normalize_video_stem
-        
+        from app.domains.memory.tree import _load_memory_trees, _normalize_video_stem        
         norm_stem = _normalize_video_stem(source_stem)
         trees = _load_memory_trees()
         

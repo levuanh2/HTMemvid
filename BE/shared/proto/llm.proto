@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package memvid.llm;
+
+import "common.proto";
+
+// llm-gateway: tập trung provider fallback (Ollama/Gemini/Groq) + embedding model.
+// Thay cho việc mọi module import cứng llm_factory và tự load model embedding.
+service LlmGateway {
+  // Mirror llm_factory.ask_ai() — fallback giữa các provider xử lý SERVER-SIDE.
+  rpc Ask (AskRequest) returns (AskResponse);
+
+  // Token streaming — thay qa_chain.answer_with_document_context_stream.
+  // Monolith forward token vào jobs_store.append_token.
+  rpc AskStream (AskRequest) returns (stream Token);
+
+  // Embeddings — thay get_embedding_model().encode([...]).
+  rpc Embed (EmbedRequest) returns (EmbedResponse);
+
+  // Introspection + cấu hình provider lúc runtime (sửa lỗi PROVIDERS-tính-tại-import).
+  rpc GetProviders (memvid.common.Empty) returns (ProvidersResponse);
+  rpc SetProviders (ProvidersResponse) returns (ProvidersResponse);
+}
+
+message AskRequest {
+  string prompt = 1;
+  string system_prompt = 2;
+  string model = 3;                 // optional override
+  string feature = 4;               // "chat" | "summary" | "mindmap"
+  memvid.common.LlmOptions options = 5;
+  double timeout_sec = 6;
+}
+
+message AskResponse {
+  string text = 1;
+  string provider_used = 2;         // provider nào trả lời (debug/quan sát)
+}
+
+message Token {
+  string text = 1;
+}
+
+message EmbedRequest {
+  repeated string texts = 1;
+  string model_name = 2;            // optional; mặc định = EMBEDDING_MODEL_NAME của server
+}
+
+message EmbedResponse {
+  repeated FloatVector vectors = 1;
+  int32 dim = 2;                    // để client assert khớp index.d (chống lệch chiều)
+}
+
+message FloatVector {
+  repeated float values = 1;
+}
+
+message ProvidersResponse {
+  repeated string providers = 1;    // thứ tự fallback
+  string embedding_model = 2;
+}

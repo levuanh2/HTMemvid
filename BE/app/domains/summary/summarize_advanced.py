@@ -11,11 +11,17 @@ import re
 import json
 from typing import List, Dict, Tuple, Optional
 import os
-from ai_provider import ask_ai
-from ingest_utils import split_text
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from app.clients.llm_factory import ask_ai
+from app.domains.ingest.ingest_utils import split_text
+try:
+    from shared.env_loader import load_project_env
+    load_project_env(override=False)
+except Exception:
+    pass
 
-# Chỉ dùng cho local Ollama (Gemini sẽ bỏ qua model).
-SLM_MODEL_SUMMARY = os.environ.get("SLM_MODEL_SUMMARY", "gemma2:2b")
+# Model mặc định cho summarize — đọc từ env (qwen2.5:14b)
+SLM_MODEL_SUMMARY = os.environ.get("SLM_MODEL_SUMMARY", "qwen2.5:14b")
 
 
 def preprocess_data(text: str) -> List[str]:
@@ -53,8 +59,8 @@ def extract_entities(text: str, model: str = None) -> List[str]:
     )
     
     user_prompt = f"Văn bản:\n{text}\n\nDanh sách thực thể quan trọng:"
-    
-    response = ask_ai(user_prompt, system_prompt=system_prompt, model=model)
+
+    response = ask_ai(user_prompt, system_prompt=system_prompt, model=model, feature="summary")
     
     # Parse response thành list
     entities = []
@@ -92,10 +98,10 @@ def summarize_with_entity_chain(text: str, entities: List[str], model: str = Non
         "Tạo bản tóm tắt dựa trên các thực thể trên:"
     )
     
-    return ask_ai(user_prompt, system_prompt=system_prompt, model=model)
+    return ask_ai(user_prompt, system_prompt=system_prompt, model=model, feature="summary")
 
 
-def chain_of_density(text: str, initial_summary: str = "", iterations: int = 5, model: str = None) -> str:
+def chain_of_density(text: str, initial_summary: str = "", iterations: int = 3, model: str = None) -> str:
     """
     Chain of Density: Tăng cường độ đậm đặc thông tin
     Lặp lại quy trình: Xác định thực thể mới -> Viết lại tóm tắt
@@ -117,19 +123,19 @@ def chain_of_density(text: str, initial_summary: str = "", iterations: int = 5, 
             "Thực thể/quan niệm quan trọng chưa có trong tóm tắt:"
         )
         
-        new_entities = ask_ai(user_prompt, system_prompt=system_prompt, model=model)
+        new_entities = ask_ai(user_prompt, system_prompt=system_prompt, model=model, feature="summary")
         new_entities_list = [e.strip() for e in new_entities.split('\n') if e.strip()][:3]
-        
+
         if not new_entities_list:
             break  # Không còn thực thể mới
-        
-        # Bước 2: Viết lại tóm tắt với cùng độ dài nhưng tích hợp thêm thực thể mới
+
+        # Bước 2: Viết lại tóm tắt tích hợp thực thể mới
         system_prompt2 = (
             "Bạn là một chuyên gia tóm tắt.\n"
             "Nhiệm vụ: Viết lại bản tóm tắt với CÙNG độ dài nhưng tích hợp thêm các thực thể mới.\n"
             "Bạn phải nén và hợp nhất văn bản để giữ nguyên độ dài nhưng thêm thông tin mới."
         )
-        
+
         entities_str = "\n".join(f"- {e}" for e in new_entities_list)
         user_prompt2 = (
             f"Bản tóm tắt hiện tại:\n{current_summary}\n\n"
@@ -137,8 +143,8 @@ def chain_of_density(text: str, initial_summary: str = "", iterations: int = 5, 
             f"Văn bản gốc (tham khảo):\n{text[:2000]}\n\n"
             "Bản tóm tắt mới (cùng độ dài, tích hợp thực thể mới):"
         )
-        
-        current_summary = ask_ai(user_prompt2, system_prompt=system_prompt2, model=model)
+
+        current_summary = ask_ai(user_prompt2, system_prompt=system_prompt2, model=model, feature="summary")
     
     return current_summary
 
@@ -162,27 +168,33 @@ def divide_and_conquer_summarize(text: str, model: str = None, pre_chunks: Optio
     
     # Tóm tắt từng phần
     section_summaries = []
-    for idx, section in enumerate(sections):
-        system_prompt = (
-            "Bạn là một chuyên gia tóm tắt.\n"
-            "Nhiệm vụ: Tóm tắt phần văn bản này một cách súc tích, tập trung vào ý chính."
-        )
-        summary = ask_ai(f"Phần văn bản:\n{section}", system_prompt=system_prompt, model=model)
-        section_summaries.append(summary)
-    
+    # Tóm tắt từng section SONG SONG
+    sys_section = (
+        "Bạn là một chuyên gia tóm tắt.\n"
+        "Nhiệm vụ: Tóm tắt phần văn bản này một cách súc tích, tập trung vào ý chính."
+    )
+
+    def _summarize_section(section: str) -> str:
+        return ask_ai(f"Phần văn bản:\n{section}", system_prompt=sys_section, model=model, feature="summary")
+
+    with ThreadPoolExecutor(max_workers=min(len(sections), 4)) as ex:
+        futures = {ex.submit(_summarize_section, s): i for i, s in enumerate(sections)}
+        results = {}
+        for fut in as_completed(futures):
+            results[futures[fut]] = fut.result()
+    section_summaries = [results[i] for i in range(len(sections))]
+
     # Tổng hợp
     if len(section_summaries) == 1:
         return section_summaries[0]
-    
+
     combined = "\n\n".join(f"Phần {i+1}: {s}" for i, s in enumerate(section_summaries))
-    
     system_prompt = (
         "Bạn là một chuyên gia tổng hợp tài liệu.\n"
         "Nhiệm vụ: Tổng hợp các phần tóm tắt thành một bản tóm tắt hoàn chỉnh, mạch lạc.\n"
         "Loại bỏ sự trùng lặp, kết nối các ý tưởng một cách tự nhiên."
     )
-    
-    final_summary = ask_ai(f"Các phần tóm tắt:\n{combined}", system_prompt=system_prompt, model=model)
+    final_summary = ask_ai(f"Các phần tóm tắt:\n{combined}", system_prompt=system_prompt, model=model, feature="summary")
     return final_summary
 
 
@@ -307,42 +319,67 @@ def advanced_summarize(
         Dict chứa kết quả tóm tắt và metadata
     """
     model = model or SLM_MODEL_SUMMARY
-    
-    # D: Data Preprocessing (nếu có sẵn chunk thì dùng lại, tránh tách lần nữa)
+
+    # D: Data Preprocessing
     chunks_input = pre_chunks if pre_chunks else preprocess_data(text)
     processed_text = "\n\n".join(chunks_input)
-    
-    # M + G: Modeling và Generation
-    # Bước 1: Tóm tắt cơ bản (có thể dùng DANCER)
-    if use_dancer and len(processed_text) > 2000:
-        base_summary = divide_and_conquer_summarize(processed_text, model=model, pre_chunks=chunks_input)
-    else:
-        # Tóm tắt đơn giản
-        system_prompt = "Bạn là chuyên gia tóm tắt. Tóm tắt văn bản một cách súc tích, tập trung vào ý chính."
-        base_summary = ask_ai(f"Văn bản:\n{processed_text[:3000]}", system_prompt=system_prompt, model=model)
-    
-    # Bước 2: Entity Chain Planning (nếu bật)
+    text_len = len(processed_text)
+
+    # Dynamic CoD iterations theo độ dài văn bản
+    cod_iterations = 1 if text_len < 1000 else (2 if text_len < 4000 else 3)
+
+    # M + G: Bước 1 (DANCER) và Bước 2 (Entity) chạy SONG SONG
+    base_summary = ""
+    entities: List[str] = []
+
+    def _run_dancer() -> str:
+        if use_dancer and text_len > 2000:
+            return divide_and_conquer_summarize(processed_text, model=model, pre_chunks=chunks_input)
+        sys_p = "Bạn là chuyên gia tóm tắt. Tóm tắt văn bản một cách súc tích, tập trung vào ý chính."
+        return ask_ai(f"Văn bản:\n{processed_text[:3000]}", system_prompt=sys_p, model=model, feature="summary")
+
+    def _run_entities() -> List[str]:
+        if use_entity_chain:
+            return extract_entities(processed_text[:3000], model=model)
+        return []
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_dancer = ex.submit(_run_dancer)
+        f_entities = ex.submit(_run_entities)
+        base_summary = f_dancer.result()
+        entities = f_entities.result()
+
+    # Bước 2 (Entity Chain) — dùng kết quả đã có
     final_summary = base_summary
-    entities = []
-    if use_entity_chain:
-        entities = extract_entities(processed_text[:3000], model=model)
-        if entities:
-            final_summary = summarize_with_entity_chain(processed_text[:3000], entities, model=model)
-    
-    # Bước 3: Chain of Density (nếu bật)
+    if use_entity_chain and entities:
+        final_summary = summarize_with_entity_chain(processed_text[:3000], entities, model=model)
+
+    # Bước 3: Chain of Density — dynamic iterations
     if use_cod:
-        final_summary = chain_of_density(processed_text[:3000], final_summary, iterations=3, model=model)
-    
-    # Bước 4: Structured Extraction (nếu bật)
+        final_summary = chain_of_density(
+            processed_text[:3000], final_summary, iterations=cod_iterations, model=model
+        )
+
+    # Bước 4 & E: structured + fact_check SONG SONG
     structured_data = None
-    if use_structured:
-        structured_data = structured_extraction(processed_text[:2000], final_summary, model=model)
-    
-    # E: Evaluation (FactCC)
     fact_check_result = None
-    if use_fact_check:
-        fact_check_result = fact_check(processed_text[:3000], final_summary, model=model)
-    
+
+    def _run_structured() -> Optional[Dict]:
+        if use_structured:
+            return structured_extraction(processed_text[:2000], final_summary, model=model)
+        return None
+
+    def _run_fact_check() -> Optional[Dict]:
+        if use_fact_check:
+            return fact_check(processed_text[:3000], final_summary, model=model)
+        return None
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_struct = ex.submit(_run_structured)
+        f_fact = ex.submit(_run_fact_check)
+        structured_data = f_struct.result()
+        fact_check_result = f_fact.result()
+
     return {
         "summary": final_summary,
         "base_summary": base_summary,
@@ -356,7 +393,8 @@ def advanced_summarize(
             "used_structured": use_structured,
             "used_fact_check": use_fact_check,
             "text_length": len(text),
-            "summary_length": len(final_summary)
-        }
+            "summary_length": len(final_summary),
+            "cod_iterations": cod_iterations,
+        },
     }
 

@@ -15,10 +15,26 @@ import json
 import ast
 import os
 from collections import deque
-from ai_provider import ask_ai
+from app.clients.llm_factory import ask_ai
+try:
+    from shared.env_loader import load_project_env
+    load_project_env(override=False)
+except Exception:
+    pass
 
-# Chỉ dùng cho local Ollama (Gemini sẽ bỏ qua model).
-SLM_MODEL_MINDMAP = os.environ.get("SLM_MODEL_MINDMAP", "gemma2:2b")
+# Model cho mindmap (ưu tiên env MINDMAP_MODEL theo Phase 2 plan).
+MINDMAP_MODEL = (
+    (os.environ.get("MINDMAP_MODEL") or "").strip()
+    or (os.environ.get("SLM_MODEL_MINDMAP") or "").strip()
+    or "gemma2:2b"
+)
+MINDMAP_OPTIONS = {"temperature": 0.2}
+
+# Timeout mặc định cho các LLM calls trong mindmap_utils
+DEFAULT_MINDMAP_TIMEOUT = 90.0  # 90s cho mỗi call
+
+def _ask_mindmap(user_prompt: str, *, system_prompt: str, model: str | None = None, timeout: float | None = DEFAULT_MINDMAP_TIMEOUT) -> str:
+    return ask_ai(user_prompt, system_prompt=system_prompt, model=model or MINDMAP_MODEL, options=MINDMAP_OPTIONS, timeout=timeout)
 
 
 MAX_SEGMENTS_FOR_MINDMAP = 24
@@ -351,7 +367,7 @@ def _generate_coreference_graph(sentences: list[dict], model: str | None) -> dic
         "Hãy dựng đồ thị tham chiếu đồng ngữ theo hướng dẫn CMGN.",
     ])
 
-    raw = ask_ai(user_prompt, system_prompt=system_prompt, model=model or SLM_MODEL_MINDMAP)
+    raw = _ask_mindmap(user_prompt, system_prompt=system_prompt, model=model)
     graph_obj = extract_json_tree(raw)
     return _sanitize_coreference_graph(graph_obj, sentences)
 
@@ -432,7 +448,7 @@ def _generate_mindmap_from_coreference_graph(
         "Hãy xuất mindmap hoàn chỉnh, cân đối 4-7 nhánh cấp 1 nếu có đủ nội dung.",
     ])
 
-    raw = ask_ai(user_prompt, system_prompt=system_prompt, model=model or SLM_MODEL_MINDMAP)
+    raw = _ask_mindmap(user_prompt, system_prompt=system_prompt, model=model)
     tree_obj = extract_json_tree(raw)
     sanitized_tree = _sanitize_tree(tree_obj, noise_terms)
     if not sanitized_tree.get("children"):
@@ -509,7 +525,7 @@ def _detect_noise_terms(content_segments: list[str], model: str | None) -> set[s
     ])
 
     try:
-        raw = ask_ai(user_prompt, system_prompt=system_prompt, model=model or SLM_MODEL_MINDMAP)
+        raw = _ask_mindmap(user_prompt, system_prompt=system_prompt, model=model)
         parsed = extract_json_tree(raw)
     except Exception:
         parsed = None
@@ -676,7 +692,7 @@ def _generate_root_topic(content_segments: list[str], noise_terms: set[str], mod
         "Không dùng các cụm liên quan đến chấm điểm, giảng viên, hay metadata hành chính." ,
     ])
 
-    raw = ask_ai(user_prompt, system_prompt=system_prompt, model=model or SLM_MODEL_MINDMAP)
+    raw = _ask_mindmap(user_prompt, system_prompt=system_prompt, model=model)
     try:
         root_obj = extract_json_tree(raw)
     except Exception as exc:
@@ -768,7 +784,7 @@ def _expand_leaf_node(
             )
             user_prompt_current += "\n\n⚠️ Bổ sung: JSON lần trước lỗi, hãy trả về đúng schema {\"expand\": bool, \"children\": [...]}"
 
-        raw = ask_ai(user_prompt_current, system_prompt=system_prompt_current, model=model or SLM_MODEL_MINDMAP)
+        raw = _ask_mindmap(user_prompt_current, system_prompt=system_prompt_current, model=model)
         try:
             result = extract_json_tree(raw)
             break
@@ -940,7 +956,7 @@ def _expand_tree(tree: dict, bullet_block: str, model: str | None, noise_terms: 
 
 
     try:
-        raw = ask_ai(user_prompt, system_prompt=system_prompt, model=model or SLM_MODEL_MINDMAP)
+        raw = _ask_mindmap(user_prompt, system_prompt=system_prompt, model=model)
         expanded_obj = extract_json_tree(raw)
         return _sanitize_tree(expanded_obj, noise_terms)
     except Exception as e:
@@ -983,7 +999,7 @@ def _build_mindmap_single_shot(content_segments: list[str], noise_terms: set[str
                 + "). Chỉ trả về block ```json ...``` chứa mindmap hợp lệ, không thêm text khác."
             )
 
-        raw = ask_ai(base_user_prompt, system_prompt=system_prompt_final, model=model or SLM_MODEL_MINDMAP)
+        raw = _ask_mindmap(base_user_prompt, system_prompt=system_prompt_final, model=model)
         try:
             tree_obj = extract_json_tree(raw)
             break
@@ -1123,7 +1139,7 @@ def _run_critic(system_prompt: str, user_prompt: str, noise_terms: set[str] | No
             )
             user_prompt_current += "\n\n⚠️ JSON lần trước lỗi, hãy trả về đúng block ```json``` duy nhất cho mindmap (tiếng Việt 100%)."
 
-        raw = ask_ai(user_prompt_current, system_prompt=system_prompt_current, model=model or SLM_MODEL_MINDMAP)
+        raw = _ask_mindmap(user_prompt_current, system_prompt=system_prompt_current, model=model)
         try:
             candidate = extract_json_tree(raw)
             return _sanitize_tree(candidate, noise_terms)
@@ -1261,7 +1277,7 @@ def _apply_mindmap_critics(tree: dict, content_segments: list[str], noise_terms:
     return refined
 
 
-def get_nested_mindmap(chunks: list[str], model: str = None) -> dict:
+def get_nested_mindmap(chunks: list[str], model: str = None, enable_critics: bool = True) -> dict:
     """Sinh mindmap nested với iterative prompting, fallback single-shot."""
     prepared_chunks = _prepare_mindmap_chunks(chunks)
     if not prepared_chunks:
@@ -1282,7 +1298,10 @@ def get_nested_mindmap(chunks: list[str], model: str = None) -> dict:
         try:
             tree = builder(filtered_chunks, noise_terms, model)
             if tree and tree.get("children"):
-                return _apply_mindmap_critics(tree, filtered_chunks, noise_terms, model)
+                # Only apply critics when enabled
+                if enable_critics:
+                    return _apply_mindmap_critics(tree, filtered_chunks, noise_terms, model)
+                return tree
         except Exception as exc:
             print(f"⚠️ Mindmap builder {label} failed: {exc}")
             last_error = exc
@@ -1303,7 +1322,7 @@ def get_main_branches(chunks: list[str], model: str = None) -> list[str]:
     )
     user_prompt = "Liệt kê 3-5 mục chính (ngắn gọn 2-4 từ) từ nội dung:\n\n" + "\n\n".join(chunks[:6])
 
-    raw = ask_ai(user_prompt, system_prompt=system_prompt, model=model or SLM_MODEL_MINDMAP)
+    raw = _ask_mindmap(user_prompt, system_prompt=system_prompt, model=model)
 
     m = re.search(r"(\[.*?\])", raw or "", flags=re.S)
     try:
@@ -1353,7 +1372,7 @@ def generate_mindmap_flat(chunks: list[str], model: str = None) -> list[dict]:
     return flatten_mindmap(tree)
 
 
-def generate_mindmap_cmgn(chunks: list[str], model: str = None) -> list[dict]:
+def generate_mindmap_cmgn(chunks: list[str], model: str = None, enable_critics: bool = True) -> list[dict]:
     """Sinh mindmap theo phương pháp CMGN (Coreference-Guided)."""
     prepared_chunks = _prepare_mindmap_chunks(chunks)
     if not prepared_chunks:
@@ -1381,11 +1400,15 @@ def generate_mindmap_cmgn(chunks: list[str], model: str = None) -> list[dict]:
     except Exception as exc:
         print(f"⚠️ CMGN: lỗi sinh mindmap từ graph ({exc}), fallback nested builder")
         try:
-            tree = get_nested_mindmap(filtered_chunks, model=model)
+            tree = get_nested_mindmap(filtered_chunks, model=model, enable_critics=enable_critics)
         except Exception as nested_exc:
             print(f"⚠️ CMGN fallback nested cũng lỗi: {nested_exc}")
             mains = get_main_branches(filtered_chunks, model=model)
             tree = {"name": "Mind Map", "children": [{"name": m, "children": []} for m in mains]}
 
-    refined_tree = _apply_mindmap_critics(tree, filtered_chunks, noise_terms, model)
+    # Only apply critics when enabled (quality mode)
+    if enable_critics:
+        refined_tree = _apply_mindmap_critics(tree, filtered_chunks, noise_terms, model)
+    else:
+        refined_tree = tree
     return flatten_mindmap(refined_tree)

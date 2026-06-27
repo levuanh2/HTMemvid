@@ -1,0 +1,10 @@
+shared/proto/gen/
+__pycache__/
+*.pyc
+*.sqlite*
+index_backup_*/
+.pytest_cache/
+videos/
+input_docs/
+data/
+models/

@@ -6,6 +6,7 @@ Thay thế hoàn toàn faiss_utils.py + phần LC trước đây tách file.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from datetime import datetime
@@ -17,20 +18,22 @@ import numpy as np
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 
-from llm_factory import (
+from app.clients.llm_factory import (
     DEFAULT_EMBEDDING_MODEL_NAME,
     get_embedding_model,
     get_embeddings,
 )
-
+from app.domains.vectorstore.embedding_utils import normalize_embeddings_array
 try:
-    from env_loader import load_project_env
-
+    from shared.env_loader import load_project_env
     load_project_env(override=False)
 except Exception:
     pass
 
-DATA_ROOT = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parent)))
+logger = logging.getLogger(__name__)
+
+from shared.paths import BE_ROOT
+DATA_ROOT = Path(os.environ.get("DATA_DIR", str(BE_ROOT)))
 INDEX_DIR = Path(os.environ.get("INDEX_DIR", str(DATA_ROOT / "index")))
 
 
@@ -135,6 +138,24 @@ def _load_meta() -> Dict[str, Dict]:
     return {}
 
 
+def load_meta() -> Dict[str, Dict]:
+    """Đọc THUẦN index.json (chunk_id -> {text, video, embedding, ...}) cho các
+    consumer ngoài (memory_tree, retrieval) — seam VectorStore.load_meta().
+
+    Khác _load_meta() nội bộ: KHÔNG tự thêm khoá __meta__ và KHÔNG ghi lại file
+    (tránh side-effect khi chỉ đọc). Hành vi khớp memory_tree._load_index_meta cũ.
+    """
+    p = Path(META_PATH)
+    if not p.exists():
+        return {}
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        print(f"⚠️ Không thể đọc index metadata: {exc}")
+        return {}
+
+
 def _save_meta(meta: dict) -> None:
     os.makedirs(os.path.dirname(META_PATH), exist_ok=True)
     tmp_path = Path(META_PATH).with_suffix(".tmp")
@@ -160,17 +181,49 @@ def _normalize_source_id(name: str) -> str:
     return cleaned.strip().lower()
 
 
+def _get_current_embedding_dim() -> int:
+    """Lấy embedding dimension thực tế từ model hiện tại (tránh hard-code)."""
+    model = _require_embedding_model()
+    dummy = model.encode(["dimension_check"], convert_to_numpy=True, show_progress_bar=False)
+    return int(dummy.shape[1])
+
+
 def _load_index(dim: int):
+    """
+    Load hoặc tạo FAISS index với dimension validation.
+    Nếu index cũ có dim khác, xóa và tạo mới.
+    """
     if os.path.exists(INDEX_PATH):
-        idx = faiss.read_index(INDEX_PATH)
-        if not isinstance(idx, faiss.IndexIDMap):
-            base = faiss.IndexFlatL2(dim)
-            new_idx = faiss.IndexIDMap(base)
-            xb = idx.reconstruct_n(0, idx.ntotal)
-            ids = np.arange(idx.ntotal, dtype="int64")
-            new_idx.add_with_ids(xb, ids)
-            return new_idx
-        return idx
+        try:
+            idx = faiss.read_index(INDEX_PATH)
+            actual_dim = idx.d
+            print(f"[vector_store] _load_index: index.d={actual_dim} requested_dim={dim} ntotal={idx.ntotal}")
+            if actual_dim != dim:
+                print(
+                    f"[INDEX] Dimension mismatch: index có {actual_dim}, model yêu cầu {dim}. "
+                    f"Xóa index cũ và tạo mới."
+                )
+                try:
+                    os.remove(INDEX_PATH)
+                except OSError:
+                    pass
+                base = faiss.IndexFlatL2(dim)
+                return faiss.IndexIDMap(base)
+            if not isinstance(idx, faiss.IndexIDMap):
+                base = faiss.IndexFlatL2(dim)
+                new_idx = faiss.IndexIDMap(base)
+                xb = idx.reconstruct_n(0, idx.ntotal)
+                ids = np.arange(idx.ntotal, dtype="int64")
+                new_idx.add_with_ids(xb, ids)
+                return new_idx
+            return idx
+        except Exception as exc:
+            logger.warning("[vector_store] Cannot read existing index: %s. Creating new.", exc)
+            try:
+                os.remove(INDEX_PATH)
+            except OSError:
+                pass
+
     base = faiss.IndexFlatL2(dim)
     return faiss.IndexIDMap(base)
 
@@ -273,14 +326,23 @@ def append_chunks_to_lc_index(
         meta[str(ids[i])] = meta_entry
 
     num_chunks = sum(1 for k in meta.keys() if isinstance(k, str) and k.isdigit())
+    model_name = MODEL_NAME
+    try:
+        from app.clients.llm_factory import get_embeddings
+        dummy = get_embeddings().embed_query("dim_check")
+        emb_dim = len(dummy)
+    except Exception:
+        emb_dim = 0
     meta["__meta__"] = {
-        "version": "1.0",
+        "version": "1.1",
         "created_at": meta.get("__meta__", {}).get("created_at") or now,
         "num_chunks": num_chunks,
+        "embedding_model_name": model_name,
+        "embedding_dim": emb_dim,
         "vector_backend": "langchain_faiss",
     }
     _save_meta(meta)
-    print(f"[vector_store] added {len(chunks)} chunks video={video_name!r} (total={num_chunks})")
+    print(f"[vector_store] added {len(chunks)} chunks video={video_name!r} (total={num_chunks}, model={model_name})")
 
 
 def rebuild_lc_index_from_meta(meta: Dict[str, Any]) -> None:
@@ -330,14 +392,22 @@ def rebuild_lc_index_from_meta(meta: Dict[str, Any]) -> None:
     vs.save_local(str(INDEX_DIR))
 
     num_chunks = len(pairs)
+    emb_dim = 0
+    try:
+        dummy = emb.embed_query("dim_check")
+        emb_dim = len(dummy)
+    except Exception:
+        pass
     meta["__meta__"] = {
-        "version": "1.0",
+        "version": "1.1",
         "created_at": meta.get("__meta__", {}).get("created_at") or datetime.now().isoformat(),
         "num_chunks": num_chunks,
+        "embedding_model_name": MODEL_NAME,
+        "embedding_dim": emb_dim,
         "vector_backend": "langchain_faiss",
     }
     _save_meta(meta)
-    print(f"[vector_store] rebuilt LC FAISS vectors={num_chunks}")
+    print(f"[vector_store] rebuilt LC FAISS vectors={num_chunks} (model={MODEL_NAME})")
 
 
 def similarity_search_lc(query: str, k: int = 5) -> List[str]:
@@ -375,10 +445,24 @@ def append_to_index(chunks: List[str], video_name: str = "", custom_metadata: Li
             batch_size=batch_size,
             show_progress_bar=False,
         ).astype("float32")
+        print(f"[vector_store] batch {i//batch_size}: type={type(batch_embeds)}, shape={getattr(batch_embeds, 'shape', None)}")
         all_embeds.append(batch_embeds)
 
     embeds = np.vstack(all_embeds) if len(all_embeds) > 1 else all_embeds[0]
+    
+    # Validate embeddings trước khi add vào index
+    try:
+        embeds = normalize_embeddings_array(
+            embeds, 
+            expected_count=len(chunks), 
+            context="append_to_index"
+        )
+    except ValueError as e:
+        print(f"[vector_store] ERROR: embedding validation failed: {e}")
+        raise
+
     dim = embeds.shape[1]
+    print(f"[vector_store] append_to_index: model={MODEL_NAME} chunks={len(chunks)} embeds_shape={embeds.shape}")
 
     meta = _load_meta()
 
@@ -411,12 +495,14 @@ def append_to_index(chunks: List[str], video_name: str = "", custom_metadata: Li
 
     num_chunks = sum(1 for k in meta.keys() if isinstance(k, str) and k.isdigit())
     meta["__meta__"] = {
-        "version": "1.0",
+        "version": "1.1",
         "created_at": meta.get("__meta__", {}).get("created_at") or now,
         "num_chunks": num_chunks,
+        "embedding_model_name": MODEL_NAME,
+        "embedding_dim": dim,
     }
     _save_meta(meta)
-    print(f"[INDEX] added {len(chunks)} chunks video={video_name!r} (total={num_chunks})")
+    print(f"[INDEX] added {len(chunks)} chunks video={video_name!r} (total={num_chunks}, model={MODEL_NAME}, dim={dim})")
 
 
 def search_index(query: str, k: int = 5) -> List[str]:
@@ -436,7 +522,28 @@ def search_index(query: str, k: int = 5) -> List[str]:
 
     model = _require_embedding_model()
     qv = model.encode([query], convert_to_numpy=True).astype("float32")
-    idx = faiss.read_index(INDEX_PATH)
+    
+    # Validate query vector shape
+    if qv.ndim == 1:
+        qv = qv.reshape(1, -1)
+    if qv.ndim != 2 or qv.shape[0] != 1:
+        logger.warning("[vector_store] Invalid query vector shape: %s", qv.shape)
+        return []
+    
+    try:
+        idx = faiss.read_index(INDEX_PATH)
+    except Exception as exc:
+        logger.error("[vector_store] Cannot read FAISS index: %s", exc)
+        return []
+    
+    # Validate dimension match
+    if qv.shape[1] != idx.d:
+        logger.warning(
+            "[vector_store] Query dim=%d != index dim=%d. Cannot search.",
+            qv.shape[1], idx.d
+        )
+        return []
+    
     _, I = idx.search(qv, k)
 
     meta = _load_meta()
@@ -548,10 +655,12 @@ def rebuild_chunk_index(existing_meta: Dict[str, Dict] | None = None) -> None:
             batch_size=batch_size,
             show_progress_bar=False,
         ).astype("float32")
+        print(f"[vector_store] rebuild batch {i//batch_size}: shape={getattr(batch_embeds, 'shape', None)}")
         all_embeds.append(batch_embeds)
 
     embeds = np.vstack(all_embeds) if len(all_embeds) > 1 else all_embeds[0]
     dim = embeds.shape[1]
+    print(f"[vector_store] rebuild_chunk_index: model={MODEL_NAME} texts={len(texts)} embeds_shape={embeds.shape}")
 
     base = faiss.IndexFlatL2(dim)
     idx = faiss.IndexIDMap(base)
@@ -561,9 +670,11 @@ def rebuild_chunk_index(existing_meta: Dict[str, Dict] | None = None) -> None:
 
     num_chunks = len(ids)
     meta["__meta__"] = {
-        "version": "1.0",
+        "version": "1.1",
         "created_at": meta.get("__meta__", {}).get("created_at") or datetime.now().isoformat(),
         "num_chunks": num_chunks,
+        "embedding_model_name": MODEL_NAME,
+        "embedding_dim": dim,
     }
     _save_meta(meta)
-    print(f"[INDEX] rebuilt FAISS vectors= {num_chunks}")
+    print(f"[INDEX] rebuilt FAISS vectors={num_chunks} (model={MODEL_NAME}, dim={dim})")

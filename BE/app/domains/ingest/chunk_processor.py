@@ -12,9 +12,9 @@ import qrcode
 from qrcode import constants
 import cv2
 
-from faiss_utils import append_to_index
-from video_utils import save_qr_frames_to_video  # giữ nguyên hàm cũ để lưu video
-
+from app.domains.vectorstore.store import append_to_index
+from app.domains.ingest.video_utils import save_qr_frames_to_video
+  # giữ nguyên hàm cũ để lưu video
 # Ngưỡng an toàn cho QR code (version 40, error correction L)
 MAX_QR_BYTES = 2953  # tối đa byte
 MAX_QR_CHARS = 2300  # ước lượng an toàn cho tiếng Việt/Anh (khoảng 80-85% capacity)
@@ -128,7 +128,7 @@ def process_and_store_chunks(chunks:list[str],video_name:str,timestamp:str,max_w
     current_global_id = 0  # sẽ dùng để tạo ID cha và sub
 
     # Load existing meta để lấy ID tiếp theo
-    from faiss_utils import _load_meta
+    from app.domains.vectorstore.store import _load_meta
     meta = _load_meta()
     existing_ids = [int(k.split('-')[0]) for k in meta.keys() if '-' in k or k.isdigit()]
     next_parent_id = max(existing_ids + [0]) + 1 if existing_ids else 0

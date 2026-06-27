@@ -5,9 +5,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from faiss_utils import append_to_index
-from video_utils import decode_video_qr
-
+from app.domains.vectorstore.store import append_to_index
+from app.domains.ingest.video_utils import decode_video_qr
 QR_METADATA_PREFIX = "[METADATA:"
 QR_METADATA_SUFFIX = "]"
 
@@ -72,7 +71,8 @@ def rebuild_faiss_index_from_videos(
     - Reconstruct original chunks by grouping QR frames by parent_id and sorting by order
     - Rebuild /app/index/index.faiss and index.json from reconstructed chunk texts
     """
-    data_dir = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parent)))
+    from shared.paths import BE_ROOT
+    data_dir = Path(os.environ.get("DATA_DIR", str(BE_ROOT)))
     video_dir = Path(os.environ.get("VIDEO_DIR", str(data_dir / "videos")))
     index_dir = Path(os.environ.get("INDEX_DIR", str(data_dir / "index")))
 

@@ -1,9 +1,40 @@
-__pycache__
-*.pyc
-.env
+# BE build context = ./BE (xem docker-compose). Loại artefact/state khỏi context
+# để image nhẹ và build nhanh.
+
+# VCS / IDE
+.git/
+.idea/
+.vscode/
+
+# Python caches & virtualenvs
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
 venv/
-videos/
+env/
+
+# Env / secrets (compose truyền env vào container; không bake .env vào image)
+.env
+.env.*
+
+# Runtime data & state (tạo lúc chạy / mount volume)
 index/
+index_backup_*/
 memory/
-.git
-node_modules/
+videos/
+input_docs/
+data/
+qr_frames/
+models/
+*.sqlite
+*.sqlite-*
+*.mp4
+*.avi
+*.log
+
+# gRPC stub sinh lại trong image qua scripts/build_proto.py
+shared/proto/gen/

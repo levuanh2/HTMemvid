@@ -73,13 +73,57 @@ def build_ingest_graph(
             log_node_event(state["job_id"], "ExtractText", "error", t.ms(), {"error": str(e)})
             return {**state, "error": str(e), "current_node": "ExtractText"}
 
+    def normalize_node(state: dict) -> dict:
+        """Raw -> Markdown (giữ heading/bảng) + làm sạch + lưu .md artifact.
+        Lỗi ở đây KHÔNG chặn pipeline: để trống markdown -> chunk fallback text cũ."""
+        t = _Timer()
+        try:
+            _set_job(state["job_id"], progress=20, current_node="Normalize")
+            from shared.config import get_settings
+            s = get_settings()
+            markdown = ""
+            md_path = ""
+            if s.use_markdown_ingest:
+                try:
+                    from app.domains.ingest.markdown_convert import convert_and_save
+                    from app.domains.ingest.clean import clean_markdown
+                    raw_md, md_path = convert_and_save(state["file_path"], md_dir=s.md_dir or None)
+                    markdown = clean_markdown(raw_md, source=state.get("filename"))
+                except Exception as exc:
+                    log_node_event(state["job_id"], "Normalize", "warn", t.ms(), {"fallback": str(exc)})
+                    markdown = ""
+            log_node_event(state["job_id"], "Normalize", "ok", t.ms(), {"md_chars": len(markdown)})
+            return {**state, "markdown": markdown, "md_path": md_path, "progress": 20, "current_node": "Normalize", "error": None}
+        except Exception:
+            return {**state, "markdown": "", "progress": 20, "current_node": "Normalize", "error": None}
+
     def chunk_node(state: dict) -> dict:
         t = _Timer()
         try:
             update_source_status(state["source_id"], "processing", progress=0.3)
             _set_job(state["job_id"], progress=30, current_node="Chunk")
+            from shared.config import get_settings
+            s = get_settings()
             use_lc = (os.getenv("USE_LC_INGEST", "1") or "").strip().lower() not in ("0", "false", "no", "off")
-            if use_lc and state.get("raw_docs"):
+            markdown = state.get("markdown") or ""
+            chunk_headings: list[str] = []
+
+            if markdown and s.chunk_strategy == "markdown_header":
+                # Structured: cắt theo heading; Enriched: contextual + hypo-QA (gate trong enrich)
+                from app.domains.ingest.chunking import chunk_markdown
+                from app.domains.ingest import enrich
+                pieces = chunk_markdown(markdown)
+                doc_context = markdown[:2000]
+                chunks = []
+                for p in pieces:
+                    txt = enrich.contextualize(p["text"], doc_context)
+                    qa = enrich.hypothetical_qa(p["text"])
+                    if qa:
+                        txt = txt + "\n\n" + qa
+                    if txt.strip():
+                        chunks.append(txt)
+                        chunk_headings.append(p.get("heading_path", ""))
+            elif use_lc and state.get("raw_docs"):
                 from app.domains.ingest.document_loader import split_documents
                 chunk_size = int(os.getenv("CHUNK_SIZE", "500"))
                 chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "50"))
@@ -87,10 +131,33 @@ def build_ingest_graph(
                 chunks = [c.page_content.strip() for c in lc_chunks if (c.page_content or "").strip()]
             else:
                 chunks = split_text(state["text"])
+
             if not chunks:
                 raise ValueError("No chunks generated")
-            log_node_event(state["job_id"], "Chunk", "ok", t.ms(), {"chunks": len(chunks)})
-            return {**state, "chunks": chunks, "progress": 30, "current_node": "Chunk", "error": None}
+
+            # Doc-level metadata (rẻ, không cần LLM): source/category/date/language — áp cho mọi chunk.
+            doc_meta: dict[str, Any] = {}
+            if s.enrich_metadata:
+                from app.domains.ingest import enrich as _enrich
+                dm = _enrich.attach_metadata(
+                    state.get("text") or chunks[0],
+                    source=state.get("filename") or "",
+                    file_path=state.get("file_path"),
+                )
+                dm.pop("heading_path", None)
+                dm.pop("page", None)
+                doc_meta = dm
+
+            log_node_event(state["job_id"], "Chunk", "ok", t.ms(), {"chunks": len(chunks), "md": bool(markdown)})
+            return {
+                **state,
+                "chunks": chunks,
+                "chunk_headings": chunk_headings,
+                "doc_meta": doc_meta,
+                "progress": 30,
+                "current_node": "Chunk",
+                "error": None,
+            }
         except Exception as e:
             log_node_event(state["job_id"], "Chunk", "error", t.ms(), {"error": str(e)})
             return {**state, "error": str(e), "current_node": "Chunk"}
@@ -127,16 +194,25 @@ def build_ingest_graph(
             update_source_status(state["source_id"], "processing", progress=0.5)
             _set_job(state["job_id"], progress=75, current_node="EmbedAndIndex")
 
-            all_chunks = [entry["text"] for entry in state["metadata_entries"]]
-            all_metadata = [
-                {
+            entries = state["metadata_entries"]
+            all_chunks = [entry["text"] for entry in entries]
+            doc_meta = state.get("doc_meta") or {}
+            headings = state.get("chunk_headings") or []
+            # heading_path khớp 1:1 khi không bị sub-split (chunk ≤ SAFE_CHUNK_CHARS).
+            aligned = len(headings) == len(entries)
+            all_metadata = []
+            for i, entry in enumerate(entries):
+                md = {
                     "parent_id": entry.get("parent_id"),
                     "sub_order": entry.get("sub_order"),
                     "total_parts": entry.get("total_parts"),
                     "is_subchunk": entry.get("is_subchunk", False),
                 }
-                for entry in state["metadata_entries"]
-            ]
+                if doc_meta:
+                    md.update(doc_meta)  # source/category/date/language (doc-level)
+                if aligned and headings[i]:
+                    md["heading_path"] = headings[i]
+                all_metadata.append(md)
             append_to_index(
                 chunks=all_chunks,
                 video_name=state["video_path"],
@@ -222,6 +298,7 @@ def build_ingest_graph(
 
     g = StateGraph(IngestState)
     g.add_node("ExtractText", extract_text_node)
+    g.add_node("Normalize", normalize_node)
     g.add_node("Chunk", chunk_node)
     g.add_node("ProcessChunks", process_chunks_node)
     g.add_node("EmbedAndIndex", embed_index_node)
@@ -231,7 +308,8 @@ def build_ingest_graph(
 
     g.set_entry_point("ExtractText")
     for node_name, next_name in (
-        ("ExtractText", "Chunk"),
+        ("ExtractText", "Normalize"),
+        ("Normalize", "Chunk"),
         ("Chunk", "ProcessChunks"),
         ("ProcessChunks", "EmbedAndIndex"),
         ("EmbedAndIndex", "BuildMemoryTree"),

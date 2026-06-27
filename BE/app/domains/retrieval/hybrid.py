@@ -24,6 +24,16 @@ class RetrievedChunk:
     video_stem: str
     bm25_score: float | None = None
     vector_score: float | None = None
+    category: str | None = None
+    language: str | None = None
+
+
+def _meta_match(c: "RetrievedChunk", category: str | None, language: str | None) -> bool:
+    if category and (c.category or "").lower() != category.lower():
+        return False
+    if language and (c.language or "").lower() != language.lower():
+        return False
+    return True
 
 
 def _norm_stem(name: str) -> str:
@@ -119,7 +129,13 @@ class HybridRetriever:
             if not text:
                 continue
             video_stem = _norm_stem(v.get("video") or "")
-            chunks.append(RetrievedChunk(chunk_id=int(k), text=text, video_stem=video_stem))
+            chunks.append(RetrievedChunk(
+                chunk_id=int(k),
+                text=text,
+                video_stem=video_stem,
+                category=(v.get("category") or None),
+                language=(v.get("language") or None),
+            ))
 
         chunks.sort(key=lambda c: c.chunk_id)
         tokens = [_tokenize(c.text) for c in chunks]
@@ -139,7 +155,15 @@ class HybridRetriever:
             if _chunk_visible_for_sources(c.video_stem, norms, bases)
         ]
 
-    def retrieve(self, query: str, *, selected_sources: list[str] | None = None, top_k: int = 6) -> list[RetrievedChunk]:
+    def retrieve(
+        self,
+        query: str,
+        *,
+        selected_sources: list[str] | None = None,
+        top_k: int = 6,
+        category: str | None = None,
+        language: str | None = None,
+    ) -> list[RetrievedChunk]:
         if os.getenv("SKIP_MODEL_LOAD") == "1":
             return []
 
@@ -148,6 +172,9 @@ class HybridRetriever:
             return []
 
         allowed_idx = self._filter_by_sources(selected_sources)
+        # Lọc thêm theo metadata (category/language) nếu được yêu cầu.
+        if category or language:
+            allowed_idx = [i for i in allowed_idx if _meta_match(self._chunks[i], category, language)]
         if not allowed_idx:
             return []
 
@@ -197,6 +224,8 @@ class HybridRetriever:
 
         by_id = {c.chunk_id: c for c in self._chunks}
         out = [by_id[cid] for cid in merged_ids if cid in by_id]
+        if category or language:
+            out = [c for c in out if _meta_match(c, category, language)]
         return out[:top_k]
 
     def retrieve_bm25_only(

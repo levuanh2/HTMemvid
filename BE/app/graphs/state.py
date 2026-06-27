@@ -18,6 +18,11 @@ class IngestState(TypedDict):
     text: NotRequired[str]
     chunks: NotRequired[list[str]]
     raw_docs: NotRequired[list[Document]]
+    # Data-quality: Markdown chuẩn hoá + per-chunk/doc enrich (PHẢI khai báo để LangGraph giữ).
+    markdown: NotRequired[str]
+    md_path: NotRequired[str]
+    chunk_headings: NotRequired[list[str]]
+    doc_meta: NotRequired[dict[str, Any]]
     # Pipeline sau Chunk — PHẢI khai báo: LangGraph merge state chỉ giữ field có trong TypedDict.
     video_name: NotRequired[str]
     video_path: NotRequired[str]

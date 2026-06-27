@@ -97,6 +97,17 @@ class Settings:
     llm_gateway_addr: str = ""
     mindmap_service_addr: str = ""
 
+    # --- Ingest data-quality (Raw->Cleaned->Structured->Enriched) ---
+    use_markdown_ingest: bool = True       # convert sang MD + chunk theo heading
+    md_dir: str = ""                       # nơi lưu .md artifact (rỗng = BE_ROOT/cleaned_md)
+    chunk_strategy: str = "markdown_header"  # markdown_header | recursive | semantic
+    chunk_size: int = 1200
+    chunk_overlap: int = 180
+    enrich_metadata: bool = True           # gán source/category/date/language/heading (rẻ, không cần LLM)
+    contextual_embeddings: bool = False    # chèn câu định vị đầu chunk (tốn 1 LLM call/chunk)
+    hypo_qa: bool = False                   # sinh câu hỏi giả định (tốn LLM/chunk)
+    doc_category: str = "general"
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
@@ -124,6 +135,15 @@ class Settings:
             hybrid_faiss_weight=_float("HYBRID_FAISS_WEIGHT", 0.6),
             llm_gateway_addr=(os.getenv("LLM_GATEWAY_ADDR") or "").strip(),
             mindmap_service_addr=(os.getenv("MINDMAP_SERVICE_ADDR") or "").strip(),
+            use_markdown_ingest=_flag("USE_MARKDOWN_INGEST", "1"),
+            md_dir=(os.getenv("MD_DIR") or "").strip(),
+            chunk_strategy=os.getenv("CHUNK_STRATEGY", "markdown_header"),
+            chunk_size=_int("CHUNK_SIZE", 1200),
+            chunk_overlap=_int("CHUNK_OVERLAP", 180),
+            enrich_metadata=_flag("ENRICH_METADATA", "1"),
+            contextual_embeddings=_flag("CONTEXTUAL_EMBEDDINGS", "0"),
+            hypo_qa=_flag("HYPO_QA", "0"),
+            doc_category=os.getenv("DOC_CATEGORY", "general"),
         )
 
 

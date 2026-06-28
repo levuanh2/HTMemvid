@@ -53,3 +53,47 @@ def test_rerank_texts_swallows_predict_error(monkeypatch):
 def test_invalid_backend_falls_back_to_identity(monkeypatch):
     _reload(monkeypatch, RERANK_ENABLED="1", RERANK_BACKEND="nonsense")
     assert isinstance(rk.get_reranker(), rk.IdentityReranker)
+
+
+class _CountingReranker:
+    """Đếm số lần load + forward để kiểm warmup chỉ warm MỘT lần."""
+
+    def __init__(self):
+        self.loads = 0
+        self.reranks = 0
+        self._model = None
+        self._warmed = False
+
+    def _ensure_model(self):
+        if self._model is None:
+            self.loads += 1
+            self._model = object()
+        return self._model
+
+    def rerank(self, query, texts, *, top_n=None):
+        self._ensure_model()
+        self.reranks += 1
+        return [(i, 0.0) for i in range(len(texts))][: (top_n or len(texts))]
+
+
+def test_warmup_runs_once_not_every_call(monkeypatch):
+    """Regression: warmup KHÔNG được forward mồi lại mỗi lần gọi (sẽ tốn ~giây/query)."""
+    eng = _CountingReranker()
+    monkeypatch.setattr(rk, "get_reranker", lambda: eng)
+    monkeypatch.setenv("SKIP_MODEL_LOAD", "0")
+
+    rk.warmup()
+    rk.warmup()
+    rk.warmup()
+
+    assert eng.loads == 1       # load model đúng 1 lần
+    assert eng.reranks == 1     # forward mồi đúng 1 lần (cờ _warmed chặn các lần sau)
+    assert eng._warmed is True
+
+
+def test_warmup_noop_when_skip_model_load(monkeypatch):
+    eng = _CountingReranker()
+    monkeypatch.setattr(rk, "get_reranker", lambda: eng)
+    monkeypatch.setenv("SKIP_MODEL_LOAD", "1")
+    rk.warmup()
+    assert eng.loads == 0 and eng.reranks == 0  # SKIP → không chạm model

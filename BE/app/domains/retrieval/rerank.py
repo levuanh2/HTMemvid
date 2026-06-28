@@ -22,6 +22,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import List, Optional, Protocol, Tuple, runtime_checkable
 
 from shared.config import get_settings
@@ -61,13 +64,17 @@ class CrossEncoderReranker:
         self.model_name = model_name
         self.batch_size = max(1, int(batch_size))
         self._model = None  # lazy
+        self._lock = threading.Lock()  # chống double-load khi warmup + node chạy song song
+        self._warmed = False  # đã warm đường inference (forward mồi) chưa
 
     def _ensure_model(self):
-        if self._model is None:
-            from sentence_transformers import CrossEncoder
+        if self._model is None:  # double-checked locking
+            with self._lock:
+                if self._model is None:
+                    from sentence_transformers import CrossEncoder
 
-            # max_length tránh OOM với chunk dài; bge-reranker-v2-m3 hỗ trợ tới 8K.
-            self._model = CrossEncoder(self.model_name, max_length=512)
+                    # max_length tránh OOM với chunk dài; bge-reranker-v2-m3 tới 8K.
+                    self._model = CrossEncoder(self.model_name, max_length=512)
         return self._model
 
     def rerank(
@@ -156,6 +163,7 @@ class LLMReranker:
 # --- Factory (cache theo backend+model) ---
 _reranker_cache: Optional[Reranker] = None
 _reranker_key: Optional[str] = None
+_warmup_lock = threading.Lock()  # serialize warmup cold-path → warm đúng 1 lần
 _IDENTITY = IdentityReranker()
 
 
@@ -211,6 +219,65 @@ def rerank_texts(
     except Exception as exc:
         logger.warning("rerank_texts: predict thất bại (%s) → giữ nguyên thứ tự.", exc)
     return _IDENTITY.rerank(query, texts, top_n=top_n)
+
+
+def warmup(timeout_sec: float = 120.0) -> None:
+    """Nạp model NGAY (đồng bộ), trước khi node chấm điểm trong vùng timeout inference.
+
+    Vì sao: `_ensure_model()` (tải/khởi tạo CrossEncoder) là lazy nên lần đầu nó
+    chạy NGAY TRONG block `result(timeout=RERANK_TIMEOUT)`. Trên CPU/cache nguội,
+    thời gian tải model > timeout (mặc định 10s) → TimeoutError → rerank âm thầm
+    fallback identity ở query ĐẦU TIÊN. Tách load ra ngoài để timeout chỉ bao
+    inference. Có timeout riêng (rộng) để model lỗi không treo vô hạn.
+
+    SKIP_MODEL_LOAD / backend không có model cục bộ (identity/cohere/llm) / lỗi → no-op.
+    Idempotent: warm xong set cờ `_warmed` → các lần sau no-op (KHÔNG forward lại)."""
+    if os.getenv("SKIP_MODEL_LOAD") == "1":
+        return
+    try:
+        reranker = get_reranker()
+    except Exception:  # pragma: no cover - get_reranker đã tự nuốt lỗi
+        return
+    ensure = getattr(reranker, "_ensure_model", None)
+    if not callable(ensure):
+        return  # identity/cohere/llm: không có model cục bộ cần preload
+    if getattr(reranker, "_warmed", False):
+        return  # hot-path (đã warm) → no-op rẻ, KHÔNG khoá, KHÔNG forward lại mỗi query
+
+    def _load():
+        ensure()
+        # Warm cả đường INFERENCE: lần forward đầu tốn thêm JIT/trace (một-lần).
+        # Chạy 1 cặp mồi để chi phí này nằm NGOÀI vùng timeout của node.
+        try:
+            reranker.rerank("warmup", ["warmup"], top_n=1)
+        except Exception:  # pragma: no cover - mồi lỗi không sao
+            pass
+        reranker._warmed = True
+
+    # Serialize cold-path: 2 query cold-start đồng thời chỉ 1 cái warm (cái kia
+    # thấy _warmed=True ở double-check). Hot-path đã return ở trên nên không kẹt khoá.
+    with _warmup_lock:
+        if getattr(reranker, "_warmed", False):
+            return
+        if not (timeout_sec and timeout_sec > 0):
+            try:
+                _load()
+            except Exception as exc:
+                logger.warning("rerank.warmup: bỏ qua (%s).", exc)
+            return
+
+        # KHÔNG dùng `with ThreadPoolExecutor` (shutdown(wait=True) sẽ chặn tới khi load
+        # xong → vô hiệu hoá timeout). shutdown(wait=False): hết timeout thì TRẢ NGAY,
+        # model nạp tiếp ở nền, node tự xử lý (double-load đã được _lock của engine chặn).
+        ex = ThreadPoolExecutor(max_workers=1)
+        try:
+            ex.submit(_load).result(timeout=timeout_sec)
+        except FuturesTimeout:
+            logger.warning("rerank.warmup: nạp model quá %ss → nạp tiếp ở nền, node tự xử lý.", timeout_sec)
+        except Exception as exc:
+            logger.warning("rerank.warmup: bỏ qua (%s).", exc)
+        finally:
+            ex.shutdown(wait=False)
 
 
 def reset_cache() -> None:

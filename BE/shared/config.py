@@ -116,8 +116,10 @@ class Settings:
     nli_enabled: bool = False
     nli_model: str = "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
     nli_contradiction_threshold: float = 0.6  # prob 'contradiction' tối thiểu để tính là xung đột
-    nli_timeout_sec: int = 10
-    nli_max_pairs: int = 10  # trần số cặp chunk đem đi NLI (kiểm soát latency)
+    # Đo thực trên CPU máy dev: 3 cặp chunk dài (6 forward) ≈ 66s → để 90s có đệm.
+    # Có GPU/model nhanh hơn thì hạ timeout xuống. (xem .playbook/known-issues)
+    nli_timeout_sec: int = 90
+    nli_max_pairs: int = 3  # trần số cặp chunk đem đi NLI (kiểm soát latency)
 
     # --- Địa chỉ service gRPC (Phase 3/4). Rỗng => dùng impl local in-process. ---
     llm_gateway_addr: str = ""
@@ -175,8 +177,8 @@ class Settings:
             nli_enabled=_flag("NLI_ENABLED", "0"),
             nli_model=os.getenv("NLI_MODEL", "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"),
             nli_contradiction_threshold=_float("NLI_CONTRADICTION_THRESHOLD", 0.6),
-            nli_timeout_sec=_int("NLI_TIMEOUT_SEC", 10),
-            nli_max_pairs=_int("NLI_MAX_PAIRS", 10),
+            nli_timeout_sec=_int("NLI_TIMEOUT_SEC", 90),
+            nli_max_pairs=_int("NLI_MAX_PAIRS", 3),
             llm_gateway_addr=(os.getenv("LLM_GATEWAY_ADDR") or "").strip(),
             mindmap_service_addr=(os.getenv("MINDMAP_SERVICE_ADDR") or "").strip(),
             use_markdown_ingest=_flag("USE_MARKDOWN_INGEST", "1"),

@@ -32,6 +32,10 @@ def base_env(monkeypatch, **flags):
     monkeypatch.setenv("USE_LC_ENSEMBLE", "0")      # retrieve gọi retriever.retrieve trực tiếp
     monkeypatch.setenv("QUERY_STREAM_TOKENS", "0")
     monkeypatch.setenv("EVAL_ENABLED", "false")
+    # Mặc định KHÔNG tải model thật trong unit test: rerank/nli warmup() gọi
+    # get_reranker()/get_nli() → nếu không có SKIP_MODEL_LOAD sẽ kéo CrossEncoder/
+    # mDeBERTa thật. Test nào cần engine thật (warmup) sẽ tự bật lại "0".
+    monkeypatch.setenv("SKIP_MODEL_LOAD", "1")
     for k, v in flags.items():
         monkeypatch.setenv(k, v)
     cfg.reload()

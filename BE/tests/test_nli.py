@@ -69,6 +69,50 @@ def test_resolve_conflicts_drops_lower_rank():
     assert keep == [0, 1]  # giữ hạng cao (0), loại hạng thấp (2)
 
 
+class _CountingNli:
+    """Đếm số lần load + forward để kiểm warmup chỉ warm MỘT lần."""
+
+    def __init__(self):
+        self.loads = 0
+        self.predicts = 0
+        self._model = None
+        self._warmed = False
+
+    def _ensure_model(self):
+        if self._model is None:
+            self.loads += 1
+            self._model = object()
+        return self._model
+
+    def predict(self, pairs):
+        self._ensure_model()
+        self.predicts += 1
+        return [{"entailment": 0.0, "neutral": 1.0, "contradiction": 0.0} for _ in pairs]
+
+
+def test_warmup_runs_once_not_every_call(monkeypatch):
+    """Regression: warmup KHÔNG được forward mồi lại mỗi lần gọi (sẽ tốn ~giây/query)."""
+    eng = _CountingNli()
+    monkeypatch.setattr(nli, "get_nli", lambda: eng)
+    monkeypatch.setenv("SKIP_MODEL_LOAD", "0")
+
+    nli.warmup()
+    nli.warmup()
+    nli.warmup()
+
+    assert eng.loads == 1      # load model đúng 1 lần
+    assert eng.predicts == 1   # forward mồi đúng 1 lần (cờ _warmed chặn các lần sau)
+    assert eng._warmed is True
+
+
+def test_warmup_noop_when_skip_model_load(monkeypatch):
+    eng = _CountingNli()
+    monkeypatch.setattr(nli, "get_nli", lambda: eng)
+    monkeypatch.setenv("SKIP_MODEL_LOAD", "1")
+    nli.warmup()
+    assert eng.loads == 0 and eng.predicts == 0  # SKIP → không chạm model
+
+
 def test_classify_neutral_on_error(monkeypatch):
     class _Boom:
         def predict(self, pairs):

@@ -34,6 +34,38 @@
   3. Phải có test build graph THẬT với `NLI_ENABLED=1` (xem `tests/test_nli_graph.py` qua `_qg_build.py`) — bắt lỗi pydantic/NotRequired khi thêm field `context_conflicts`/`rerank_scores` vào `QueryState` (đúng bài học conftest-mock).
   4. Khi nhiều node cùng sửa `retrieved_chunks` (Rerank đổi thành str + lưu `rerank_scores`; VerifyContext loại chunk), node sau PHẢI realign mọi list song song (`rerank_scores`, `retrieved_stems`) theo index giữ lại — lệch độ dài thì downstream (CRAG grade) phải tự bỏ qua an toàn.
 
+## Timeout bọc lời gọi engine PHẢI loại trừ thời gian load/JIT (warm trước, ngoài timeout)
+
+- **Root cause:** `RerankDocuments`/`VerifyContext` bọc engine trong `result(timeout=...)` 10s,
+  nhưng engine lazy-load model NGAY trong block đó. Load weights mDeBERTa ~12.7s > 10s → query
+  đầu âm thầm fallback identity/[] (rerank vô tác dụng, NLI không khử mâu thuẫn). Phát hiện CHỈ
+  qua smoke-test engine THẬT — unit test monkeypatch engine fn nên không bao giờ load model thật.
+- **Prevention:**
+  1. Mọi node bọc model-call trong timeout PHẢI warm model (load + 1 forward mồi) NGOÀI vùng
+     timeout trước. Đã thêm `rerank.warmup()`/`nli.warmup()` (timeout riêng 120s, mọi lỗi → no-op).
+  2. Timeout của node chỉ nên bao **inference thực**, không bao chi phí một-lần (load/JIT/trace).
+  3. Phải có smoke-test chạy ENGINE THẬT (không monkeypatch) với cờ bật + timeout mặc định —
+     đây là lớp duy nhất bắt được loại lỗi "timeout nuốt lần load đầu" (mirror bài học conftest-mock).
+  4. Khi đặt giá trị timeout mặc định: ĐO inference thực trên phần cứng đích trước
+     (mDeBERTa CPU ~7s/cặp ⇒ 10s là phi thực tế cho NLI; xem known-issues). Đừng đoán.
+- **Test env:** `base_env` (`tests/_qg_build.py`) set `SKIP_MODEL_LOAD=1` để `warmup()` không
+  kéo model thật trong unit test; test cần engine thật tự bật lại `"0"` + monkeypatch `get_*`.
+- **3 bẫy khi viết warmup (codex review bắt được — đã sửa):**
+  1. **`with ThreadPoolExecutor` vô hiệu hoá timeout:** `__exit__` gọi `shutdown(wait=True)` →
+     vẫn chặn tới khi load xong, dù `result(timeout=...)` đã ném. Phải tạo executor thủ công +
+     `finally: ex.shutdown(wait=False)` mới TRẢ NGAY khi quá hạn (load tiếp ở nền). (Lưu ý: node
+     `RerankDocuments`/`VerifyContext` cũng dùng `with ...` y hệt → timeout của node cũng KHÔNG
+     bỏ được call treo; đây là pattern toàn codebase, residual chưa sửa.)
+  2. **Double-load race:** warmup (wait=False) + node có thể cùng gọi `_ensure_model` → thêm
+     `threading.Lock` + double-checked locking, gán `self._model` là bước CUỐI.
+  3. **Forward mồi mỗi query:** `_load` chạy 1 forward để warm JIT — nếu không gắn cờ sẽ chạy
+     LẠI mỗi query (NLI ~11s/query thừa). Gắn `engine._warmed=True` sau lần đầu → các lần sau no-op.
+     Cold-path bọc thêm `_warmup_lock` (module) + double-check `_warmed` → warm đúng 1 lần cho mọi
+     case thực tế (tuần tự + đồng thời thường). **Residual benign (chấp nhận):** nếu load > timeout
+     (warmup nhả lock khi `_warmed` chưa set) + có query đồng thời → forward mồi có thể chạy 2 lần
+     (double-LOAD vẫn bị instance `_lock` chặn). Trên CPU này load ~13s ≪ 90–120s nên gần như bất
+     khả thi; cố đóng kín sẽ thêm máy móc concurrency không đáng. (codex review 2 vòng)
+
 ## langgraph 0.2.x: interrupt() KHÔNG đặt key `__interrupt__` trong kết quả invoke
 
 - **Root cause:** Convention `out["__interrupt__"]` là của langgraph 1.x. Ở 0.2.x, `graph.invoke` khi gặp `interrupt()` trả về state đã commit (không có key đó) và graph tạm dừng. Phát hiện đúng: `graph.get_state(config).next` khác rỗng + đọc `state.tasks[].interrupts[0].value`.

@@ -21,6 +21,9 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from shared.config import get_settings
@@ -53,17 +56,23 @@ class MDebertaNli:
         self._tok = None
         self._model = None
         self._id2label: Dict[int, str] = {}
+        self._lock = threading.Lock()  # chống double-load khi warmup + node chạy song song
+        self._warmed = False  # đã warm đường inference (forward mồi) chưa
 
     def _ensure_model(self):
-        if self._model is None:
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        if self._model is None:  # double-checked locking
+            with self._lock:
+                if self._model is None:
+                    from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-            self._tok = AutoTokenizer.from_pretrained(self.model_name)
-            self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
-            self._model.eval()
-            raw = getattr(self._model.config, "id2label", None) or {}
-            # Chuẩn hoá: index -> nhãn lowercase ('ENTAILMENT' → 'entailment').
-            self._id2label = {int(i): str(lbl).strip().lower() for i, lbl in raw.items()}
+                    tok = AutoTokenizer.from_pretrained(self.model_name)
+                    model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+                    model.eval()
+                    raw = getattr(model.config, "id2label", None) or {}
+                    # Chuẩn hoá: index -> nhãn lowercase ('ENTAILMENT' → 'entailment').
+                    self._id2label = {int(i): str(lbl).strip().lower() for i, lbl in raw.items()}
+                    self._tok = tok
+                    self._model = model  # gán cuối cùng → cờ "đã load" cho double-check
         return self._model
 
     def predict(self, pairs: List[Tuple[str, str]]) -> List[Dict[str, float]]:
@@ -96,6 +105,7 @@ class MDebertaNli:
 # --- Factory (cache theo model-name) ---
 _nli_cache: Optional[NliEngine] = None
 _nli_key: Optional[str] = None
+_warmup_lock = threading.Lock()  # serialize warmup cold-path → warm đúng 1 lần
 _NULL = NullNli()
 
 
@@ -190,6 +200,65 @@ def resolve_conflicts(n: int, conflicts: List[Dict[str, object]]) -> List[int]:
     """
     drop = {int(c["j"]) for c in conflicts if int(c["j"]) > int(c["i"])}
     return [idx for idx in range(n) if idx not in drop]
+
+
+def warmup(timeout_sec: float = 120.0) -> None:
+    """Nạp model NGAY (đồng bộ), trước khi node chấm cặp trong vùng timeout inference.
+
+    Vì sao: `_ensure_model()` (tải/khởi tạo mDeBERTa) là lazy nên lần đầu nó chạy
+    NGAY TRONG block `result(timeout=NLI_TIMEOUT)`. Trên CPU/cache nguội, thời gian
+    tải model > timeout (mặc định 10s) → TimeoutError → detect_conflicts âm thầm
+    trả [] (không khử mâu thuẫn) ở query ĐẦU TIÊN. Tách load ra ngoài để timeout
+    chỉ bao inference. Có timeout riêng (rộng) để model lỗi không treo vô hạn.
+
+    SKIP_MODEL_LOAD / engine không có model cục bộ (NullNli) / lỗi → no-op.
+    Idempotent: warm xong set cờ `_warmed` → các lần sau no-op (KHÔNG forward lại)."""
+    if os.getenv("SKIP_MODEL_LOAD") == "1":
+        return
+    try:
+        engine = get_nli()
+    except Exception:  # pragma: no cover - get_nli đã tự nuốt lỗi
+        return
+    ensure = getattr(engine, "_ensure_model", None)
+    if not callable(ensure):
+        return  # NullNli: không có model cục bộ cần preload
+    if getattr(engine, "_warmed", False):
+        return  # hot-path (đã warm) → no-op rẻ, KHÔNG khoá, KHÔNG forward lại mỗi query
+
+    def _load():
+        ensure()
+        # Warm cả đường INFERENCE: lần forward đầu tốn thêm JIT/trace (một-lần).
+        # Chạy 1 cặp mồi để chi phí này nằm NGOÀI vùng timeout của node.
+        try:
+            engine.predict([("warmup", "warmup")])
+        except Exception:  # pragma: no cover - mồi lỗi không sao
+            pass
+        engine._warmed = True
+
+    # Serialize cold-path: 2 query cold-start đồng thời chỉ 1 cái warm (cái kia
+    # thấy _warmed=True ở double-check). Hot-path đã return ở trên nên không kẹt khoá.
+    with _warmup_lock:
+        if getattr(engine, "_warmed", False):
+            return
+        if not (timeout_sec and timeout_sec > 0):
+            try:
+                _load()
+            except Exception as exc:
+                logger.warning("nli.warmup: bỏ qua (%s).", exc)
+            return
+
+        # KHÔNG dùng `with ThreadPoolExecutor` (shutdown(wait=True) sẽ chặn tới khi load
+        # xong → vô hiệu hoá timeout). shutdown(wait=False): hết timeout thì TRẢ NGAY,
+        # model nạp tiếp ở nền, node tự xử lý (double-load đã được _lock của engine chặn).
+        ex = ThreadPoolExecutor(max_workers=1)
+        try:
+            ex.submit(_load).result(timeout=timeout_sec)
+        except FuturesTimeout:
+            logger.warning("nli.warmup: nạp model quá %ss → nạp tiếp ở nền, node tự xử lý.", timeout_sec)
+        except Exception as exc:
+            logger.warning("nli.warmup: bỏ qua (%s).", exc)
+        finally:
+            ex.shutdown(wait=False)
 
 
 def reset_cache() -> None:

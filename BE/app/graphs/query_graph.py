@@ -310,6 +310,11 @@ def build_query_graph(
             if not chunks:
                 return {**state, "progress": 35, "current_node": "RerankDocuments", "error": None}
 
+            # Nạp model NGOÀI vùng timeout: nếu để lazy-load chạy trong block
+            # result(timeout=RERANK_TIMEOUT), lần đầu (cache nguội) tải model >
+            # timeout → rerank âm thầm fallback identity ở query đầu tiên.
+            rerank.warmup()
+
             def _do_rerank():
                 return rerank.rerank_texts(state["q"], chunks, top_n=RERANK_TOP_N)
 
@@ -375,6 +380,11 @@ def build_query_graph(
             texts = [str(c) for c in chunks if c]
             if len(texts) < 2:
                 return {**state, "progress": 42, "current_node": "VerifyContext", "error": None}
+
+            # Nạp model NGOÀI vùng timeout: nếu để lazy-load chạy trong block
+            # result(timeout=NLI_TIMEOUT), lần đầu (cache nguội) tải model > timeout
+            # → detect_conflicts âm thầm trả [] (không khử mâu thuẫn) ở query đầu.
+            nli.warmup()
 
             def _do_detect():
                 return nli.detect_conflicts(

@@ -70,6 +70,8 @@ class MindmapState(TypedDict):
     job_id: str
     source_names: list
     strategy: str
+    generation_mode: str       # fast | balanced | quality (trước đây bị bỏ qua → luôn balanced)
+    strategy_requested: str    # strategy yêu cầu (sau guard); generate_node đọc field này
     result: dict
     progress: int
     current_node: str

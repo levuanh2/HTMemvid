@@ -11,6 +11,7 @@ from langgraph.graph import END, StateGraph
 from app.graphs.logger import _Timer, log_node_event
 from app.graphs.sqlite_checkpointer import sqlite_saver_from_path
 from app.graphs.state import IngestState
+from shared.source_id import canonical_source_stem
 
 def build_ingest_graph(
     *,
@@ -200,6 +201,9 @@ def build_ingest_graph(
             headings = state.get("chunk_headings") or []
             # heading_path khớp 1:1 khi không bị sub-split (chunk ≤ SAFE_CHUNK_CHARS).
             aligned = len(headings) == len(entries)
+            # Định danh canonical ghi thẳng vào metadata để retrieval khớp CHÍNH XÁC
+            # (không phải tái dựng từ video_path đã sanitize).
+            src_stem = canonical_source_stem(state["filename"])
             all_metadata = []
             for i, entry in enumerate(entries):
                 md = {
@@ -207,6 +211,8 @@ def build_ingest_graph(
                     "sub_order": entry.get("sub_order"),
                     "total_parts": entry.get("total_parts"),
                     "is_subchunk": entry.get("is_subchunk", False),
+                    "source_stem": src_stem,
+                    "source_id": state.get("source_id"),
                 }
                 if doc_meta:
                     md.update(doc_meta)  # source/category/date/language (doc-level)
@@ -220,7 +226,7 @@ def build_ingest_graph(
                 batch_size=32,
             )
 
-            source_stem = Path(state["video_name"]).stem.lower()
+            source_stem = canonical_source_stem(state["filename"])
             update_source_status(
                 state["source_id"],
                 status="index_ready",

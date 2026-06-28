@@ -20,6 +20,44 @@
   PHẢI factual (tất định). Còn chừa: query_rewrite + structured_extraction/fact_check (domain summary)
   vẫn `feature="chat"` — chấp nhận (sinh ngôn ngữ), siết sau nếu cần policy khép kín.
 
+## Định danh file phải có MỘT nguồn sự thật (đừng suy stem rải rác mỗi nơi mỗi kiểu)
+
+- **Root cause:** stem của source được tính lại ở nhiều tầng (upload/ingest/retrieval/memory-tree/
+  list-indexed) với quy tắc lệch nhau (giữ vs sanitize khoảng trắng, NFC vs NFKD, có/không bỏ timestamp).
+  Tên file có space → query-theo-file trượt khớp, trả rỗng.
+- **Prevention:**
+  1. MỘT hàm canonical duy nhất (`shared/source_id.py`), MIRROR đúng cách tạo artifact đích (ở đây là
+     video_path); mọi nơi so khớp PHẢI gọi nó. Khi thêm tầng mới đụng tên file → dùng lại, đừng tự chế.
+  2. Ghi định danh canonical (`source_stem`/`source_id`) THẲNG vào metadata để hạ nguồn khớp chính xác,
+     thay vì tái dựng từ tên đã biến đổi (sanitize/timestamp).
+  3. NFKD KHÔNG bỏ dấu kết hợp — đừng tưởng `normalize("NFKD")` biến "Hướng" → "Huong". Muốn ổn định
+     thì ép NFC + sanitize, đừng so khớp chuỗi thô.
+- **Bài học test:** bug này KHÔNG bị bắt vì `conftest` mock `_trigger_background_ingest` + `QUERY_GRAPH`,
+  và `hybrid.retrieve` return [] khi `SKIP_MODEL_LOAD=1`. Lớp bắt được là UNIT trực tiếp `_filter_by_sources`
+  với metadata giả (video_path đã sanitize) — không cần model. Luôn có test ở tầng logic thuần khi tầng
+  tích hợp bị mock (đúng tinh thần "conftest mock che mất lỗi" bên dưới).
+
+## Mindmap: timeout TEMP, normalize nguồn lệch, mode bị bỏ qua
+
+- **Timeout "TEMP TESTING":** `worker.py` từng để `LLM_TIMEOUT_BALANCED=30`, `JOB_TIMEOUT_BALANCED=60`
+  (comment "was 90/180") → balanced hay timeout → rơi deterministic nghèo. Đã khôi phục 90/180 và cho
+  override qua env `MINDMAP_LLM_TIMEOUT_*`/`MINDMAP_JOB_TIMEOUT_*`. **Bài học:** đừng để giá trị debug
+  "TEMP" lọt vào nhánh chính; nếu cần thử nghiệm → dùng env, đừng sửa hằng số.
+- **Normalize nguồn lệch chuẩn:** worker dùng `normalize_video_name` riêng (NFKD, khớp `m['video']`) thay
+  vì `canonical_source_stem`. Đã hợp nhất: helper module-level `collect_chunks_for_sources` ưu tiên
+  `m['source_stem']` (ingest ghi) → fallback `video`, canonical hoá. Khớp file giống retrieval (space/dấu).
+- **Mode bị bỏ qua (bug ẩn):** `run_mindmap_job` nhét `generation_mode` vào field `strategy` và KHÔNG set
+  `generation_mode` → `generate_node` luôn đọc mode = "balanced" (fast/quality bị mất). Đã thêm
+  `generation_mode` + `strategy_requested` vào `MindmapState` và set đúng; endpoint propagate strategy.
+  Test `test_mindmap_graph::test_mode_and_strategy_propagated_to_worker` chốt.
+- **JSON repair phải string-aware:** bỏ dấu phẩy thừa bằng regex mù làm hỏng comma trong chuỗi
+  (codex bắt). `_repair_json_text` quét ký tự, chỉ bỏ `,` trước `}`/`]` khi NGOÀI chuỗi.
+- **Gap test mindmap:** conftest mock `MINDMAP_GRAPH` → graph thật không được dựng. Đã thêm
+  `test_mindmap_graph.py` dựng `build_mindmap_graph` THẬT (callable stub) — bắt lỗi pydantic/langgraph.
+- **Giới hạn đã biết — Huỷ mindmap (FE):** nút Huỷ chỉ dừng polling FE; job BE vẫn chạy xong và
+  `append_mindmap` đã lưu map trong lúc sinh → map có thể hiện ở lần fetch sau. Huỷ thật cần
+  cooperative-abort (cờ cancel + worker/TimeoutTracker kiểm) — chưa làm (codex review). Chấp nhận.
+
 ## Đừng nâng langgraph/langchain lên 1.x trên máy dev này
 
 - **Root cause:** Nâng env lên langgraph 1.x kéo `ormsgpack` — binary bị Windows Application Control chặn → app vỡ hoàn toàn ở import-time. Code lại vốn viết cho langchain 0.3.x / langgraph 0.2.x (API `langchain.retrievers.EnsembleRetriever`, `SqliteSaver(conn)`), nên việc nâng lên 1.x còn kéo theo cả migrate API (`langchain.retrievers` → `langchain_classic.retrievers`).

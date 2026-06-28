@@ -31,6 +31,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from app.clients.llm_factory import ask_ai, get_embedding_model
 from services.mindmap.utils import generate_mindmap_flat, generate_mindmap_cmgn, get_main_branches
 from app.domains.vectorstore.embedding_utils import safe_stack_vectors, normalize_embeddings_array
+from shared.source_id import canonical_source_stem
 try:
     from shared.env_loader import load_project_env
     load_project_env(override=False)
@@ -44,6 +45,33 @@ except Exception:
 # MINDMAP_MODEL_BALANCED=qwen3.5:9b
 # MINDMAP_MODEL_QUALITY=qwen2.5:14b
 # MINDMAP_MODEL_FALLBACK=gemma4:e4b
+
+def collect_chunks_for_sources(meta: dict, source_names: list) -> list:
+    """Thu thập chunk thuộc các nguồn đã chọn, khớp theo CANONICAL source stem
+    (shared.source_id) — đồng nhất với retrieval. Ưu tiên field 'source_stem'
+    (ingest ghi), fallback 'video' (data cũ). Tên có space/dấu vẫn khớp đúng.
+
+    Nguồn rỗng → trả [] (như cũ: không gom toàn bộ index)."""
+    wanted = {canonical_source_stem(s) for s in (source_names or []) if (s or "").strip()}
+    wanted.discard("")
+    out: list = []
+    for key, m in (meta or {}).items():
+        if not isinstance(m, dict):
+            continue
+        stem = canonical_source_stem(m.get("source_stem") or m.get("video") or "")
+        if not stem or stem not in wanted:
+            continue
+        out.append({
+            "text": m.get("text", ""),
+            "parent_id": m.get("parent_id"),
+            "sub_order": m.get("sub_order"),
+            "total_parts": m.get("total_parts"),
+            "is_subchunk": m.get("is_subchunk", False),
+            "key": key,
+            "embedding": m.get("embedding"),
+        })
+    return out
+
 
 def get_mindmap_model_for_mode(mode: str) -> str:
     """Get model theo mode."""
@@ -92,17 +120,18 @@ NODE_LIMITS = {
 }
 
 # ========== TIMEOUT PER LLM CALL (seconds) ==========
-LLM_TIMEOUT_FAST = 60
-LLM_TIMEOUT_BALANCED = 30  # TEMP TESTING: was 90
-LLM_TIMEOUT_QUALITY = 120
+# Mặc định gốc; override qua env MINDMAP_LLM_TIMEOUT_* nếu cần chỉnh theo phần cứng.
+LLM_TIMEOUT_FAST = int(os.getenv("MINDMAP_LLM_TIMEOUT_FAST", "60"))
+LLM_TIMEOUT_BALANCED = int(os.getenv("MINDMAP_LLM_TIMEOUT_BALANCED", "90"))
+LLM_TIMEOUT_QUALITY = int(os.getenv("MINDMAP_LLM_TIMEOUT_QUALITY", "120"))
 
 # ========== TOTAL JOB TIMEOUT (seconds) ==========
-# - Fast: 90s du cho 1 LLM call + deterministic visual
-# - Balanced: 180s du cho 1 LLM call + deterministic visual
-# - Quality: 600s cho phep cmgn/iterative nhieu LLM calls
-JOB_TIMEOUT_FAST = 90
-JOB_TIMEOUT_BALANCED = 60  # TEMP TESTING: was 180
-JOB_TIMEOUT_QUALITY = 600
+# - Fast: 90s đủ cho 1 LLM call + deterministic visual
+# - Balanced: 180s đủ cho 1 LLM call + deterministic visual
+# - Quality: 600s cho phép cmgn/iterative nhiều LLM calls
+JOB_TIMEOUT_FAST = int(os.getenv("MINDMAP_JOB_TIMEOUT_FAST", "90"))
+JOB_TIMEOUT_BALANCED = int(os.getenv("MINDMAP_JOB_TIMEOUT_BALANCED", "180"))
+JOB_TIMEOUT_QUALITY = int(os.getenv("MINDMAP_JOB_TIMEOUT_QUALITY", "600"))
 
 # ========== LLM CALL BUDGET (MỚI) ==========
 # Giới hạn số LLM calls thật sự
@@ -393,6 +422,67 @@ def _concat_cluster_summary(texts: list[str], max_chars: int = 900) -> str:
     return " | ".join(parts) if parts else "(trống)"
 
 
+def _repair_json_text(raw: str) -> str:
+    """Sửa nhẹ JSON gần đúng từ LLM: bỏ code fence, trích khối {...} CÂN BẰNG đầu
+    tiên (bỏ rác trước/sau), bỏ dấu phẩy thừa trước '}'/']'. Chuỗi trả về vẫn có
+    thể lỗi — caller bọc try và rơi xuống fallback deterministic nếu cần."""
+    s = (raw or "").strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json)?\s*", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\s*```\s*$", "", s).strip()
+    start = s.find("{")
+    if start != -1:
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(s)):
+            c = s[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        s = s[start:i + 1]
+                        break
+    # bỏ dấu phẩy thừa trước '}'/']' — CHỈ ngoài chuỗi (tránh hỏng comma trong string).
+    out_chars: list = []
+    in_str = False
+    esc = False
+    n = len(s)
+    for i, c in enumerate(s):
+        if in_str:
+            out_chars.append(c)
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+            out_chars.append(c)
+            continue
+        if c == ",":
+            j = i + 1
+            while j < n and s[j] in " \t\r\n":
+                j += 1
+            if j < n and s[j] in "}]":
+                continue  # bỏ dấu phẩy thừa
+        out_chars.append(c)
+    return "".join(out_chars).strip()
+
+
 def _parse_mindmap_output_json(raw: str) -> MindmapOutput:
     raw = (raw or "").strip()
     try:
@@ -409,7 +499,15 @@ def _parse_mindmap_output_json(raw: str) -> MindmapOutput:
             pass
     m = re.search(r"\{[\s\S]*\}\s*$", raw)
     if m:
-        return MindmapOutput.model_validate_json(m.group(0))
+        try:
+            return MindmapOutput.model_validate_json(m.group(0))
+        except Exception:
+            pass
+    # Lần cuối: repair nhẹ rồi thử lại (vẫn lỗi → raise, caller fallback deterministic).
+    try:
+        return MindmapOutput.model_validate_json(_repair_json_text(raw))
+    except Exception:
+        pass
     raise ValueError("Không parse được JSON MindmapOutput")
 
 
@@ -433,6 +531,10 @@ def _parse_visual_diagram_json(raw: str) -> VisualDiagramOutput:
             return VisualDiagramOutput.model_validate_json(m.group(0))
         except Exception:
             pass
+    try:
+        return VisualDiagramOutput.model_validate_json(_repair_json_text(raw))
+    except Exception:
+        pass
     raise ValueError("Không parse được JSON VisualDiagramOutput")
 
 
@@ -1714,37 +1816,9 @@ def run_mindmap_generation(
     with open(index_meta_path, encoding="utf-8") as f:
         meta = json.load(f)
 
-    def normalize_video_name(name: str) -> str:
-        if not name:
-            return ""
-        name = Path(name).name if '/' in name or '\\' in name else name
-        cleaned = unicodedata.normalize('NFKD', name.strip()).replace('\u00a0', ' ')
-        cleaned = cleaned.replace('.mp4', '')
-        cleaned = re.sub(r'_\d{8}_\d{6}$', '', cleaned)
-        return cleaned.strip().lower()
-
-    normalized_sources = set()
-    for s in source_names:
-        normalized = normalize_video_name(s)
-        if normalized:
-            normalized_sources.add(normalized)
-
-    all_chunks_with_meta = []
-    for key, m in meta.items():
-        video_raw = m.get("video", "").strip()
-        if not video_raw:
-            continue
-        video_clean = normalize_video_name(video_raw)
-        if video_clean in normalized_sources:
-            all_chunks_with_meta.append({
-                "text": m.get("text", ""),
-                "parent_id": m.get("parent_id"),
-                "sub_order": m.get("sub_order"),
-                "total_parts": m.get("total_parts"),
-                "is_subchunk": m.get("is_subchunk", False),
-                "key": key,
-                "embedding": m.get("embedding"),
-            })
+    # Kh\u1edbp ngu\u1ed3n theo canonical stem D\u00d9NG CHUNG v\u1edbi retrieval (helper module-level,
+    # \u01b0u ti\u00ean source_stem; x\u1eed l\u00fd \u0111\u00fang t\u00ean c\u00f3 space/d\u1ea5u/k\u00fd t\u1ef1 \u0111\u1eb7c bi\u1ec7t).
+    all_chunks_with_meta = collect_chunks_for_sources(meta, source_names)
 
     timing.start("merge")
     _prog_msg(15, "Đang gộp sub-chunks...")

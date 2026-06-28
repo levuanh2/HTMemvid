@@ -27,8 +27,8 @@ class TestMindmapTimeout(unittest.TestCase):
         )
         
         # Setup tracker va budget
-        job_timeout = JOB_TIMEOUT_BALANCED  # TEMP TESTING: 60s (was 180s)
-        llm_timeout = LLM_TIMEOUT_BALANCED   # TEMP TESTING: 30s (was 90s)
+        job_timeout = JOB_TIMEOUT_BALANCED  # default 180s
+        llm_timeout = LLM_TIMEOUT_BALANCED   # default 90s
         tracker = TimeoutTracker(MODE_BALANCED, job_timeout, llm_timeout)
         budget = LlmCallBudget(MODE_BALANCED)
         
@@ -72,27 +72,25 @@ class TestMindmapTimeout(unittest.TestCase):
             get_llm_timeout_for_mode
         )
         
-        # Test voi fresh tracker - remaining = job_timeout
-        job_timeout = 60  # TEMP TESTING: was 180
-        llm_timeout = 30  # TEMP TESTING: was 90
+        # Test voi fresh tracker - remaining = job_timeout (dùng constant đã khôi phục)
+        job_timeout = JOB_TIMEOUT_BALANCED   # default 180
+        llm_timeout = LLM_TIMEOUT_BALANCED   # default 90
         tracker = TimeoutTracker(MODE_BALANCED, job_timeout, llm_timeout)
-        
+
         remaining = tracker.time_remaining()
         per_call = get_llm_timeout_for_mode(MODE_BALANCED)
-        
+
         # Fresh tracker: remaining ~ job_timeout, actual = min(per_call, remaining - 10)
-        # actual = min(30, 60 - 10) = min(30, 50) = 30
         actual = min(per_call, max(1, remaining - 10))
-        self.assertAlmostEqual(remaining, 60, delta=5)
-        self.assertEqual(per_call, 30)  # TEMP TESTING: was 90
-        self.assertEqual(actual, 30)  # TEMP TESTING: was 90
-        
-        # Test: Nếu remaining quá nhỏ -> actual < 15
-        # Simulate: đẩy job_start về 165s trước -> remaining ~ 15s
-        tracker.job_start -= 165
+        self.assertAlmostEqual(remaining, job_timeout, delta=5)
+        self.assertEqual(per_call, LLM_TIMEOUT_BALANCED)
+        self.assertEqual(actual, min(LLM_TIMEOUT_BALANCED, int(job_timeout) - 10))
+
+        # Test: Nếu remaining quá nhỏ -> actual nhỏ (sẽ raise ở call thật)
+        # Simulate: đẩy job_start lùi (job_timeout - 15)s -> remaining ~ 15s
+        tracker.job_start -= (job_timeout - 15)
         remaining = tracker.time_remaining()
         actual = min(per_call, max(1, remaining - 10))
-        # actual = min(90, max(1, ~15-10)) = min(90, 5) = 5 (< 15 -> sẽ raise)
 
     def test_llm_budget_stops_at_limit(self):
         """Test: LLM call budget được enforce đúng."""

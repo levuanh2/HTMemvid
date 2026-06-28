@@ -556,16 +556,12 @@ def _get_source_status_by_stem(source_stem: str) -> Optional[Dict]:
     Tìm trong registry source nào có source_stem trùng.
     """
     registry = _load_source_registry()
+    # Canonical hoá CẢ HAI phía để khớp kể cả registry cũ (format pre-canonical).
+    target = _normalize_video_stem(source_stem)
     for source_id, info in registry.items():
-        stored_stem = info.get("source_stem")
-        if stored_stem:
-            if stored_stem == source_stem:
-                return info
-        else:
-            filename = info.get("filename", "")
-            normalized = _normalize_video_stem(filename)
-            if normalized == source_stem:
-                return info
+        stored = info.get("source_stem") or info.get("filename", "")
+        if stored and _normalize_video_stem(stored) == target:
+            return info
     return None
 
 
@@ -959,50 +955,79 @@ def process_doc():
 # -------------------------
 # 📤 Upload single file (ASYNC)
 # -------------------------
-@app.post('/upload-file')
-def upload_file():
-    """
-    Upload file và trả response ngay, xử lý ingest chạy background.
-    """
-    file = request.files.get('file')
-    if not file:
-        return jsonify({'error': 'Missing file'}), 400
+# Ký tự cấm trên tên file Windows (+ control chars). NFKD ở canonicalizer lo phần
+# khớp; ở đây chỉ lo lưu file vật lý an toàn (chặn ký tự cấm + path traversal).
+_ILLEGAL_FS_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
-    # Generate source_id (unique identifier cho source này)
+
+def _safe_save_path(filename: str) -> str:
+    """Đường lưu vật lý AN TOÀN trong INPUT_DIR: bỏ thành phần thư mục (chống
+    traversal), thay ký tự cấm → '_', và đảm bảo không trùng file sẵn có."""
+    base = os.path.basename((filename or "").strip()) or "file"
+    safe = _ILLEGAL_FS_CHARS.sub("_", base).strip().strip(".") or "file"
+    path = os.path.join(INPUT_DIR, safe)
+    root, ext = os.path.splitext(path)
+    n = 2
+    while os.path.exists(path):
+        path = f"{root}_{n}{ext}"
+        n += 1
+    return path
+
+
+def _unique_display_filename(filename: str, registry: dict) -> str:
+    """Chống trùng tên: nếu canonical stem đã có trong registry → thêm hậu tố
+    " (n)" trước đuôi để hai tài liệu cùng tên KHÔNG trộn chunk (mỗi cái 1 stem)."""
+    fn = filename or "file"
+    existing = {(info.get("source_stem") or "") for info in registry.values()}
+    if _normalize_video_stem(fn) not in existing:
+        return fn
+    base, ext = os.path.splitext(fn)
+    n = 2
+    while _normalize_video_stem(f"{base} ({n}){ext}") in existing:
+        n += 1
+    return f"{base} ({n}){ext}"
+
+
+def _ingest_uploaded_file(file) -> dict:
+    """Đăng ký + lưu an toàn + trigger ingest cho 1 file. Dùng chung cho
+    /upload-file và /upload-multiple (đồng nhất: source_id + registry + poll)."""
     source_id = str(uuid.uuid4())
-    filename = file.filename
-    
-    # Save file
-    save_path = os.path.join(INPUT_DIR, filename)
-    file.save(save_path)
-    
-    # Register source với status "processing"
-    # Tính source_stem từ filename để dễ map sau này
-    video_name = f"{filename.replace('.', '_')}"
-    source_stem = Path(video_name).stem.lower()
-    
     registry = _load_source_registry()
+    # Tên hiển thị (chống trùng) — canonical stem suy từ tên này nên FE chọn theo
+    # tên hiển thị sẽ khớp chunk; lưu vật lý theo path an toàn riêng.
+    filename = _unique_display_filename(file.filename or "file", registry)
+    save_path = _safe_save_path(filename)
+    os.makedirs(INPUT_DIR, exist_ok=True)
+    file.save(save_path)
+
+    source_stem = _normalize_video_stem(filename)
     registry[source_id] = {
         "filename": filename,
-        "source_stem": source_stem,  # Lưu thêm để dễ map
+        "source_stem": source_stem,
+        "input_path": save_path,   # để xóa file gốc khi delete
         "status": "processing",
         "progress": 0.0,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     _save_source_registry(registry)
-    
-    # Trigger background ingest (non-blocking)
     _trigger_background_ingest(source_id, save_path, filename)
-    
-    # Trả response ngay
-    return jsonify({
+    return {
         'source_id': source_id,
         'filename': filename,
         'video_stem': source_stem,
         'status': 'processing',
         'progress': 0.0,
         'can_query': False,
-    })
+    }
+
+
+@app.post('/upload-file')
+def upload_file():
+    """Upload file và trả response ngay, xử lý ingest chạy background."""
+    file = request.files.get('file')
+    if not file or not (file.filename or "").strip():
+        return jsonify({'error': 'Missing file'}), 400
+    return jsonify(_ingest_uploaded_file(file))
 
 
 @app.post('/upload')
@@ -1058,59 +1083,26 @@ def get_source_status(source_id: str):
 # -------------------------
 @app.post('/upload-multiple')
 def upload_multiple():
+    """Upload nhiều file — mỗi file đi CÙNG luồng async với /upload-file
+    (tạo source_id + registry + background ingest) nên FE poll status được."""
     files = request.files.getlist('files')
     if not files:
         return jsonify({'error': 'Missing files'}), 400
 
-    results = []
+    sources, results = [], []
     for file in files:
-        save_path = os.path.join(INPUT_DIR, file.filename)
-        file.save(save_path)
-
-        text = extract_text(save_path)
-        if not text.strip():
-            results.append({'file': file.filename, 'error': 'Cannot read content'})
+        if not (file.filename or "").strip():
+            results.append({'file': file.filename, 'error': 'Empty filename'})
             continue
-
-        chunks = split_text(text)
-        video_name = f"{file.filename.replace('.', '_')}"
-
         try:
-            video_path, metadata_entries = process_and_store_chunks(
-                chunks=chunks,
-                video_name=video_name,
-                timestamp=datetime.now().isoformat()
-            )
-
-            for entry in metadata_entries:
-                append_to_index(
-                    chunks=[entry["text"]],
-                    video_name=video_path,
-                    custom_metadata=[{
-                        "parent_id": entry.get("parent_id"),
-                        "sub_order": entry.get("sub_order"),
-                        "total_parts": entry.get("total_parts"),
-                        "is_subchunk": entry.get("is_subchunk", False)
-                    }]
-                )
-
-            # Trigger background task để build Memory Tree (non-blocking)
-            source_stem = Path(video_name).stem.lower()
-            _trigger_memory_tree_build([source_stem])
-
-            results.append({
-                'file': file.filename,
-                'video_path': video_path,
-                'status': 'uploaded',
-                'message': 'OK. Memory Tree is being built in background.'
-            })
+            info = _ingest_uploaded_file(file)
+            sources.append(info)
+            results.append({'file': info['filename'], 'source_id': info['source_id'], 'status': 'processing'})
         except Exception as e:
-            results.append({
-                'file': file.filename,
-                'error': f'Processing failed: {str(e)}'
-            })
+            import traceback; traceback.print_exc()
+            results.append({'file': file.filename, 'error': f'Upload failed: {str(e)}'})
 
-    return jsonify({'results': results})
+    return jsonify({'sources': sources, 'results': results})
 @app.get('/list-indexed')
 def list_indexed():
     """
@@ -1121,24 +1113,34 @@ def list_indexed():
         with open(INDEX_META_JSON_PATH, encoding='utf-8') as f:
             meta = json.load(f)
 
+        # Map canonical source_stem -> tên hiển thị (filename gốc) từ registry.
+        stem_to_filename = {}
+        try:
+            for info in (_load_source_registry() or {}).values():
+                st = _normalize_video_stem(info.get('source_stem') or info.get('filename') or '')
+                if st and st not in stem_to_filename:
+                    stem_to_filename[st] = info.get('filename') or st
+        except Exception:
+            pass
+
         video_map = {}
         for item in meta.values():
             video = item.get('video', '').strip()
             if not video or video.lower() == 'unknown':
                 continue
-            
-            # Normalize video path: có thể là đường dẫn đầy đủ hoặc chỉ tên file
-            # Ví dụ: "videos/file_pdf_20260109_001635.mp4" hoặc "file_pdf_20260109_001635.mp4"
-            video_normalized = Path(video).name  # Lấy tên file (bỏ đường dẫn nếu có)
-            video_stem = Path(video_normalized).stem.lower()  # Đồng bộ với hybrid._norm_stem (FAISS meta)
-            
-            text = item.get('text', '')
-            video_map.setdefault(video_stem, []).append(text)
+            # Canonical stem DÙNG CHUNG với retrieval/upload (bỏ path/ext/timestamp,
+            # sanitize space/đặc biệt). Gộp các chunk cùng nguồn dù video_path khác ts.
+            video_stem = _normalize_video_stem(item.get('source_stem') or video)
+            if not video_stem:
+                continue
+            video_map.setdefault(video_stem, []).append(item.get('text', ''))
 
         sources = []
         for video_stem, chunks in video_map.items():
             sources.append({
-                'video': video_stem,  # FE expects stem (không có extension, không có timestamp nếu đã normalize)
+                'video': video_stem,          # giữ key cũ (FE đang đọc s.video)
+                'video_stem': video_stem,     # khóa canonical (FE nên dùng cái này)
+                'filename': stem_to_filename.get(video_stem) or video_stem,  # tên hiển thị
                 'chunks': chunks,
                 'num_chunks': len(chunks),
                 'can_query': True,
@@ -1631,13 +1633,10 @@ def delete_summary(summary_id: str):
 def delete_source():
     data = request.json or {}
     video_name = data.get('video', '')
-
     if not video_name:
         return jsonify({'error': 'Missing video name'}), 400
 
-    # FE gửi stem -> normalize
-    video_stem = unicodedata.normalize('NFKD', video_name.strip()).replace('\u00a0', ' ').replace('.mp4', '').lower()
-
+    target_stem = _normalize_video_stem(video_name)
     meta_path = INDEX_META_JSON_PATH
     if not meta_path.exists():
         return jsonify({'error': 'No index metadata found'}), 404
@@ -1646,29 +1645,54 @@ def delete_source():
         with open(meta_path, encoding='utf-8') as f:
             meta = json.load(f)
 
-        # Tìm danh sách stored video names có stem khớp
+        # Khớp theo canonical stem DÙNG CHUNG (không glob prefix → không xóa nhầm).
         stored_names = set()
+        removed_total = 0
         for v in meta.values():
-            stored_video = unicodedata.normalize('NFKD', v.get('video', '').strip()).replace('\u00a0', ' ')
-            if Path(stored_video).stem.lower() == video_stem:
-                stored_names.add(stored_video)
+            if not isinstance(v, dict):
+                continue
+            stem = _normalize_video_stem(v.get('source_stem') or v.get('video') or '')
+            if stem and stem == target_stem:
+                stored_names.add(v.get('video', ''))
+                removed_total += 1
 
         if not stored_names:
             return jsonify({'message': 'No matching source found', 'removed': 0})
 
-        removed_total = 0
-        # Gọi delete_source_from_index cho từng stored name (vector_store sẽ rebuild index)
         for stored in stored_names:
-            delete_source_from_index(stored)
-            # count removed in meta by checking previous entries (best-effort)
-            removed_total += sum(1 for v in meta.values() if Path(unicodedata.normalize('NFKD', v.get('video', '').strip()).replace('\u00a0',' ')).stem.lower() == video_stem)
-
-        # Xóa file video vật lý (match by stem)
-        for f in Path(VIDEOS_DIR).glob(f"{video_stem}*"):
             try:
-                f.unlink()
+                delete_source_from_index(stored)
             except Exception as e:
-                print("⚠️ Could not delete video file:", f, e)
+                print("delete_source_from_index failed:", stored, e)
+
+        # Xóa file video vật lý CHÍNH XÁC theo path đã lưu (KHÔNG glob).
+        for stored in stored_names:
+            for cand in {stored, os.path.join(VIDEOS_DIR, os.path.basename(stored or ''))}:
+                try:
+                    pf = Path(cand)
+                    if cand and pf.is_file():
+                        pf.unlink()
+                except Exception as e:
+                    print("Could not delete video file:", cand, e)
+
+        # Dọn registry: bỏ entry cùng canonical stem (+ xóa file input gốc).
+        try:
+            reg = _load_source_registry()
+            to_del = [sid for sid, info in reg.items()
+                      if _normalize_video_stem(info.get('source_stem') or info.get('filename') or '') == target_stem]
+            for sid in to_del:
+                ip = reg[sid].get('input_path')
+                if ip:
+                    try:
+                        if Path(ip).is_file():
+                            Path(ip).unlink()
+                    except Exception:
+                        pass
+                reg.pop(sid, None)
+            if to_del:
+                _save_source_registry(reg)
+        except Exception as e:
+            print("registry cleanup failed:", e)
 
         return jsonify({'message': 'Deleted', 'removed': removed_total})
 
@@ -1676,7 +1700,8 @@ def delete_source():
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-def run_mindmap_job(job_id: str, source_names: list[str], generation_mode: str) -> None:
+
+def run_mindmap_job(job_id: str, source_names: list[str], generation_mode: str, strategy_requested: str = "auto") -> None:
     """Background: sinh mindmap + lưu file; cập nhật mindmap_jobs thread-safe."""
     attach_mindmap_job_context(job_id)
     try:
@@ -1692,7 +1717,9 @@ def run_mindmap_job(job_id: str, source_names: list[str], generation_mode: str) 
         init_state = {
             "job_id": job_id,
             "source_names": source_names,
-            "strategy": generation_mode,  # strategy = mode để worker hiểu
+            "strategy": strategy_requested,            # giữ field cũ = strategy yêu cầu
+            "generation_mode": generation_mode,        # mode THỰC (trước đây bị bỏ → luôn balanced)
+            "strategy_requested": strategy_requested,  # generate_node đọc field này
             "result": {},
             "progress": 0,
             "current_node": f"Chế độ: {generation_mode}",
@@ -1801,7 +1828,7 @@ def generate_mindmap():
 
         thread = threading.Thread(
             target=run_mindmap_job,
-            args=(job_id, source_names, generation_mode),
+            args=(job_id, source_names, generation_mode, strategy_requested),
             daemon=True,
         )
         thread.start()
@@ -1810,6 +1837,9 @@ def generate_mindmap():
             "job_id": job_id,
             "status": "started",
             "generation_mode": generation_mode,
+            "strategy_requested": strategy_requested,  # sau guard (FE biết strategy thực sẽ chạy)
+            "jobTimeout": job_timeout,                  # FE dùng để set timeout polling đúng mode
+            "llmTimeout": llm_timeout,
         }), 202
 
     except Exception as e:
@@ -1962,20 +1992,28 @@ def _delete_input_file(source_id: str, source_info: Dict) -> bool:
     Xóa file gốc trong input_docs/.
     Returns True nếu xóa thành công hoặc file không tồn tại.
     """
+    # Ưu tiên input_path (đường lưu vật lý THẬT, đã sanitize/chống trùng); fallback
+    # INPUT_DIR/filename cho entry cũ. Tránh sót file gốc khi tên bị sanitize/đổi.
+    candidates = []
+    ip = source_info.get("input_path")
+    if ip:
+        candidates.append(Path(ip))
     filename = source_info.get("filename")
-    if not filename:
-        return True  # Không có filename, coi như đã xóa
-    
-    input_file_path = Path(INPUT_DIR) / filename
-    if input_file_path.exists():
+    if filename:
+        candidates.append(Path(INPUT_DIR) / filename)
+    if not candidates:
+        return True
+
+    ok = True
+    for input_file_path in candidates:
         try:
-            input_file_path.unlink()
-            print(f"🗑️ [Delete] Đã xóa input file: {input_file_path}")
-            return True
+            if input_file_path.exists():
+                input_file_path.unlink()
+                print(f"🗑️ [Delete] Đã xóa input file: {input_file_path}")
         except Exception as e:
             print(f"⚠️ [Delete] Không thể xóa input file {input_file_path}: {e}")
-            return False
-    return True  # File không tồn tại, coi như OK
+            ok = False
+    return ok
 
 
 def _delete_videos(source_id: str, source_stem: str) -> int:
@@ -1989,27 +2027,25 @@ def _delete_videos(source_id: str, source_stem: str) -> int:
         return 0
     
     deleted_count = 0
-    
-    # Tìm tất cả file video có thể liên quan
-    # Pattern 1: videos/{source_stem}*.mp4
-    # Pattern 2: videos/{source_id}*.mp4
-    patterns = [f"{source_stem}*", f"{source_id}*"]
-    
-    for pattern in patterns:
-        for video_file in videos_root.glob(pattern):
-            try:
-                if video_file.is_file():
-                    video_file.unlink()
-                    deleted_count += 1
-                    print(f"🗑️ [Delete] Đã xóa video: {video_file}")
-                elif video_file.is_dir():
-                    import shutil
-                    shutil.rmtree(video_file, ignore_errors=True)
-                    deleted_count += 1
-                    print(f"🗑️ [Delete] Đã xóa thư mục video: {video_file}")
-            except Exception as e:
-                print(f"⚠️ [Delete] Không thể xóa video {video_file}: {e}")
-    
+
+    # Khớp CHÍNH XÁC theo canonical stem từng file (không glob '{stem}*' prefix —
+    # tránh xóa nhầm "report" ↔ "report2", và miễn nhiễm hoa/thường giữa các OS).
+    for video_file in videos_root.iterdir():
+        try:
+            if _normalize_video_stem(video_file.name) != source_stem:
+                continue
+            if video_file.is_file():
+                video_file.unlink()
+                deleted_count += 1
+                print(f"🗑️ [Delete] Đã xóa video: {video_file}")
+            elif video_file.is_dir():
+                import shutil
+                shutil.rmtree(video_file, ignore_errors=True)
+                deleted_count += 1
+                print(f"🗑️ [Delete] Đã xóa thư mục video: {video_file}")
+        except Exception as e:
+            print(f"⚠️ [Delete] Không thể xóa video {video_file}: {e}")
+
     return deleted_count
 
 
@@ -2127,7 +2163,14 @@ def delete_source_v2(source_id: str):
     exists, source_info = _validate_source_exists(source_id, source_stem)
     if not exists:
         return jsonify({"error": "Source not found"}), 404
-    
+
+    # source_id là UUID, KHÔNG phải stem. Lấy stem THẬT từ registry entry để purge
+    # chunk/video/memory đúng nguồn (nếu không sẽ xóa sót do stem sai từ UUID).
+    if source_info:
+        _real_stem = _normalize_video_stem(source_info.get("source_stem") or source_info.get("filename") or "")
+        if _real_stem:
+            source_stem = _real_stem
+
     # Kiểm tra nếu source đang processing (cho phép xóa nhưng log warning)
     if source_info and source_info.get("status") == "processing":
         print(f"⚠️ [Delete] Source {source_id} đang processing, vẫn tiếp tục xóa")

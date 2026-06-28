@@ -100,14 +100,18 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
       .then((res) => res.json())
       .then((data) => {
         const backendSources = data.sources || [];
+        // Khóa canonical DÙNG CHUNG với BE: ưu tiên video_stem (BE trả canonical),
+        // fallback video. filename hiển thị lấy từ BE nếu có.
+        const keyOf = (s) => s.video_stem || s.video;
         setSources((prev) => {
           const activeSources = prev.filter((s) => s.status === "processing" || s.status === "index_ready");
-          const readySources = backendSources.map((s) => ({ source_id: null, filename: formatFileName(s.video), video_stem: s.video, status: "ready", progress: 1.0, substatus: null, capabilities: { chunk_query: true, memory_query: true }, can_query: true, num_chunks: s.num_chunks }));
+          const readySources = backendSources.map((s) => ({ source_id: null, filename: s.filename || formatFileName(keyOf(s)), video_stem: keyOf(s), status: "ready", progress: 1.0, substatus: null, capabilities: { chunk_query: true, memory_query: true }, can_query: true, num_chunks: s.num_chunks }));
           const combined = [...activeSources];
-          readySources.forEach((rs) => { if (!combined.some((ps) => ps.video_stem === rs.video_stem || ps.filename === rs.filename)) combined.push(rs); });
+          readySources.forEach((rs) => { if (!combined.some((ps) => (ps.video_stem || ps.video) === rs.video_stem)) combined.push(rs); });
           return combined;
         });
-        setSelectedSources((prev) => prev.filter((p) => backendSources.some((s) => s.video === p)));
+        // Giữ lựa chọn cũ nếu vẫn còn trong danh sách index (so theo khóa canonical).
+        setSelectedSources((prev) => prev.filter((p) => backendSources.some((s) => keyOf(s) === p)));
       })
       .catch((err) => console.error("Error fetching sources:", err));
   };

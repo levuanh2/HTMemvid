@@ -2595,6 +2595,23 @@ function MindMapContent({ data, onClose, initialLayoutType }) {
 
 export default function MindMapModal({ data, onClose, initialLayoutType }) {
   if (typeof document === "undefined") return null;
+  // Empty-state: tránh hiển thị khung trống khi không có node nào.
+  const hasNodes =
+    (Array.isArray(data?.nodes) && data.nodes.length > 0) ||
+    (Array.isArray(data?.diagram?.nodes) && data.diagram.nodes.length > 0);
+  if (!hasNodes) {
+    return createPortal(
+      <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50" onClick={onClose}>
+        <div className="bg-white rounded-[12px] p-6 max-w-sm text-center shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div className="text-3xl mb-2">🧠</div>
+          <p className="text-[14px] font-semibold text-gray-800 mb-1">Sơ đồ trống</p>
+          <p className="text-[12px] text-gray-500 mb-4">Không có nội dung để hiển thị. Hãy thử tạo lại với tài liệu khác hoặc chế độ Quality.</p>
+          <button onClick={onClose} className="px-4 py-1.5 rounded-[8px] bg-gray-800 text-white text-[13px]">Đóng</button>
+        </div>
+      </div>,
+      document.body
+    );
+  }
   return createPortal(
     <ReactFlowProvider><MindMapContent data={data} onClose={onClose} initialLayoutType={initialLayoutType} /></ReactFlowProvider>,
     document.body

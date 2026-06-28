@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import re
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -14,6 +13,7 @@ from rank_bm25 import BM25Okapi
 
 from app.clients.llm_factory import DEFAULT_MODEL_NAME, encode_query_cached, get_embedding_model
 from app.domains.vectorstore.store import _use_lc_vector_store
+from shared.source_id import canonical_source_stem
 logger = logging.getLogger(__name__)
 
 
@@ -37,12 +37,9 @@ def _meta_match(c: "RetrievedChunk", category: str | None, language: str | None)
 
 
 def _norm_stem(name: str) -> str:
-    try:
-        cleaned = unicodedata.normalize("NFKD", (name or "").strip()).replace("\u00a0", " ")
-        cleaned = Path(cleaned).name
-        return Path(cleaned).stem.lower()
-    except Exception:
-        return (name or "").strip().lower()
+    # \u0110\u1ecbnh danh canonical D\u00d9NG CHUNG (shared.source_id) \u2014 kh\u1edbp \u0111\u00fang c\u00e1ch ingest \u0111\u1eb7t
+    # t\u00ean video_path (sanitize space/\u0111\u1eb7c bi\u1ec7t \u2192 '_'), n\u00ean selected \u2194 chunk lu\u00f4n tr\u00f9ng.
+    return canonical_source_stem(name)
 
 
 # Giống memory_tree._normalize_video_stem: bỏ hậu tố _YYYYMMDD_HHMMSS để khớp stem ngắn (registry) ↔ tên video đã index (có timestamp).
@@ -128,7 +125,9 @@ class HybridRetriever:
             text = (v.get("text") or "").strip()
             if not text:
                 continue
-            video_stem = _norm_stem(v.get("video") or "")
+            # Ưu tiên canonical source_stem ghi sẵn (chunk mới); fallback suy từ
+            # video_path (chunk cũ) — cả hai qua cùng canonicalizer nên khớp selected.
+            video_stem = _norm_stem(v.get("source_stem") or v.get("video") or "")
             chunks.append(RetrievedChunk(
                 chunk_id=int(k),
                 text=text,
@@ -282,7 +281,7 @@ class HybridRetriever:
                     by_id = {c.chunk_id: c for c in self._chunks}
                     out: list[RetrievedChunk] = []
                     for d, dist in pairs:
-                        stem = _norm_stem(d.metadata.get("video") or "")
+                        stem = _norm_stem(d.metadata.get("source_stem") or d.metadata.get("video") or "")
                         if norms and not _chunk_visible_for_sources(stem, norms, bases):
                             continue
                         cid = d.metadata.get("chunk_id")

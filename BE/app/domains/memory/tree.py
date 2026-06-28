@@ -12,6 +12,7 @@ import numpy as np
 from app.clients.llm_factory import ask_ai, get_embedding_model
 from app.domains.vectorstore.store import MODEL_NAME
 from app.domains.vectorstore.embedding_utils import normalize_embeddings_array, safe_stack_vectors
+from shared.source_id import canonical_source_stem
 try:
     from shared.env_loader import load_project_env
     load_project_env(override=False)
@@ -65,13 +66,9 @@ def _now_iso() -> str:
 
 
 def _normalize_video_stem(name: str) -> str:
-    if not name:
-        return ""
-    name = Path(name).name if "/" in name or "\\" in name else name
-    cleaned = unicodedata.normalize("NFKD", name.strip()).replace("\u00a0", " ")
-    cleaned = cleaned.replace(".mp4", "")
-    cleaned = re.sub(r"_\d{8}_\d{6}$", "", cleaned)
-    return cleaned.strip().lower()
+    # Dùng chung canonicalizer (shared.source_id) để memory-tree, check_sources_status
+    # và retrieval cùng MỘT quy tắc khớp file (kể cả tên có space/dấu/ký tự đặc biệt).
+    return canonical_source_stem(name)
 
 
 def _embed(text: str) -> List[float]:

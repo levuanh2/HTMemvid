@@ -133,6 +133,8 @@ export default function SidebarRight({ selectedSources, onClose }) {
   const pollingTimeoutRef = useRef(null);
   // Generation counter to discard late responses after user started a new job
   const pollingGenerationRef = useRef(0);
+  // Cho phép HUỶ job mindmap đang chạy (reject promise + stop polling).
+  const cancelMindmapRef = useRef(null);
 
   // ── Fetchers (logic unchanged) ────────────────────
   const fetchMindMaps = useCallback(async () => {
@@ -303,8 +305,10 @@ export default function SidebarRight({ selectedSources, onClose }) {
       if (startData.error) throw new Error(startData.error);
       if (!startData.job_id) throw new Error("Server không trả job_id.");
 
-      // Use adaptive interval-based polling (deduped, auto-cleanup)
+      // Use adaptive interval-based polling (deduped, auto-cleanup).
+      // jobTimeout từ BE (đúng theo mode fast/balanced/quality), fallback 180.
       const data = await new Promise((resolve, reject) => {
+        cancelMindmapRef.current = () => reject(new Error("__cancelled__"));
         startPolling(startData.job_id, {
           jobTimeoutMs: (startData.jobTimeout || 180) * 1000,
           onTick: (j) => setMindmapJobHint({ progress: j.progress ?? null, current_node: j.current_node ?? null }),
@@ -312,6 +316,13 @@ export default function SidebarRight({ selectedSources, onClose }) {
           onError: (err) => reject(err),
         });
       });
+      // Empty-state: BE trả nhưng không có node nào → báo rõ, không lưu map rỗng.
+      const hasNodes = (Array.isArray(data?.nodes) && data.nodes.length > 0) ||
+        (Array.isArray(data?.diagram?.nodes) && data.diagram.nodes.length > 0);
+      if (!hasNodes) {
+        alert("Không tạo được sơ đồ từ tài liệu đã chọn (nội dung quá ngắn hoặc không trích được ý chính). Thử chọn tài liệu khác hoặc chế độ Quality.");
+        return;
+      }
       if (import.meta.env.DEV) {
         console.log("[SidebarRight] mindmap result", data);
         console.log("[SidebarRight] nodes", data?.nodes?.length, "diagram", data?.diagram?.nodes?.length);
@@ -329,12 +340,28 @@ export default function SidebarRight({ selectedSources, onClose }) {
       };
       setMindMaps((prev) => [record, ...prev.filter((item) => item.id !== record.id)]);
       await fetchMindMaps();
-    } catch (err) { console.error("Mind Map Error:", err); alert("Không tạo được Mind Map, kiểm tra console!"); }
+    } catch (err) {
+      if (err?.message === "__cancelled__") {
+        console.log("[MindMap] cancelled by user");
+      } else {
+        console.error("Mind Map Error:", err);
+        alert(err?.message ? `Không tạo được sơ đồ tư duy: ${err.message}` : "Không tạo được sơ đồ tư duy, kiểm tra console!");
+      }
+    }
     finally {
+      cancelMindmapRef.current = null;
       setLoading(false);
       setMindmapJobHint({ progress: null, current_node: null });
       stopPolling("done");
     }
+  };
+
+  const handleCancelMindMap = () => {
+    // Lưu ý: chỉ DỪNG CHỜ ở FE. Job BE có thể vẫn chạy xong và lưu map (append_mindmap
+    // ghi trong lúc sinh) → map có thể xuất hiện ở lần fetch sau. Huỷ mid-LLM cần
+    // cooperative-abort phía worker (chưa làm).
+    stopPolling("cancel");
+    if (cancelMindmapRef.current) cancelMindmapRef.current();
   };
 
   const handleDeleteMap = async (id) => {
@@ -426,14 +453,20 @@ export default function SidebarRight({ selectedSources, onClose }) {
                 </div>
               )}
 
-              {/* Loading progress */}
+              {/* Loading progress + huỷ */}
               {loading && (
                 <div className="mt-2 flex items-center gap-2 text-[12px] text-text-secondary">
                   <Spinner className="text-brand" />
                   <span className="font-medium">{mindmapJobHint.progress != null ? `${mindmapJobHint.progress}%` : "Đang tạo…"}</span>
                   {mindmapJobHint.current_node && (
-                    <span className="text-text-muted truncate">{mindmapJobHint.current_node}</span>
+                    <span className="text-text-muted truncate flex-1">{mindmapJobHint.current_node}</span>
                   )}
+                  <button
+                    onClick={handleCancelMindMap}
+                    className="ml-auto px-2 py-0.5 rounded-[6px] border border-border text-[11px] text-text-muted hover:text-red-500 hover:border-red-500/40 transition-colors"
+                  >
+                    Huỷ
+                  </button>
                 </div>
               )}
             </div>

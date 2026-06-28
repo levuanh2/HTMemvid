@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 import unicodedata
@@ -14,7 +15,7 @@ from langgraph.graph import END, StateGraph
 from app.graphs.logger import _Timer, log_node_event
 from app.graphs.sqlite_checkpointer import sqlite_saver_from_path
 from app.graphs.state import QueryState
-from app.domains.retrieval import grading, query_rewrite, rerank
+from app.domains.retrieval import grading, nli, query_rewrite, rerank
 from app.domains.retrieval.ensemble_retriever import hybrid_retrieve_with_ensemble
 from app.domains.retrieval.hybrid import HybridRetriever
 from shared.config import get_settings
@@ -82,6 +83,11 @@ def build_query_graph(
     # Khi bật rerank: Stage 1 (RetrieveFAISS) lấy candidate pool rộng, Stage 2
     # (RerankDocuments) lọc xuống RERANK_TOP_N.
     RETRIEVE_TOP_K = RERANK_CANDIDATE_K if RERANK_ENABLED else HYBRID_TOP_K
+    # NLI (contradiction-check). Mặc định tắt → topology graph y hệt cũ.
+    NLI_ENABLED = _s.nli_enabled
+    NLI_CONTRADICTION_THRESHOLD = _s.nli_contradiction_threshold
+    NLI_TIMEOUT = _s.nli_timeout_sec
+    NLI_MAX_PAIRS = _s.nli_max_pairs
     # HITL hi\u1ec3n th\u1ecb c\u00e2u tr\u1ea3 l\u1eddi sau khi duy\u1ec7t \u2192 t\u1eaft stream token \u0111\u1ec3 kh\u00f4ng l\u1ed9 b\u1ea3n nh\u00e1p ch\u01b0a duy\u1ec7t.
     if HITL_ENABLED:
         QUERY_STREAM_TOKENS = False
@@ -307,12 +313,14 @@ def build_query_graph(
             def _do_rerank():
                 return rerank.rerank_texts(state["q"], chunks, top_n=RERANK_TOP_N)
 
+            scored_ok = True
             try:
                 with ThreadPoolExecutor(max_workers=1) as ex:
                     ranked = ex.submit(_do_rerank).result(timeout=RERANK_TIMEOUT)
             except TimeoutError:
                 # Quá hạn → giữ nguyên thứ tự, chỉ cắt top_n (không làm hỏng câu trả lời).
                 ranked = [(i, 0.0) for i in range(min(RERANK_TOP_N, len(chunks)))]
+                scored_ok = False  # điểm 0.0 giả → KHÔNG dùng cho CRAG grade
 
             idxs = [i for i, _ in ranked if 0 <= i < len(chunks)]
             kept = [chunks[i] for i in idxs]
@@ -324,6 +332,13 @@ def build_query_graph(
                 "current_node": "RerankDocuments",
                 "error": None,
             }
+            # Điểm cross-encoder (logit) → sigmoid về (0,1) cho CRAG grade dùng lại
+            # (sau rerank chunk là str nên grade mất vector/bm25 score). Bỏ qua khi timeout.
+            if scored_ok:
+                patch["rerank_scores"] = [
+                    1.0 / (1.0 + math.exp(-float(s)))
+                    for i, s in ranked if 0 <= i < len(chunks)
+                ]
             # Sau khi lọc, nguồn có thể thu hẹp → cập nhật lại danh sách hiển thị.
             if kept_stems:
                 sources: list[str] = []
@@ -348,6 +363,67 @@ def build_query_graph(
                 "current_node": "RerankDocuments",
                 "error": None,
             }
+
+    def verify_context_node(state: dict) -> dict:
+        """NLI contradiction-check: phát hiện cặp chunk mâu thuẫn (phủ định/thời gian/
+        con số) rồi loại chunk hạng thấp, giữ chunk hạng cao. Lỗi/timeout → giữ nguyên."""
+        t = _Timer()
+        chunks = state.get("retrieved_chunks") or []
+        stems = state.get("retrieved_stems") or []
+        try:
+            _set_job(state["job_id"], progress=42, current_node="VerifyContext")
+            texts = [str(c) for c in chunks if c]
+            if len(texts) < 2:
+                return {**state, "progress": 42, "current_node": "VerifyContext", "error": None}
+
+            def _do_detect():
+                return nli.detect_conflicts(
+                    texts, max_pairs=NLI_MAX_PAIRS, threshold=NLI_CONTRADICTION_THRESHOLD
+                )
+
+            try:
+                with ThreadPoolExecutor(max_workers=1) as ex:
+                    conflicts = ex.submit(_do_detect).result(timeout=NLI_TIMEOUT)
+            except TimeoutError:
+                conflicts = []
+
+            if not conflicts:
+                log_node_event(state["job_id"], "VerifyContext", "ok", t.ms(), {"conflicts": 0})
+                return {**state, "context_conflicts": [], "progress": 42, "current_node": "VerifyContext", "error": None}
+
+            keep = nli.resolve_conflicts(len(texts), conflicts)
+            kept = [texts[i] for i in keep]
+            kept_stems = [stems[i] for i in keep if i < len(stems)] if stems else []
+
+            patch: dict = {
+                "retrieved_chunks": kept,
+                "context_conflicts": conflicts,
+                "progress": 42,
+                "current_node": "VerifyContext",
+                "error": None,
+            }
+            # Giữ rerank_scores khớp 1-1 với chunk còn lại (CRAG grade dựa vào độ dài khớp).
+            prev_scores = state.get("rerank_scores")
+            if isinstance(prev_scores, list) and len(prev_scores) == len(texts):
+                patch["rerank_scores"] = [prev_scores[i] for i in keep]
+            if kept_stems:
+                sources: list[str] = []
+                for s in kept_stems:
+                    s = (s or "").strip()
+                    if s and s not in sources:
+                        sources.append(s)
+                patch["retrieved_stems"] = kept_stems
+                patch["retrieved_sources"] = sources
+
+            log_node_event(
+                state["job_id"], "VerifyContext", "ok", t.ms(),
+                {"conflicts": len(conflicts), "dropped": len(texts) - len(kept)},
+            )
+            return {**state, **patch}
+        except Exception as e:
+            # NLI lỗi KHÔNG fail pipeline — giữ nguyên toàn bộ chunk.
+            log_node_event(state["job_id"], "VerifyContext", "error", t.ms(), {"error": str(e)})
+            return {**state, "progress": 42, "current_node": "VerifyContext", "error": None}
 
     def context_builder_node(state: dict) -> dict:
         t = _Timer()
@@ -558,6 +634,7 @@ def build_query_graph(
                 state.get("retrieved_chunks") or [],
                 relevance_threshold=CRAG_RELEVANCE_THRESHOLD,
                 wrong_floor=CRAG_WRONG_FLOOR,
+                rerank_scores=state.get("rerank_scores"),
             )
             log_node_event(
                 state["job_id"], "GradeDocuments", "ok", t.ms(),
@@ -734,8 +811,16 @@ def build_query_graph(
     else:
         g.set_entry_point("CheckSources")
 
-    # Rerank (Stage 2): chèn RerankDocuments giữa RetrieveFAISS và ContextBuilder khi bật.
-    retrieve_faiss_next = "RerankDocuments" if RERANK_ENABLED else "ContextBuilder"
+    # Chuỗi sau retrieve: RetrieveFAISS → [RerankDocuments] → [VerifyContext] → ContextBuilder.
+    # Mỗi node giữa chỉ chèn khi cờ bật; tắt hết → topology y hệt cũ.
+    post_retrieve_chain = []
+    if RERANK_ENABLED:
+        post_retrieve_chain.append("RerankDocuments")
+    if NLI_ENABLED:
+        post_retrieve_chain.append("VerifyContext")
+    post_retrieve_chain.append("ContextBuilder")
+    retrieve_faiss_next = post_retrieve_chain[0]
+
     for node_name, next_name in (
         ("CheckSources", "CacheLookup"),
         ("CacheLookup", "RetrieveMemory"),
@@ -750,10 +835,19 @@ def build_query_graph(
 
     if RERANK_ENABLED:
         g.add_node("RerankDocuments", rerank_documents_node)
+        nxt = post_retrieve_chain[post_retrieve_chain.index("RerankDocuments") + 1]
         g.add_conditional_edges(
             "RerankDocuments",
             _route_err_or_continue,
-            {"ErrorHandler": "ErrorHandler", "Continue": "ContextBuilder"},
+            {"ErrorHandler": "ErrorHandler", "Continue": nxt},
+        )
+    if NLI_ENABLED:
+        g.add_node("VerifyContext", verify_context_node)
+        nxt = post_retrieve_chain[post_retrieve_chain.index("VerifyContext") + 1]
+        g.add_conditional_edges(
+            "VerifyContext",
+            _route_err_or_continue,
+            {"ErrorHandler": "ErrorHandler", "Continue": nxt},
         )
 
     # CRAG: ContextBuilder → GradeDocuments (bật) hoặc → GenerateAnswer (tắt).

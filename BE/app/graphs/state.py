@@ -42,6 +42,8 @@ class QueryState(TypedDict):
     retrieved_chunks: list
     retrieved_stems: NotRequired[list]
     retrieved_sources: NotRequired[list]
+    context_conflicts: NotRequired[list]  # cặp chunk mâu thuẫn do NLI phát hiện (VerifyContext)
+    rerank_scores: NotRequired[list]  # điểm cross-encoder (0-1) khớp retrieved_chunks — CRAG grade dùng
     context: str
     answer: str
     retry_count: int

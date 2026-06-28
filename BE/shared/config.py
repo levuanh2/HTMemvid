@@ -110,6 +110,15 @@ class Settings:
     rerank_batch: int = 16
     rerank_timeout_sec: int = 10
 
+    # --- NLI / contradiction-check (khử trùng context TRƯỚC khi sinh đáp án) ---
+    # Mặc định OFF → topology graph y hệt cũ. Khi bật: quét các cặp chunk top-K
+    # bằng mDeBERTa, hạ/loại chunk mâu thuẫn (phủ định/thời gian/con số) hạng thấp.
+    nli_enabled: bool = False
+    nli_model: str = "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
+    nli_contradiction_threshold: float = 0.6  # prob 'contradiction' tối thiểu để tính là xung đột
+    nli_timeout_sec: int = 10
+    nli_max_pairs: int = 10  # trần số cặp chunk đem đi NLI (kiểm soát latency)
+
     # --- Địa chỉ service gRPC (Phase 3/4). Rỗng => dùng impl local in-process. ---
     llm_gateway_addr: str = ""
     mindmap_service_addr: str = ""
@@ -163,6 +172,11 @@ class Settings:
             rerank_top_n=_int("RERANK_TOP_N", 0),
             rerank_batch=_int("RERANK_BATCH", 16),
             rerank_timeout_sec=_int("RERANK_TIMEOUT_SEC", 10),
+            nli_enabled=_flag("NLI_ENABLED", "0"),
+            nli_model=os.getenv("NLI_MODEL", "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"),
+            nli_contradiction_threshold=_float("NLI_CONTRADICTION_THRESHOLD", 0.6),
+            nli_timeout_sec=_int("NLI_TIMEOUT_SEC", 10),
+            nli_max_pairs=_int("NLI_MAX_PAIRS", 10),
             llm_gateway_addr=(os.getenv("LLM_GATEWAY_ADDR") or "").strip(),
             mindmap_service_addr=(os.getenv("MINDMAP_SERVICE_ADDR") or "").strip(),
             use_markdown_ingest=_flag("USE_MARKDOWN_INGEST", "1"),

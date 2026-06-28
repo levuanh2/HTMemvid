@@ -22,6 +22,43 @@ def test_crag_supervisor_hitl_env_flags(monkeypatch):
     assert settings.hitl_enabled is True
 
 
+def test_nli_env_flags(monkeypatch):
+    monkeypatch.setenv("NLI_ENABLED", "1")
+    monkeypatch.setenv("NLI_MODEL", "some/model")
+    monkeypatch.setenv("NLI_CONTRADICTION_THRESHOLD", "0.8")
+    monkeypatch.setenv("NLI_TIMEOUT_SEC", "5")
+    monkeypatch.setenv("NLI_MAX_PAIRS", "20")
+
+    cfg.reload()
+    settings = cfg.get_settings()
+
+    assert settings.nli_enabled is True
+    assert settings.nli_model == "some/model"
+    assert settings.nli_contradiction_threshold == 0.8
+    assert settings.nli_timeout_sec == 5
+    assert settings.nli_max_pairs == 20
+
+
+def test_nli_defaults(monkeypatch):
+    for name in (
+        "NLI_ENABLED",
+        "NLI_MODEL",
+        "NLI_CONTRADICTION_THRESHOLD",
+        "NLI_TIMEOUT_SEC",
+        "NLI_MAX_PAIRS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    cfg.reload()
+    settings = cfg.get_settings()
+
+    assert settings.nli_enabled is False
+    assert settings.nli_model == "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
+    assert settings.nli_contradiction_threshold == 0.6
+    assert settings.nli_timeout_sec == 10
+    assert settings.nli_max_pairs == 10
+
+
 def test_crag_supervisor_hitl_defaults(monkeypatch):
     for name in (
         "CRAG_ENABLED",

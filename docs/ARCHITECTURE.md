@@ -221,6 +221,7 @@ Quy trình xử lý câu hỏi và trả lời.
 | **Memory tree** | Truy xuất context | Conditional - chỉ chạy khi cần |
 | **Hybrid retrieval** | Tìm docs liên quan (Stage 1 / Recall) | BM25 + FAISS + RRF; khi rerank bật → lấy `RERANK_CANDIDATE_K` ứng viên |
 | **Rerank** | Lọc tinh (Stage 2 / Precision) | Cross-encoder chấm cặp (query, passage), lọc xuống `RERANK_TOP_N`; conditional - chỉ khi `RERANK_ENABLED=1` |
+| **VerifyContext (NLI)** | Khử trùng context | mDeBERTa NLI: loại chunk MÂU THUẪN (phủ định/thời gian/con số); conditional - chỉ khi `NLI_ENABLED=1`. Chạy sau Rerank nếu cả hai bật |
 | **Context builder** | Tạo context | Thêm citation, truncate nếu quá dài |
 | **Generate answer** | Sinh câu trả | Gọi qa_chain với context + history |
 | **Finalize** | Hoàn thiện | Format output, gửi SSE |
@@ -254,6 +255,20 @@ Hybrid ─▶ RERANK_CANDIDATE_K ─▶ Cross-encoder (query, passage) ─▶ to
 - An toàn: lỗi load/predict hoặc quá `RERANK_TIMEOUT_SEC` → giữ nguyên thứ tự (Identity), không làm vỡ pipeline.
 - Lưu ý: rerank chỉ sắp xếp lại tài liệu Stage 1 đưa cho — KHÔNG tìm tài liệu mới (Recall thấp thì rerank vô dụng).
 - Code: `BE/app/domains/retrieval/rerank.py`, node `RerankDocuments` trong `query_graph.py`.
+
+### NLI / Contradiction-check (khử trùng context)
+
+```
+RetrieveFAISS ─▶ [RerankDocuments] ─▶ [VerifyContext] ─▶ ContextBuilder
+                                         mDeBERTa NLI
+```
+
+- Bật bằng `NLI_ENABLED=1` (mặc định tắt → graph chạy y như cũ). Chạy SAU Rerank nếu cả hai bật.
+- Vì sao: embedding (bi-encoder) có điểm mù — cosine cao nhưng nghĩa ngược (phủ định "được nghỉ" vs "không được nghỉ", đổi thực thể, thời gian/con số cũ-mới "12 ngày" vs "20 ngày"). NLI bắt được hai chunk *mâu thuẫn nhau* cùng lọt vào context.
+- Cách làm: quét cặp chunk top-K (trần `NLI_MAX_PAIRS`), chấm mDeBERTa cả 2 chiều lấy prob `contradiction` lớn nhất; ≥ `NLI_CONTRADICTION_THRESHOLD` → loại chunk hạng thấp, giữ chunk hạng cao; ghi `context_conflicts` vào state.
+- An toàn: `SKIP_MODEL_LOAD=1`, lỗi load/predict, hoặc quá `NLI_TIMEOUT_SEC` → passthrough (giữ nguyên context), không làm vỡ pipeline.
+- Cross-encoder của Rerank cũng được tái dùng làm tín hiệu cho CRAG grade (`grade_documents(rerank_scores=...)`) vì sau rerank chunk là `str` nên mất vector/bm25 score.
+- Code: `BE/app/domains/retrieval/nli.py`, node `VerifyContext` trong `query_graph.py`. Dep mới: `sentencepiece` (tokenizer DebertaV2).
 - `k` = 60 (constant)
 - `rank_i` = thứ hạng trong retrieval method i
 - `n` = số retrieval methods

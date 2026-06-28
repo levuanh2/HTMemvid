@@ -40,11 +40,21 @@ def grade_documents(
     *,
     relevance_threshold: float = 0.25,
     wrong_floor: float = 0.1,
+    rerank_scores: list | None = None,
 ) -> str:
     if not chunks:
         return "wrong"
 
-    best = max((_relevance(query, chunk) for chunk in chunks), default=0.0)
+    rels = [_relevance(query, chunk) for chunk in chunks]
+    # Sau Rerank, chunk là str (mất vector/bm25 score) → grade rớt về lexical thuần.
+    # Cross-encoder là tín hiệu liên quan tốt hơn lexical: fold vào nếu khớp độ dài.
+    if rerank_scores and len(rerank_scores) == len(rels):
+        rels = [
+            max(r, min(1.0, max(0.0, float(s))))
+            for r, s in zip(rels, rerank_scores)
+        ]
+
+    best = max(rels, default=0.0)
     if best >= relevance_threshold:
         return "correct"
     if best <= wrong_floor:

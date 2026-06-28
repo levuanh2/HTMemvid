@@ -25,3 +25,19 @@ def test_grade_documents_ambiguous_for_partial_overlap():
 def test_grade_documents_wrong_for_empty_or_unrelated_chunks():
     assert grade_documents("python testing", []) == "wrong"
     assert grade_documents("python testing", ["astronomy telescope nebula"]) == "wrong"
+
+
+def test_rerank_scores_promote_lexically_weak_chunk():
+    # Sau rerank chunk là str (mất vector/bm25) → lexical thuần grade "wrong".
+    query = "python testing"
+    chunks = ["astronomy telescope nebula"]
+    assert grade_documents(query, chunks) == "wrong"
+    # Nhưng cross-encoder chấm cao (0.9) → grade "correct" (rerank là tín hiệu tốt hơn).
+    assert grade_documents(query, chunks, rerank_scores=[0.9]) == "correct"
+
+
+def test_rerank_scores_ignored_when_length_mismatch():
+    query = "python testing"
+    chunks = ["astronomy telescope nebula"]
+    # Lệch độ dài → bỏ qua an toàn, về lexical.
+    assert grade_documents(query, chunks, rerank_scores=[0.9, 0.8]) == "wrong"

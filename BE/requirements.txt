@@ -51,3 +51,4 @@ markdownify
 torch==2.5.1+cpu
 tqdm
 transformers
+sentencepiece>=0.2.0   # tokenizer cho mDeBERTa NLI (DebertaV2) — leaf dep, không chạm langgraph; chỉ cần khi NLI_ENABLED=1

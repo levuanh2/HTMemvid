@@ -132,7 +132,8 @@ class LLMReranker:
         "được câu hỏi (10 = rất liên quan, 0 = không liên quan). Không giải thích."
     )
 
-    def __init__(self, *, feature: str = "chat") -> None:
+    def __init__(self, *, feature: str = "grade") -> None:
+        # 'grade' → factual temperature (≈0): chấm điểm 0-10 cần tất định, không "sáng tạo".
         self.feature = feature
 
     def _score_one(self, query: str, text: str) -> float:

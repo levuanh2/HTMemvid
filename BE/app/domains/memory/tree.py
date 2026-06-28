@@ -924,7 +924,9 @@ def generate_notebooklm_style_answer(question: str, human_context: str, intent_t
         "Hãy trả lời trực tiếp vào câu hỏi, viết như đang giải thích lại cho người khác một cách tự nhiên, mạch lạc."
     )
     
-    return ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL, feature="chat")
+    # feature='answer' → factual temp (≈0): đây là sinh đáp án grounded trên tài liệu,
+    # giữ nhất quán với GenerateAnswer/summarize_results (giảm bịa đặt).
+    return ask_ai(user_prompt, system_prompt=system_prompt, model=SLM_MODEL, feature="answer")
 
 
 def query_with_memory_tree(query: str, selected_sources: Optional[List[str]] = None, top_k: int = 5) -> Optional[Dict[str, Any]]:

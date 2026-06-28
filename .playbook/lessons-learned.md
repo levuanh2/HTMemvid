@@ -1,5 +1,25 @@
 # Lessons Learned
 
+## Per-feature temperature: factual→0, chat→0.3 (chống ảo giác đúng tầng)
+
+- **Bối cảnh:** temperature thấp giảm bịa đặt ở tác vụ factual, NHƯNG không phải "viên đạn bạc"
+  (vẫn cần prompt ràng buộc "thiếu thì nói thiếu" + RAG/CRAG/NLI — đã có sẵn). Trước đây cả
+  chat/summary/sinh-đáp-án dùng CHUNG một `LLM_TEMPERATURE=0.3`.
+- **Thiết kế (đã làm):** `_resolve_temperature(feature, options)` trong `llm_factory.py`, ưu tiên
+  `options['temperature']` (override per-call, vd mindmap 0.15) > factual (`_FACTUAL_FEATURES`:
+  answer/summary/mindmap/grade/classify/extract → `LLM_TEMPERATURE_FACTUAL=0`) > chat (`LLM_TEMPERATURE=0.3`).
+  Sinh đáp án RAG dùng `feature="answer"` (cùng model chat, temp 0): `summarize_results`,
+  LC QA chain (`answer_with_document_context*` qua query_graph), VÀ memory-tree answer (`tree.py`).
+  LLMReranker scoring → `feature="grade"`. (Quét đủ path nhờ codex: GenerateAnswer + memory-tree.)
+- **Bẫy gateway (proto3) — codex review bắt được:** `common_pb2.LlmOptions.temperature` là `double`
+  proto3 → KHÔNG phân biệt "0.0 đặt rõ" vs "mặc định"; `server._options_to_dict` lại dùng truthy
+  `if options.temperature:` → rớt 0.0. ⇒ KHÔNG inject temp client-side. Để **server tự resolve theo
+  `feature`** (đồng nhất cả ollama/gemini/groq). Phải truyền `feature, options` vào CẢ
+  `_gemini_chat_llm`/`_groq_chat_llm` (trước chỉ ollama nhận) — `local_providers.ProviderPool.ask`.
+- **Prevention:** thêm feature factual mới → bỏ vào `_FACTUAL_FEATURES`. Tác vụ scoring/classify/extract
+  PHẢI factual (tất định). Còn chừa: query_rewrite + structured_extraction/fact_check (domain summary)
+  vẫn `feature="chat"` — chấp nhận (sinh ngôn ngữ), siết sau nếu cần policy khép kín.
+
 ## Đừng nâng langgraph/langchain lên 1.x trên máy dev này
 
 - **Root cause:** Nâng env lên langgraph 1.x kéo `ormsgpack` — binary bị Windows Application Control chặn → app vỡ hoàn toàn ở import-time. Code lại vốn viết cho langchain 0.3.x / langgraph 0.2.x (API `langchain.retrievers.EnsembleRetriever`, `SqliteSaver(conn)`), nên việc nâng lên 1.x còn kéo theo cả migrate API (`langchain.retrievers` → `langchain_classic.retrievers`).

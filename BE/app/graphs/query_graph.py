@@ -502,7 +502,7 @@ def build_query_graph(
                         q,
                         ctx,
                         history=hist if isinstance(hist, list) else None,
-                        feature="chat",
+                        feature="answer",  # factual temp (≈0): bám context, giảm bịa
                     )
                 return summarize_results(q_effective, chunks, model=state.get("model"))
 
@@ -521,7 +521,7 @@ def build_query_graph(
                             q,
                             ctx,
                             history=hist if isinstance(hist, list) else None,
-                            feature="chat",
+                            feature="answer",  # factual temp (≈0): bám context, giảm bịa
                         ):
                             parts.append(piece)
                             try:

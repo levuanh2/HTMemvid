@@ -83,6 +83,22 @@ def _model_map(feature: str) -> str:
     }.get(feature, _chat)
 
 
+# Tác vụ factual/grounded → temperature thấp (tiến 0): bám sự thật, tái lập, giảm bịa.
+# 'answer' = sinh đáp án RAG (cùng model chat nhưng cần factual). Chat hội thoại giữ
+# LLM_TEMPERATURE để văn phong tự nhiên.
+_FACTUAL_FEATURES = frozenset({"answer", "summary", "mindmap", "grade", "classify", "extract"})
+
+
+def _resolve_temperature(feature: str, options: dict | None = None) -> float:
+    """Per-feature temperature. Ưu tiên options['temperature'] (override tường minh),
+    sau đó factual→LLM_TEMPERATURE_FACTUAL (0), còn lại→LLM_TEMPERATURE (0.3)."""
+    if options and "temperature" in options:
+        return float(options["temperature"])
+    if feature in _FACTUAL_FEATURES:
+        return float(os.getenv("LLM_TEMPERATURE_FACTUAL", "0"))
+    return float(os.getenv("LLM_TEMPERATURE", "0.3"))
+
+
 def _invoke_chat(llm: Any, user: str, system_prompt: str | None, timeout: float | None = None) -> str:
     from langchain_core.messages import HumanMessage, SystemMessage
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
@@ -126,7 +142,7 @@ def _ollama_chat_llm(model: str | None, feature: str, options: dict | None, time
     kw: dict[str, Any] = {
         "model": m,
         "base_url": host,
-        "temperature": float(os.getenv("LLM_TEMPERATURE", "0.3")),
+        "temperature": _resolve_temperature(feature, options),
         "num_predict": _DEFAULT_LLM_OUT,
         "num_ctx": int(os.getenv("LLM_CTX_SIZE", "4096")),
         "reasoning": _ollama_reasoning_param(),
@@ -134,8 +150,6 @@ def _ollama_chat_llm(model: str | None, feature: str, options: dict | None, time
     if options:
         if "num_predict" in options:
             kw["num_predict"] = int(options["num_predict"])
-        if "temperature" in options:
-            kw["temperature"] = float(options["temperature"])
         if "num_ctx" in options:
             kw["num_ctx"] = int(options["num_ctx"])
     
@@ -149,7 +163,7 @@ def _ollama_chat_llm(model: str | None, feature: str, options: dict | None, time
     return ChatOllama(**kw)
 
 
-def _gemini_chat_llm() -> Any:
+def _gemini_chat_llm(feature: str = "chat", options: dict | None = None) -> Any:
     from langchain_google_genai import ChatGoogleGenerativeAI
 
     api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
@@ -157,18 +171,19 @@ def _gemini_chat_llm() -> Any:
         raise RuntimeError("Missing GEMINI_API_KEY for Gemini provider.")
     model = os.getenv("GEMINI_CHAT_MODEL", "gemini-2.5-flash")
     max_out = _DEFAULT_LLM_OUT
+    temp = _resolve_temperature(feature, options)
     try:
         return ChatGoogleGenerativeAI(
             model=model,
             api_key=api_key,
-            temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")),
+            temperature=temp,
             max_output_tokens=max_out,
         )
     except TypeError:
-        return ChatGoogleGenerativeAI(model=model, api_key=api_key, temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")))
+        return ChatGoogleGenerativeAI(model=model, api_key=api_key, temperature=temp)
 
 
-def _groq_chat_llm() -> Any:
+def _groq_chat_llm(feature: str = "chat", options: dict | None = None) -> Any:
     from langchain_groq import ChatGroq
 
     api_key = (os.getenv("GROQ_API_KEY") or "").strip()
@@ -178,7 +193,7 @@ def _groq_chat_llm() -> Any:
     return ChatGroq(
         model=model,
         api_key=api_key,
-        temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")),
+        temperature=_resolve_temperature(feature, options),
         max_tokens=_DEFAULT_LLM_OUT,
     )
 
@@ -408,7 +423,10 @@ def ask_ai(
     """
     _addr = _gateway_addr()
     if _addr:
-        # Định tuyến qua llm-gateway (fallback provider xử lý phía server).
+        # Định tuyến qua llm-gateway. Temperature resolve theo `feature` ở PHÍA SERVER
+        # (ProviderPool.ask → builder nhận feature) cho đồng nhất cả 3 provider — KHÔNG
+        # inject temp client-side (proto3 double không phân biệt 0.0-đặt-rõ vs mặc định,
+        # truthy-check ở server sẽ rớt 0.0). Override per-call (mindmap) vẫn đi qua options.
         return _grpc_llm_provider(_addr).ask(
             prompt,
             system_prompt=system_prompt,
@@ -430,11 +448,11 @@ def ask_ai(
                 return _invoke_chat(llm, prompt, system_prompt, timeout=timeout)
 
             if provider == "gemini":
-                llm = _gemini_chat_llm()
+                llm = _gemini_chat_llm(feature, options)
                 return _invoke_chat(llm, prompt, system_prompt, timeout=timeout)
 
             if provider == "groq":
-                llm = _groq_chat_llm()
+                llm = _groq_chat_llm(feature, options)
                 return _invoke_chat(llm, prompt, system_prompt, timeout=timeout)
         except Exception as e:
             last_error = e
@@ -488,4 +506,5 @@ def summarize_results(query: str, chunks: list[str], model: str | None = None) -
         f"Nội dung liên quan từ tài liệu:\n{sources}\n\n"
         "Hãy trả lời trực tiếp câu hỏi, mạch lạc."
     )
-    return ask_ai(user_msg, system_prompt=system_prompt, model=model)
+    # feature='answer' → factual temperature (≈0): bám đoạn trích, giảm bịa đặt.
+    return ask_ai(user_msg, system_prompt=system_prompt, model=model, feature="answer")

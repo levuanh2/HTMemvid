@@ -91,9 +91,9 @@ class ProviderPool:
                 if provider == "ollama":
                     llm = _lf._ollama_chat_llm(effective_model, feature, options)
                 elif provider == "gemini":
-                    llm = _lf._gemini_chat_llm()
+                    llm = _lf._gemini_chat_llm(feature, options)
                 elif provider == "groq":
-                    llm = _lf._groq_chat_llm()
+                    llm = _lf._groq_chat_llm(feature, options)
                 else:
                     continue
                 out = _lf._invoke_chat(llm, prompt, system_prompt, timeout=timeout)

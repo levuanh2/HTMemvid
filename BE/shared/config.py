@@ -77,7 +77,10 @@ class Settings:
 
     # --- LLM params ---
     llm_max_tokens: int = 8192
-    llm_temperature: float = 0.3
+    llm_temperature: float = 0.3  # chat hội thoại (văn phong tự nhiên)
+    # Tác vụ factual/grounded (sinh đáp án RAG, summary, grade): tiến về 0 để
+    # bám sự thật + tái lập, giảm bịa đặt. (xem .playbook/lessons-learned)
+    llm_temperature_factual: float = 0.0
     llm_ctx_size: int = 4096
     ai_timeout_sec: int = 180
 
@@ -151,6 +154,7 @@ class Settings:
             skip_model_load=_flag("SKIP_MODEL_LOAD"),
             llm_max_tokens=_int("LLM_MAX_TOKENS", 8192),
             llm_temperature=_float("LLM_TEMPERATURE", 0.3),
+            llm_temperature_factual=_float("LLM_TEMPERATURE_FACTUAL", 0.0),
             llm_ctx_size=_int("LLM_CTX_SIZE", 4096),
             ai_timeout_sec=_int("AI_TIMEOUT_SEC", 180),
             use_lc_vector_store=_flag("USE_LC_VECTOR_STORE", "1"),

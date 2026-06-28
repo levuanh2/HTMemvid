@@ -714,11 +714,14 @@ QUERY_GRAPH_BUILD_ERROR = _graphs.query_build_error
 MINDMAP_GRAPH = _graphs.mindmap
 
 
-def _langgraph_invoke(graph: Any, state: dict, *, thread_id: str) -> dict:
-    """Graph compile với SqliteSaver yêu cầu configurable.thread_id."""
+def _langgraph_invoke(graph: Any, state: dict, *, thread_id: str, command: Any = None) -> dict:
+    """Graph compile với SqliteSaver yêu cầu configurable.thread_id.
+
+    command != None → resume một interrupt (HITL): truyền Command(resume=...) thay cho state.
+    """
     tid = (thread_id or "").strip() or str(uuid.uuid4())
     try:
-        return graph.invoke(state, config={"configurable": {"thread_id": tid}})
+        return graph.invoke(command if command is not None else state, config={"configurable": {"thread_id": tid}})
     except Exception as e:
         # LangGraph / thư viện đôi khi ném exception str() rỗng — bọc để job/SSE có nội dung.
         if not str(e).strip():
@@ -733,6 +736,77 @@ def _job_error_text(exc: BaseException) -> str:
         return msg
     name = getattr(type(exc), "__name__", None) or type(exc).__qualname__ or "Exception"
     return f"{name}: không có nội dung chi tiết (xem traceback trong log server)."
+
+
+def _detect_query_interrupt(graph: Any, thread_id: str) -> Optional[dict]:
+    """HITL: phát hiện graph đang tạm dừng tại interrupt().
+
+    langgraph 0.2.x KHÔNG đặt key '__interrupt__' trong kết quả invoke → đọc qua get_state().
+    Trả về payload review (dict) nếu đang chờ duyệt, ngược lại None.
+    """
+    try:
+        st = graph.get_state({"configurable": {"thread_id": thread_id}})
+    except Exception:
+        return None
+    if not getattr(st, "next", None):
+        return None
+    for task in getattr(st, "tasks", []) or []:
+        intrs = getattr(task, "interrupts", None) or ()
+        if intrs:
+            return getattr(intrs[0], "value", None) or {}
+    return None
+
+
+def _mark_query_interrupted(jid: str, review: dict) -> None:
+    """HITL: đánh dấu job chờ người duyệt (SSE coi 'interrupted' là terminal)."""
+    review = review or {}
+    result_obj = {"payload": {"review": review}, "status": 200}
+    with query_jobs_lock:
+        if jid in query_jobs:
+            query_jobs[jid]["status"] = "interrupted"
+            query_jobs[jid]["result"] = result_obj
+    if _jobs_update_job:
+        try:
+            _jobs_update_job(jid, status="interrupted", current_node="ReviewGate", result=result_obj)
+        except Exception:
+            pass
+
+
+def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> None:
+    """Trích payload/status từ kết quả graph → cập nhật query_jobs/jobs_store + persist history.
+
+    Dùng chung cho /query và /query-resume.
+    """
+    raw_pl = out.get("payload")
+    payload = dict(raw_pl) if isinstance(raw_pl, dict) else {}
+    ans_state = (out.get("answer") or "").strip()
+    if ans_state and not (payload.get("answer") or "").strip():
+        payload["answer"] = out["answer"]
+    has_ans = bool((payload.get("answer") or "").strip())
+    has_err = bool((payload.get("error") or "").strip())
+    if not has_ans and not has_err:
+        payload["error"] = out.get("error") or "Unknown error"
+    status = int(out.get("status_code") or 200)
+    result_obj = {"payload": payload, "status": status}
+
+    with query_jobs_lock:
+        if jid in query_jobs:
+            query_jobs[jid]["status"] = "done"
+            query_jobs[jid]["result"] = result_obj
+
+    if _jobs_update_job:
+        try:
+            _jobs_update_job(jid, status="done", progress=100, current_node="Finalize", result=result_obj)
+        except Exception:
+            pass
+
+    # Persist conversation history (best-effort)
+    try:
+        if isinstance(payload, dict) and payload.get("answer"):
+            from app.domains.jobs.sessions_store import append_messages as _ss_append
+            _ss_append(session_id, [{"role": "user", "content": question}, {"role": "assistant", "content": str(payload.get("answer"))}])
+    except Exception:
+        pass
 
 
 def _load_summaries() -> list[dict]:
@@ -1170,46 +1244,18 @@ def query():
                 "current_node": "Queued",
                 "error": None,
             }
-            out = _langgraph_invoke(QUERY_GRAPH, init_state, thread_id=session_id or jid)
-            raw_pl = out.get("payload")
-            payload = dict(raw_pl) if isinstance(raw_pl, dict) else {}
-            ans_state = (out.get("answer") or "").strip()
-            if ans_state and not (payload.get("answer") or "").strip():
-                payload["answer"] = out["answer"]
-            has_ans = bool((payload.get("answer") or "").strip())
-            has_err = bool((payload.get("error") or "").strip())
-            if not has_ans and not has_err:
-                payload["error"] = out.get("error") or "Unknown error"
-            status = int(out.get("status_code") or 200)
-            result_obj = {
-                "payload": payload,
-                "status": status,
-            }
-
+            # thread_id = jid (duy nhất/truy vấn) → tránh rò state/interrupt giữa các lượt cùng session; lưu để /query-resume dùng lại.
             with query_jobs_lock:
                 if jid in query_jobs:
-                    query_jobs[jid]["status"] = "done"
-                    query_jobs[jid]["result"] = result_obj
-
-            if _jobs_update_job:
-                try:
-                    _jobs_update_job(
-                        jid,
-                        status="done",
-                        progress=100,
-                        current_node="Finalize",
-                        result=result_obj,
-                    )
-                except Exception:
-                    pass
-
-            # Persist conversation history (best-effort)
-            try:
-                if isinstance(payload, dict) and payload.get("answer"):
-                    from app.domains.jobs.sessions_store import append_messages as _ss_append
-                    _ss_append(session_id, [{"role": "user", "content": question}, {"role": "assistant", "content": str(payload.get("answer"))}])
-            except Exception:
-                pass
+                    query_jobs[jid]["thread_id"] = jid
+                    query_jobs[jid]["question"] = question
+                    query_jobs[jid]["session_id"] = session_id
+            out = _langgraph_invoke(QUERY_GRAPH, init_state, thread_id=jid)
+            review = _detect_query_interrupt(QUERY_GRAPH, jid)
+            if review is not None:
+                _mark_query_interrupted(jid, review)
+                return
+            _finalize_query_job(jid, session_id, question, out)
         except Exception as exc:
             err_txt = _job_error_text(exc)
             with query_jobs_lock:
@@ -1264,6 +1310,66 @@ def query_status(job_id: str):
             "result": job.get("result"),
             "error": job.get("error"),
         }), 200
+
+
+@app.post('/query-resume/<job_id>')
+def query_resume(job_id: str):
+    """HITL: tiếp tục một job đang chờ duyệt (status='interrupted').
+
+    Body: {"action": "approve"|"edit"|"reject", "answer": "..."}.
+    """
+    data = request.json or {}
+    action = str(data.get("action") or "approve").strip().lower()
+    if action not in ("approve", "edit", "reject"):
+        return jsonify({"error": "action phải là approve, edit hoặc reject"}), 400
+    decision = {"action": action}
+    if action == "edit":
+        decision["answer"] = str(data.get("answer") or "").strip()
+
+    with query_jobs_lock:
+        job = query_jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        if job.get("status") != "interrupted":
+            return jsonify({"error": "Job không ở trạng thái chờ duyệt"}), 409
+        tid = job.get("thread_id") or job_id
+        session_id = job.get("session_id") or ""
+        question = job.get("question") or ""
+        job["status"] = "running"
+
+    acquired = _query_semaphore.acquire(blocking=False)
+    if not acquired:
+        with query_jobs_lock:
+            if job_id in query_jobs:
+                query_jobs[job_id]["status"] = "interrupted"
+        return jsonify({"error": "Too many concurrent queries, please retry."}), 429
+
+    def resume_job() -> None:
+        try:
+            from langgraph.types import Command
+            out = _langgraph_invoke(QUERY_GRAPH, None, thread_id=tid, command=Command(resume=decision))
+            review = _detect_query_interrupt(QUERY_GRAPH, tid)
+            if review is not None:
+                _mark_query_interrupted(job_id, review)
+                return
+            _finalize_query_job(job_id, session_id, question, out)
+        except Exception as exc:
+            err_txt = _job_error_text(exc)
+            with query_jobs_lock:
+                if job_id in query_jobs:
+                    query_jobs[job_id]["status"] = "error"
+                    query_jobs[job_id]["error"] = err_txt
+            if _jobs_update_job:
+                try:
+                    _jobs_update_job(job_id, status="error", error_text=err_txt)
+                except Exception:
+                    pass
+            logging.exception("[QUERY_RESUME] job_id=%s failed: %s", job_id, err_txt)
+        finally:
+            _query_semaphore.release()
+
+    threading.Thread(target=resume_job, daemon=True).start()
+    return jsonify({"job_id": job_id, "status": "running"}), 202
 
 
 @app.get("/query-stream/<job_id>")

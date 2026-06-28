@@ -219,7 +219,8 @@ Quy trình xử lý câu hỏi và trả lời.
 |------|-------|----------|
 | **Cache lookup** | Kiểm tra cache | Nếu hit → trả ngay, miss → tiếp tục |
 | **Memory tree** | Truy xuất context | Conditional - chỉ chạy khi cần |
-| **Hybrid retrieval** | Tìm docs liên quan | BM25 + FAISS + RRF (Reciprocal Rank Fusion) |
+| **Hybrid retrieval** | Tìm docs liên quan (Stage 1 / Recall) | BM25 + FAISS + RRF; khi rerank bật → lấy `RERANK_CANDIDATE_K` ứng viên |
+| **Rerank** | Lọc tinh (Stage 2 / Precision) | Cross-encoder chấm cặp (query, passage), lọc xuống `RERANK_TOP_N`; conditional - chỉ khi `RERANK_ENABLED=1` |
 | **Context builder** | Tạo context | Thêm citation, truncate nếu quá dài |
 | **Generate answer** | Sinh câu trả | Gọi qa_chain với context + history |
 | **Finalize** | Hoàn thiện | Format output, gửi SSE |
@@ -239,6 +240,20 @@ Query ─┬─▶ BM25 (keyword search)
 ```
 RRF_score = Σ (1 / (k + rank_i)) / n
 ```
+
+### Rerank — Two-Stage Retrieval (Stage 2 / Precision)
+
+```
+Stage 1 (Recall)            Stage 2 (Precision)
+Hybrid ─▶ RERANK_CANDIDATE_K ─▶ Cross-encoder (query, passage) ─▶ top RERANK_TOP_N ─▶ LLM
+  ~20 ứng viên                    chấm điểm đồng thời                ~4 tốt nhất
+```
+
+- Bật bằng `RERANK_ENABLED=1` (mặc định tắt → graph chạy y như cũ).
+- Backend cắm-rút (`RERANK_BACKEND`): `cross_encoder` (self-host, offline — mặc định `BAAI/bge-reranker-v2-m3`), `cohere`, `llm`, `none`.
+- An toàn: lỗi load/predict hoặc quá `RERANK_TIMEOUT_SEC` → giữ nguyên thứ tự (Identity), không làm vỡ pipeline.
+- Lưu ý: rerank chỉ sắp xếp lại tài liệu Stage 1 đưa cho — KHÔNG tìm tài liệu mới (Recall thấp thì rerank vô dụng).
+- Code: `BE/app/domains/retrieval/rerank.py`, node `RerankDocuments` trong `query_graph.py`.
 - `k` = 60 (constant)
 - `rank_i` = thứ hạng trong retrieval method i
 - `n` = số retrieval methods

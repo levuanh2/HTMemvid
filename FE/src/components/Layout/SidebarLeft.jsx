@@ -1,19 +1,21 @@
 import { useState, useEffect, useRef } from "react";
-import { FiMoreVertical, FiAlertCircle, FiX } from "react-icons/fi";
+import { FiMoreVertical, FiAlertCircle, FiX, FiFile } from "react-icons/fi";
 import { apiFetch } from "../../utils/api";
+
+/** Phase sau FAISS: memory tree. memory_tree_ready = đã xong — không hiện « đang tối ưu ». */
+const SUBSTATUS_OPTIMIZING = new Set(["faiss_ready", "building_memory_tree"]);
 
 // ── Status config ──────────────────────────────────────
 const getStatusConfig = (status, substatus, canQuery) => {
   if (canQuery === true) {
     return {
       mainText: "Sẵn sàng tra cứu",
-      subText: substatus ? "Đang tối ưu thêm…" : null,
+      subText: substatus && SUBSTATUS_OPTIMIZING.has(substatus) ? "Đang hoàn thiện memory tree…" : null,
       showProgress: false,
       checkboxEnabled: true,
       badge: "READY",
-      badgeStyle: { background: "#052e16", color: "#4ade80", border: "1px solid #166534" },
-      borderColor: "#166534",
-      bgColor: "transparent",
+      badgeClass: "badge-ready",
+      borderClass: "border-emerald-300/60",
     };
   }
   switch (status) {
@@ -23,9 +25,8 @@ const getStatusConfig = (status, substatus, canQuery) => {
         showProgress: true,
         checkboxEnabled: false,
         badge: "PROCESSING",
-        badgeStyle: { background: "#1c1400", color: "#fbbf24", border: "1px solid #92400e" },
-        borderColor: "#92400e",
-        bgColor: "transparent",
+        badgeClass: "badge-processing",
+        borderClass: "border-amber-300/60",
       };
     case "index_ready":
       return {
@@ -34,9 +35,8 @@ const getStatusConfig = (status, substatus, canQuery) => {
         badge: "PROCESSING",
         showProgress: true,
         checkboxEnabled: false,
-        badgeStyle: { background: "#1c1400", color: "#fbbf24", border: "1px solid #92400e" },
-        borderColor: "#92400e",
-        bgColor: "transparent",
+        badgeClass: "badge-processing",
+        borderClass: "border-amber-300/60",
       };
     case "ready":
       return {
@@ -44,9 +44,8 @@ const getStatusConfig = (status, substatus, canQuery) => {
         badge: "PROCESSING",
         showProgress: true,
         checkboxEnabled: false,
-        badgeStyle: { background: "#1c1400", color: "#fbbf24", border: "1px solid #92400e" },
-        borderColor: "#92400e",
-        bgColor: "transparent",
+        badgeClass: "badge-processing",
+        borderClass: "border-amber-300/60",
       };
     case "error":
       return {
@@ -54,13 +53,12 @@ const getStatusConfig = (status, substatus, canQuery) => {
         showProgress: false,
         checkboxEnabled: false,
         badge: "ERROR",
-        badgeStyle: { background: "#1f0000", color: "#f87171", border: "1px solid #991b1b" },
-        borderColor: "#991b1b",
-        bgColor: "transparent",
+        badgeClass: "badge-error",
+        borderClass: "border-red-300/60",
         showErrorIcon: true,
       };
     default:
-      return { mainText: "Không xác định", showProgress: false, checkboxEnabled: false, badge: null, borderColor: "#374151", bgColor: "transparent" };
+      return { mainText: "Không xác định", showProgress: false, checkboxEnabled: false, badge: null, badgeClass: "", borderClass: "border-border" };
   }
 };
 
@@ -74,6 +72,7 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
   const fileInputRef = useRef(null);
   const pollingIntervalsRef = useRef({});
 
+  // ── Polling logic (unchanged) ──────────────────────
   const pollSourceStatus = (sourceId) => {
     if (pollingIntervalsRef.current[sourceId]) return;
     const poll = async () => {
@@ -103,7 +102,7 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
         const backendSources = data.sources || [];
         setSources((prev) => {
           const activeSources = prev.filter((s) => s.status === "processing" || s.status === "index_ready");
-          const readySources = backendSources.map((s) => ({ source_id: null, filename: formatFileName(s.video), video_stem: s.video, status: "ready", progress: 1.0, substatus: "memory_tree_ready", capabilities: { chunk_query: true, memory_query: true }, can_query: true, num_chunks: s.num_chunks }));
+          const readySources = backendSources.map((s) => ({ source_id: null, filename: formatFileName(s.video), video_stem: s.video, status: "ready", progress: 1.0, substatus: null, capabilities: { chunk_query: true, memory_query: true }, can_query: true, num_chunks: s.num_chunks }));
           const combined = [...activeSources];
           readySources.forEach((rs) => { if (!combined.some((ps) => ps.video_stem === rs.video_stem || ps.filename === rs.filename)) combined.push(rs); });
           return combined;
@@ -116,6 +115,7 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
   useEffect(() => { fetchSourcesFromBackend(); }, []);
   useEffect(() => { if (onSourcesChange) onSourcesChange(sources); }, [sources, onSourcesChange]);
 
+  // ── Upload logic (unchanged) ───────────────────────
   const handleAddFiles = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -143,9 +143,20 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
     setMenuOpen(null);
     setDeletingFile(key);
     try {
-      const url = src.source_id ? `/sources/${src.source_id}` : `/sources/by-stem/${encodeURIComponent(key)}`;
-      const res = await apiFetch(url, { method: "DELETE" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      let res;
+      if (src.source_id) {
+        res = await apiFetch(`/sources/${encodeURIComponent(src.source_id)}`, { method: "DELETE" });
+      } else {
+        res = await apiFetch(`/delete-source`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ video: String(key || "") }),
+        });
+      }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || `HTTP ${res.status}`);
+      }
       setSources((prev) => prev.filter((s) => (s.video_stem || s.video) !== key));
       setSelectedSources((prev) => prev.filter((p) => p !== key));
     } catch (err) { console.error("Delete source error:", err); alert("Không xóa được tài liệu, kiểm tra console!"); }
@@ -165,67 +176,74 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
   const readySources = sources.filter((s) => s.can_query);
   const allSelected = readySources.length > 0 && readySources.every((s) => selectedSources.includes(s.video_stem || s.video));
 
+  // ── Render ─────────────────────────────────────────
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#111827" }}>
+    <div className="flex flex-col h-full" style={{ background: 'var(--bg-sidebar)' }}>
+
       {/* Header */}
-      <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #1e2d3d", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-        <div>
-          <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "#4b5563", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Tài liệu</div>
-          <div style={{ fontSize: "0.75rem", color: "#6b7280" }}>{sources.length} files · {selectedSources.length} đang chọn</div>
+      <div className="px-4 pt-4 pb-3 border-b border-border flex items-center justify-between flex-shrink-0">
+        <div className="min-w-0">
+          <div className="text-[13px] font-bold text-text-primary">Tài liệu</div>
+          <div className="text-[12px] text-text-muted mt-0.5">
+            {sources.length} files · <span className="text-brand font-semibold">{selectedSources.length} đang chọn</span>
+          </div>
         </div>
-        <button onClick={onClose} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#6b7280", padding: 4, display: "flex", borderRadius: 8 }} className="md:hidden" aria-label="Đóng">
-          <FiX size={18} />
+        <button onClick={onClose} className="md:hidden icon-btn w-8 h-8 border-0 shadow-none" aria-label="Đóng">
+          <FiX size={17} />
         </button>
       </div>
 
       {/* Controls */}
-      <div style={{ padding: "10px 12px 8px", flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-        {/* Select all */}
-        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "2px 4px" }}>
-          <input
-            type="checkbox"
-            checked={allSelected}
-            onChange={(e) => handleSelectAll(e.target.checked)}
-            style={{ width: 14, height: 14, accentColor: "#4f46e5", cursor: "pointer" }}
-          />
-          <span style={{ fontSize: "0.78rem", color: "#9ca3af", fontWeight: 500 }}>Chọn tất cả</span>
-        </label>
-
+      <div className="px-3 pt-3 pb-2 flex-shrink-0 flex flex-col gap-2">
         {/* Upload button */}
         <label
-          style={{
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            background: uploading ? "#374151" : "linear-gradient(135deg, #2563eb, #4f46e5)",
-            color: uploading ? "#9ca3af" : "#fff",
-            borderRadius: 10, padding: "9px 14px",
-            cursor: uploading ? "not-allowed" : "pointer",
-            fontWeight: 600, fontSize: "0.82rem",
-            transition: "all 0.2s",
-            boxShadow: uploading ? "none" : "0 4px 12px rgba(37,99,235,0.25)",
-            userSelect: "none",
-          }}
+          className={[
+            "select-none w-full",
+            "inline-flex items-center justify-center gap-2",
+            uploading ? "btn-secondary cursor-not-allowed opacity-70" : "btn-primary cursor-pointer",
+          ].join(" ")}
         >
           {uploading ? (
             <>
-              <span style={{ width: 14, height: 14, border: "2px solid #6b7280", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />
+              <span className="w-4 h-4 border-2 border-white/40 border-t-transparent rounded-full inline-block animate-spin" />
               Đang tải lên…
             </>
           ) : (
             <>
-              <span style={{ fontSize: "1rem" }}>+</span> Thêm tài liệu
+              <span className="text-lg leading-none font-light">+</span>
+              <span>Thêm</span>
             </>
           )}
-          <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleAddFiles} disabled={uploading} style={{ display: "none" }} />
+          <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleAddFiles} disabled={uploading} />
+        </label>
+
+        {/* Search input */}
+        <div className="flex items-center gap-2 bg-surface-elevated border border-border rounded-[10px] px-3 py-2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-text-muted flex-shrink-0">
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <span className="text-[12px] text-text-muted">Tìm kiếm tài liệu</span>
+        </div>
+
+        {/* Select all */}
+        <label className="flex items-center gap-2 cursor-pointer px-1 py-0.5">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            onChange={(e) => handleSelectAll(e.target.checked)}
+            className="w-3.5 h-3.5 accent-brand cursor-pointer rounded"
+          />
+          <span className="text-[12px] text-text-secondary font-medium">Chọn tất cả</span>
         </label>
       </div>
 
       {/* Sources list */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 12px 12px", display: "flex", flexDirection: "column", gap: 6, scrollbarWidth: "thin", scrollbarColor: "#374151 transparent" }}>
+      <div className="flex-1 overflow-y-auto px-3 pb-3 flex flex-col gap-1.5">
         {sources.length === 0 && (
-          <div style={{ textAlign: "center", padding: "40px 16px", color: "#6b7280" }}>
-            <div style={{ fontSize: "2rem", marginBottom: 10 }}>📂</div>
-            <p style={{ fontSize: "0.8rem" }}>Chưa có tài liệu nào.</p>
-            <p style={{ fontSize: "0.75rem", color: "#4b5563", marginTop: 4 }}>Nhấn "Thêm tài liệu" để bắt đầu.</p>
+          <div className="text-center py-10 px-4">
+            <div className="text-3xl mb-2">📂</div>
+            <p className="text-[13px] font-semibold text-text-secondary">Chưa có tài liệu nào.</p>
+            <p className="text-[12px] text-text-muted mt-1">Nhấn "Thêm" để bắt đầu.</p>
           </div>
         )}
 
@@ -241,79 +259,84 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
             <div
               key={src.source_id || src.video_stem || idx}
               onClick={() => checkboxEnabled && toggleSelect(src)}
-              style={{
-                background: isSelected ? "#1e1b4b" : "#1f2937",
-                border: `1.5px solid ${isSelected ? "#4f46e5" : statusConfig.borderColor}`,
-                borderRadius: 12,
-                padding: "10px 12px",
-                cursor: checkboxEnabled ? "pointer" : "default",
-                transition: "all 0.15s",
-                opacity: isDeleting ? 0.5 : 1,
-                boxShadow: isSelected ? "0 0 0 2px rgba(79,70,229,0.2)" : "none",
-              }}
+              className={[
+                "rounded-[10px] border px-3 py-2.5 transition-all duration-150 transition-theme",
+                checkboxEnabled ? "cursor-pointer hover:shadow-card-hover" : "cursor-default",
+                isSelected
+                  ? "border-brand/40 shadow-glow" : `border-border bg-surface-card hover:border-border-strong`,
+                isDeleting ? "opacity-50" : "",
+              ].join(" ")}
             >
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+              <div className="flex items-start gap-2.5">
+                {/* Checkbox */}
                 <input
                   type="checkbox"
                   checked={isSelected}
                   onChange={(e) => { e.stopPropagation(); toggleSelect(src); }}
                   disabled={!checkboxEnabled}
-                  style={{ marginTop: 2, width: 14, height: 14, accentColor: "#4f46e5", cursor: checkboxEnabled ? "pointer" : "not-allowed", flexShrink: 0 }}
+                  className="mt-0.5 w-3.5 h-3.5 accent-brand flex-shrink-0 cursor-pointer"
                 />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#e5e7eb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }} title={displayName}>
+
+                {/* File icon */}
+                <FiFile size={14} className={`flex-shrink-0 mt-0.5 ${isSelected ? "text-brand" : "text-text-muted"}`} />
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[13px] font-semibold text-text-primary truncate flex-1" title={displayName}>
                       {displayName}
                     </span>
-                    {statusConfig.showErrorIcon && <FiAlertCircle color="#f87171" size={13} style={{ flexShrink: 0 }} />}
+                    {statusConfig.showErrorIcon && <FiAlertCircle color="#ef4444" size={13} className="flex-shrink-0" />}
                   </div>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
-                    <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>{statusConfig.mainText}</span>
+                  {/* Chunks count & badge */}
+                  <div className="flex items-center gap-2 mt-1">
+                    {isSelectable && src.num_chunks && (
+                      <span className="text-[11px] text-text-muted">{src.num_chunks} chunks</span>
+                    )}
                     {statusConfig.badge && (
-                      <span style={{ fontSize: "0.65rem", padding: "1px 6px", borderRadius: 99, fontWeight: 700, ...statusConfig.badgeStyle }}>{statusConfig.badge}</span>
+                      <span className={statusConfig.badgeClass || ""}>{statusConfig.badge}</span>
                     )}
                   </div>
 
                   {statusConfig.subText && (
-                    <div style={{ fontSize: "0.7rem", color: "#6b7280", marginTop: 2 }}>{statusConfig.subText}</div>
+                    <div className="text-[11px] text-text-muted mt-0.5">{statusConfig.subText}</div>
                   )}
 
+                  {/* Progress bar */}
                   {statusConfig.showProgress && (
-                    <div style={{ marginTop: 7 }}>
-                      <div style={{ background: "#374151", borderRadius: 99, height: 4, overflow: "hidden" }}>
-                        <div style={{ width: `${(src.progress || 0) * 100}%`, height: "100%", background: "linear-gradient(90deg, #2563eb, #4f46e5)", borderRadius: 99, transition: "width 0.5s ease-out" }} />
+                    <div className="mt-1.5">
+                      <div className="progress-track">
+                        <div className="progress-fill" style={{ width: `${(src.progress || 0) * 100}%` }} />
                       </div>
-                      <div style={{ fontSize: "0.67rem", color: "#6b7280", marginTop: 3 }}>{Math.round((src.progress || 0) * 100)}%</div>
                     </div>
                   )}
 
-                  {src.status === "ready" && src.num_chunks && (
-                    <div style={{ fontSize: "0.7rem", color: "#6b7280", marginTop: 3 }}>📄 {src.num_chunks} chunks</div>
-                  )}
-
-                  {src.status === "error" && src.error && (
-                    <div style={{ fontSize: "0.7rem", color: "#f87171", marginTop: 4, background: "#1f0000", padding: "5px 8px", borderRadius: 6 }}>{src.error}</div>
+                  {/* Error message */}
+                  {src.status === "error" && (
+                    <div className="text-[11px] text-red-500 mt-1.5 bg-red-50 border border-red-200 rounded-[6px] px-2 py-1 whitespace-pre-wrap break-words">
+                      {String(src.error ?? "").trim() || "Không có chi tiết lỗi — xem log backend."}
+                    </div>
                   )}
                 </div>
 
-                {/* Menu */}
-                <div style={{ position: "relative", flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                {/* Context menu */}
+                <div className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                   {isDeleting ? (
-                    <span style={{ width: 16, height: 16, border: "2px solid #6b7280", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />
+                    <span className="w-4 h-4 border-2 border-text-muted/30 border-t-text-muted rounded-full inline-block animate-spin" />
                   ) : (
                     <>
                       <button
                         onClick={() => setMenuOpen(menuOpen === idx ? null : idx)}
-                        style={{ background: "transparent", border: "none", cursor: "pointer", padding: 4, color: "#6b7280", borderRadius: 6, display: "flex" }}
+                        className="w-7 h-7 rounded-[7px] inline-flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-elevated transition-colors"
                       >
-                        <FiMoreVertical size={15} />
+                        <FiMoreVertical size={14} />
                       </button>
                       {menuOpen === idx && (
-                        <div style={{ position: "absolute", right: 0, top: 26, background: "#1f2937", border: "1px solid #374151", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", zIndex: 20, minWidth: 110 }}>
+                        <div className="absolute right-0 top-8 z-20 min-w-[100px] border border-border rounded-[10px] shadow-card-hover overflow-hidden" style={{ background: 'var(--bg-card)' }}>
                           <button
                             onClick={() => handleDeleteSource(src)}
-                            style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", background: "transparent", border: "none", color: "#f87171", fontSize: "0.82rem", cursor: "pointer", fontWeight: 600, borderRadius: 10 }}
+                            className="w-full text-left px-3 py-2 text-[13px] font-semibold text-red-500 hover:bg-red-50 transition-colors"
                           >
                             🗑 Xóa
                           </button>
@@ -327,12 +350,6 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
           );
         })}
       </div>
-
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .md\\:hidden { display: flex; }
-        @media (min-width: 768px) { .md\\:hidden { display: none !important; } }
-      `}</style>
     </div>
   );
 }

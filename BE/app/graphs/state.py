@@ -40,6 +40,7 @@ class QueryState(TypedDict):
     category: NotRequired[Optional[str]]
     language: NotRequired[Optional[str]]
     retrieved_chunks: list
+    retrieved_stems: NotRequired[list]
     retrieved_sources: NotRequired[list]
     context: str
     answer: str
@@ -55,6 +56,12 @@ class QueryState(TypedDict):
     cache_key: NotRequired[Optional[str]]
     eval_score: NotRequired[float]
     processing_message: NotRequired[Optional[str]]
+    route: NotRequired[Optional[str]]
+    doc_grade: NotRequired[Optional[str]]
+    rewrite_count: NotRequired[int]
+    crag_fallback: NotRequired[bool]
+    awaiting_review: NotRequired[bool]
+    review_decision: NotRequired[Optional[dict]]
 
 
 class MindmapState(TypedDict):

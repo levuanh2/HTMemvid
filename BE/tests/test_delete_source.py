@@ -11,15 +11,17 @@ class DeleteSourceTestCase(unittest.TestCase):
         # Tạo temp dir và patch đường dẫn index/memory để tránh đụng dữ liệu thật
         self.tmpdir = Path(tempfile.mkdtemp())
 
-        # Patch faiss_utils paths
-        import faiss_utils
-        self._orig_meta_path = faiss_utils.META_PATH
-        self._orig_index_path = faiss_utils.INDEX_PATH
-        faiss_utils.META_PATH = str(self.tmpdir / "index.json")
-        faiss_utils.INDEX_PATH = str(self.tmpdir / "index.faiss")
+        # Patch vector_store paths
+        import app.domains.vectorstore.store as vector_store
+
+        self._orig_meta_path = vector_store.META_PATH
+        self._orig_index_path = vector_store.INDEX_PATH
+        vector_store.META_PATH = str(self.tmpdir / "index.json")
+        vector_store.INDEX_PATH = str(self.tmpdir / "index.faiss")
 
         # Patch memory_tree paths
-        import memory_tree
+        import app.domains.memory.tree as memory_tree
+
         self._orig_memory_dir = memory_tree.MEMORY_DIR
         self._orig_trees_path = memory_tree.MEMORY_TREES_PATH
         self._orig_mem_index = memory_tree.MEMORY_INDEX_PATH
@@ -31,13 +33,16 @@ class DeleteSourceTestCase(unittest.TestCase):
         memory_tree.MEMORY_INDEX_META_PATH = memory_tree.MEMORY_DIR / "memory_index.json"
         os.makedirs(memory_tree.MEMORY_DIR, exist_ok=True)
 
+        # CI-like mode: không tải embedding model khi rebuild index
+        os.environ["SKIP_MODEL_LOAD"] = "1"
+
     def tearDown(self):
         # Restore paths
-        import faiss_utils
-        import memory_tree
+        import app.domains.memory.tree as memory_tree
+        import app.domains.vectorstore.store as vector_store
 
-        faiss_utils.META_PATH = self._orig_meta_path
-        faiss_utils.INDEX_PATH = self._orig_index_path
+        vector_store.META_PATH = self._orig_meta_path
+        vector_store.INDEX_PATH = self._orig_index_path
 
         memory_tree.MEMORY_DIR = self._orig_memory_dir
         memory_tree.MEMORY_TREES_PATH = self._orig_trees_path
@@ -47,8 +52,8 @@ class DeleteSourceTestCase(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_delete_existing_source(self):
-        import faiss_utils
-        import memory_tree
+        import app.domains.memory.tree as memory_tree
+        import app.domains.vectorstore.store as vector_store
 
         # Tạo metadata index cho 2 source khác nhau
         meta = {
@@ -56,7 +61,7 @@ class DeleteSourceTestCase(unittest.TestCase):
             "1": {"text": "chunk A2", "video": "sourceA_20250101_120000.mp4"},
             "2": {"text": "chunk B1", "video": "sourceB_20250101_120000.mp4"},
         }
-        with open(faiss_utils.META_PATH, "w", encoding="utf-8") as f:
+        with open(vector_store.META_PATH, "w", encoding="utf-8") as f:
             json.dump(meta, f)
 
         # Tạo memory_trees với 2 tree
@@ -76,19 +81,20 @@ class DeleteSourceTestCase(unittest.TestCase):
             json.dump(trees, f)
 
         # Gọi hàm delete trực tiếp
-        deleted_chunks = faiss_utils.delete_chunks_by_source("sourceA")
+        deleted_chunks = vector_store.delete_chunks_by_source("sourceA")
         deleted_nodes = memory_tree.delete_memory_tree_by_source("sourceA")
 
         self.assertEqual(deleted_chunks, 2)
         self.assertEqual(deleted_nodes, 2)
 
         # Đảm bảo meta còn lại chỉ thuộc sourceB
-        with open(faiss_utils.META_PATH, encoding="utf-8") as f:
+        with open(vector_store.META_PATH, encoding="utf-8") as f:
             remaining_meta = json.load(f)
-        self.assertEqual(len(remaining_meta), 1)
+        remaining_chunks = {k: v for k, v in remaining_meta.items() if isinstance(k, str) and k.isdigit()}
+        self.assertEqual(len(remaining_chunks), 1)
         self.assertEqual(
-            faiss_utils._normalize_source_id(remaining_meta["2"]["video"]),
-            faiss_utils._normalize_source_id("sourceB"),
+            vector_store._normalize_source_id(remaining_chunks["2"]["video"]),
+            vector_store._normalize_source_id("sourceB"),
         )
 
         with open(memory_tree.MEMORY_TREES_PATH, encoding="utf-8") as f:
@@ -97,14 +103,14 @@ class DeleteSourceTestCase(unittest.TestCase):
         self.assertEqual(remaining_trees[0]["source_stem"], "sourceB")
 
     def test_delete_non_existing_source(self):
-        import faiss_utils
-        import memory_tree
+        import app.domains.memory.tree as memory_tree
+        import app.domains.vectorstore.store as vector_store
 
         # Tạo metadata index với 1 source
         meta = {
             "0": {"text": "chunk A1", "video": "sourceA_20250101_120000.mp4"},
         }
-        with open(faiss_utils.META_PATH, "w", encoding="utf-8") as f:
+        with open(vector_store.META_PATH, "w", encoding="utf-8") as f:
             json.dump(meta, f)
 
         # Tạo memory_trees với 1 tree
@@ -118,16 +124,17 @@ class DeleteSourceTestCase(unittest.TestCase):
         with open(memory_tree.MEMORY_TREES_PATH, "w", encoding="utf-8") as f:
             json.dump(trees, f)
 
-        deleted_chunks = faiss_utils.delete_chunks_by_source("non_exist_source")
+        deleted_chunks = vector_store.delete_chunks_by_source("non_exist_source")
         deleted_nodes = memory_tree.delete_memory_tree_by_source("non_exist_source")
 
         # Không xóa gì
         self.assertEqual(deleted_chunks, 0)
         self.assertEqual(deleted_nodes, 0)
 
-        with open(faiss_utils.META_PATH, encoding="utf-8") as f:
+        with open(vector_store.META_PATH, encoding="utf-8") as f:
             remaining_meta = json.load(f)
-        self.assertEqual(len(remaining_meta), 1)
+        remaining_chunks = {k: v for k, v in remaining_meta.items() if isinstance(k, str) and k.isdigit()}
+        self.assertEqual(len(remaining_chunks), 1)
 
         with open(memory_tree.MEMORY_TREES_PATH, encoding="utf-8") as f:
             remaining_trees = json.load(f)
@@ -136,5 +143,3 @@ class DeleteSourceTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-

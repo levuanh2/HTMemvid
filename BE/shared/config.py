@@ -92,6 +92,23 @@ class Settings:
     rrf_k: int = 60
     hybrid_bm25_weight: float = 0.4
     hybrid_faiss_weight: float = 0.6
+    crag_enabled: bool = False
+    crag_relevance_threshold: float = 0.25
+    crag_wrong_floor: float = 0.1
+    crag_rewrite_max: int = 1
+    supervisor_enabled: bool = False
+    hitl_enabled: bool = False
+
+    # --- Rerank (Two-Stage Retrieval — Stage 2 / Precision) ---
+    # Mặc định OFF → pipeline y hệt cũ. Khi bật: Stage 1 lấy rerank_candidate_k
+    # ứng viên (rộng), cross-encoder lọc xuống rerank_top_n (= hybrid_top_k nếu 0).
+    rerank_enabled: bool = False
+    rerank_backend: str = "cross_encoder"  # cross_encoder | cohere | llm | none
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_candidate_k: int = 20
+    rerank_top_n: int = 0  # 0 => dùng hybrid_top_k
+    rerank_batch: int = 16
+    rerank_timeout_sec: int = 10
 
     # --- Địa chỉ service gRPC (Phase 3/4). Rỗng => dùng impl local in-process. ---
     llm_gateway_addr: str = ""
@@ -133,6 +150,19 @@ class Settings:
             rrf_k=_int("RRF_K", 60),
             hybrid_bm25_weight=_float("HYBRID_BM25_WEIGHT", 0.4),
             hybrid_faiss_weight=_float("HYBRID_FAISS_WEIGHT", 0.6),
+            crag_enabled=_flag("CRAG_ENABLED", "0"),
+            crag_relevance_threshold=_float("CRAG_RELEVANCE_THRESHOLD", 0.25),
+            crag_wrong_floor=_float("CRAG_WRONG_FLOOR", 0.1),
+            crag_rewrite_max=_int("CRAG_REWRITE_MAX", 1),
+            supervisor_enabled=_flag("SUPERVISOR_ENABLED", "0"),
+            hitl_enabled=_flag("HITL_ENABLED", "0"),
+            rerank_enabled=_flag("RERANK_ENABLED", "0"),
+            rerank_backend=os.getenv("RERANK_BACKEND", "cross_encoder"),
+            rerank_model=os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),
+            rerank_candidate_k=_int("RERANK_CANDIDATE_K", 20),
+            rerank_top_n=_int("RERANK_TOP_N", 0),
+            rerank_batch=_int("RERANK_BATCH", 16),
+            rerank_timeout_sec=_int("RERANK_TIMEOUT_SEC", 10),
             llm_gateway_addr=(os.getenv("LLM_GATEWAY_ADDR") or "").strip(),
             mindmap_service_addr=(os.getenv("MINDMAP_SERVICE_ADDR") or "").strip(),
             use_markdown_ingest=_flag("USE_MARKDOWN_INGEST", "1"),

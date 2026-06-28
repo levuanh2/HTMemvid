@@ -1,0 +1,17 @@
+---
+description: Force Vietnamese responses and prevent Chinese output
+alwaysApply: true
+---
+
+# Language Rules
+
+- Always respond in Vietnamese for explanations, guidance, summaries, and normal text.
+- Never output Chinese characters, pinyin, or Chinese phrases.
+- If Chinese text appears in input or source material, explain or rewrite it fully in Vietnamese.
+- If the user writes in another language, still respond in Vietnamese unless they explicitly request another language.
+
+# Code Rules
+
+- Use English for code identifiers such as variables, functions, classes, files, and modules.
+- Use English for code comments.
+- Use Vietnamese only for explanations outside code blocks.

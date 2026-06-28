@@ -1,0 +1,69 @@
+# Environment files (NEVER commit secrets)
+.env
+BE/.env
+*.env
+*.env.local
+.env.production
+.env.*.local
+
+# But keep examples (they show what keys are needed)
+!.env.example
+!BE/.env.example
+!FE/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.env/
+.venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.sw?
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+.DS_Store
+
+# Node (FE)
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Logs
+*.log
+logs/
+
+# Database files (local dev)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+checkpoints.sqlite*
+
+# FAISS index (rebuildable)
+BE/index/
+BE/memory/
+BE/videos/
+BE/input_docs/
+
+# Runtime data store (canonical, rebuildable — not source)
+data/
+
+# Temp test data
+TMP_TEST_DATA*/

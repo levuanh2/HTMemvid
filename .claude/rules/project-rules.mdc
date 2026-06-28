@@ -1,0 +1,20 @@
+---
+alwaysApply: true
+---
+
+# Project Rules
+
+This repo uses shared agent instructions and skills.
+
+For any frontend, UI, layout, component, page, CSS, Tailwind, React, Next.js, Vite, or visual design task, read and apply:
+
+- .agents/rules/skills/frontend-design/SKILL.md
+
+Core rules:
+- Do not rewrite the app from scratch.
+- Preserve existing routing.
+- Preserve mock data unless explicitly requested.
+- Do not call real APIs unless explicitly requested.
+- Prefer small, safe refactors.
+- Keep the UI clean, consistent, modern, and demo-ready.
+- Run build/test after code changes when possible.

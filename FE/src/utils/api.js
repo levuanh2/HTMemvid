@@ -1,6 +1,6 @@
 const API = import.meta.env.VITE_API_URL;
 
-export const apiFetch = (path, options = {}) => {
+export const apiUrl = (path) => {
   let base = String(API ?? "")
     .trim()
     .replace(/\/+$/, "")
@@ -9,6 +9,9 @@ export const apiFetch = (path, options = {}) => {
     base = "http://localhost:8080";
   }
   const p = path.startsWith("/") ? path : `/${path}`;
-  const url = base ? `${base}${p}` : p;
-  return fetch(url, options);
+  return base ? `${base}${p}` : p;
+};
+
+export const apiFetch = (path, options = {}) => {
+  return fetch(apiUrl(path), options);
 };

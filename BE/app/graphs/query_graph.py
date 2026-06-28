@@ -14,8 +14,10 @@ from langgraph.graph import END, StateGraph
 from app.graphs.logger import _Timer, log_node_event
 from app.graphs.sqlite_checkpointer import sqlite_saver_from_path
 from app.graphs.state import QueryState
+from app.domains.retrieval import grading, query_rewrite, rerank
 from app.domains.retrieval.ensemble_retriever import hybrid_retrieve_with_ensemble
 from app.domains.retrieval.hybrid import HybridRetriever
+from shared.config import get_settings
 _log = logging.getLogger(__name__)
 
 _INCLUDE_CHUNK_SOURCE_TAGS = (os.getenv("INCLUDE_CHUNK_SOURCE_TAGS", "0") or "").strip().lower() in (
@@ -62,6 +64,27 @@ def build_query_graph(
     QUERY_STREAM_TOKENS = (os.getenv("QUERY_STREAM_TOKENS", "1") or "").strip().lower() in ("1", "true", "yes", "on")
     # Timeout ri\u00eang cho Memory Tree \u2014 fallback FAISS n\u1ebfu v\u01b0\u1ee3t
     MEMORY_TREE_TIMEOUT = int(os.getenv("MEMORY_TREE_TIMEOUT_SEC", "15"))
+
+    # C\u1edd t\u00ednh n\u0103ng m\u1edbi (CRAG / Supervisor / HITL) \u0111\u1ecdc qua get_settings() \u2014 \u0111\u1ecdc 1 l\u1ea7n
+    # t\u1ea1i build time, c\u00f9ng v\u00f2ng \u0111\u1eddi v\u1edbi c\u00e1c os.getenv \u1edf tr\u00ean. M\u1eb7c \u0111\u1ecbnh t\u1eaft \u2192 graph y h\u1ec7t c\u0169.
+    _s = get_settings()
+    CRAG_ENABLED = _s.crag_enabled
+    CRAG_RELEVANCE_THRESHOLD = _s.crag_relevance_threshold
+    CRAG_WRONG_FLOOR = _s.crag_wrong_floor
+    CRAG_REWRITE_MAX = _s.crag_rewrite_max
+    SUPERVISOR_ENABLED = _s.supervisor_enabled
+    HITL_ENABLED = _s.hitl_enabled
+    # Rerank (Two-Stage Retrieval). Mặc định tắt → topology graph y hệt cũ.
+    RERANK_ENABLED = _s.rerank_enabled
+    RERANK_CANDIDATE_K = max(_s.rerank_candidate_k, HYBRID_TOP_K)
+    RERANK_TOP_N = _s.rerank_top_n if _s.rerank_top_n > 0 else HYBRID_TOP_K
+    RERANK_TIMEOUT = _s.rerank_timeout_sec
+    # Khi bật rerank: Stage 1 (RetrieveFAISS) lấy candidate pool rộng, Stage 2
+    # (RerankDocuments) lọc xuống RERANK_TOP_N.
+    RETRIEVE_TOP_K = RERANK_CANDIDATE_K if RERANK_ENABLED else HYBRID_TOP_K
+    # HITL hi\u1ec3n th\u1ecb c\u00e2u tr\u1ea3 l\u1eddi sau khi duy\u1ec7t \u2192 t\u1eaft stream token \u0111\u1ec3 kh\u00f4ng l\u1ed9 b\u1ea3n nh\u00e1p ch\u01b0a duy\u1ec7t.
+    if HITL_ENABLED:
+        QUERY_STREAM_TOKENS = False
 
     # Retriever được INJECT (seam shared.interfaces.Retriever). Mặc định dựng
     # HybridRetriever như cũ -> main.py không phải đổi (back-compat Phase 1).
@@ -186,14 +209,14 @@ def build_query_graph(
                         retriever,
                         state["q"],
                         selected_sources=selected_sources,
-                        top_k=HYBRID_TOP_K,
+                        top_k=RETRIEVE_TOP_K,
                         category=f_category,
                         language=f_language,
                     )
                 return retriever.retrieve(
                     state["q"],
                     selected_sources=selected_sources,
-                    top_k=HYBRID_TOP_K,
+                    top_k=RETRIEVE_TOP_K,
                     category=f_category,
                     language=f_language,
                 )
@@ -224,6 +247,7 @@ def build_query_graph(
                 return {**state, **hist_patch, "payload": payload, "status_code": 200, "done": True, "progress": 20, "current_node": "RetrieveFAISS"}
 
             chunks_with_citation: list[str] = []
+            chunk_stems: list[str] = []
             sources_seen: list[str] = []
             for item in retrieved:
                 txt = item.text or ""
@@ -232,6 +256,7 @@ def build_query_graph(
                 else:
                     chunks_with_citation.append(txt)
                 stem = (item.video_stem or "").strip()
+                chunk_stems.append(stem)
                 if stem and stem not in sources_seen:
                     sources_seen.append(stem)
 
@@ -240,6 +265,7 @@ def build_query_graph(
                 **state,
                 **hist_patch,
                 "retrieved_chunks": chunks_with_citation,
+                "retrieved_stems": chunk_stems,
                 "retrieved_sources": sources_seen,
                 "progress": 20,
                 "current_node": "RetrieveFAISS",
@@ -267,6 +293,61 @@ def build_query_graph(
                     "current_node": "RetrieveFAISS",
                 }
             return {**state, "error": err_str, "current_node": "RetrieveFAISS"}
+
+    def rerank_documents_node(state: dict) -> dict:
+        """Two-Stage Retrieval — Stage 2: cross-encoder lọc candidate pool xuống top_n."""
+        t = _Timer()
+        chunks = state.get("retrieved_chunks") or []
+        stems = state.get("retrieved_stems") or []
+        try:
+            _set_job(state["job_id"], progress=35, current_node="RerankDocuments")
+            if not chunks:
+                return {**state, "progress": 35, "current_node": "RerankDocuments", "error": None}
+
+            def _do_rerank():
+                return rerank.rerank_texts(state["q"], chunks, top_n=RERANK_TOP_N)
+
+            try:
+                with ThreadPoolExecutor(max_workers=1) as ex:
+                    ranked = ex.submit(_do_rerank).result(timeout=RERANK_TIMEOUT)
+            except TimeoutError:
+                # Quá hạn → giữ nguyên thứ tự, chỉ cắt top_n (không làm hỏng câu trả lời).
+                ranked = [(i, 0.0) for i in range(min(RERANK_TOP_N, len(chunks)))]
+
+            idxs = [i for i, _ in ranked if 0 <= i < len(chunks)]
+            kept = [chunks[i] for i in idxs]
+            kept_stems = [stems[i] for i in idxs if i < len(stems)] if stems else []
+
+            patch: dict = {
+                "retrieved_chunks": kept,
+                "progress": 35,
+                "current_node": "RerankDocuments",
+                "error": None,
+            }
+            # Sau khi lọc, nguồn có thể thu hẹp → cập nhật lại danh sách hiển thị.
+            if kept_stems:
+                sources: list[str] = []
+                for s in kept_stems:
+                    s = (s or "").strip()
+                    if s and s not in sources:
+                        sources.append(s)
+                patch["retrieved_sources"] = sources
+
+            log_node_event(
+                state["job_id"], "RerankDocuments", "ok", t.ms(),
+                {"candidates": len(chunks), "kept": len(kept), "backend": _s.rerank_backend},
+            )
+            return {**state, **patch}
+        except Exception as e:
+            # Rerank lỗi KHÔNG fail pipeline — giữ ứng viên đầu, cắt top_n.
+            log_node_event(state["job_id"], "RerankDocuments", "error", t.ms(), {"error": str(e)})
+            return {
+                **state,
+                "retrieved_chunks": chunks[:RERANK_TOP_N],
+                "progress": 35,
+                "current_node": "RerankDocuments",
+                "error": None,
+            }
 
     def context_builder_node(state: dict) -> dict:
         t = _Timer()
@@ -442,7 +523,8 @@ def build_query_graph(
         cache_key = state.get("cache_key")
         payload = state.get("payload")
         status_code = int(state.get("status_code") or 200)
-        if cache_key and isinstance(payload, dict) and payload.get("answer"):
+        # Không cache câu trả lời fallback "không tìm thấy" — re-index sau có thể truy hồi được.
+        if cache_key and not state.get("crag_fallback") and isinstance(payload, dict) and payload.get("answer"):
             try:
                 set_cached(cache_key, {"payload": payload, "status": status_code})
             except Exception:
@@ -466,6 +548,138 @@ def build_query_graph(
         log_node_event(state["job_id"], "ErrorHandler", "error", 0.0, {"error": err})
         return {**state, "current_node": "ErrorHandler", "payload": {"error": err}, "status_code": 500}
 
+    # ---- CRAG nodes (chỉ wire khi CRAG_ENABLED) ----
+    def grade_documents_node(state: dict) -> dict:
+        t = _Timer()
+        try:
+            _set_job(state["job_id"], progress=55, current_node="GradeDocuments")
+            grade = grading.grade_documents(
+                state["q"],
+                state.get("retrieved_chunks") or [],
+                relevance_threshold=CRAG_RELEVANCE_THRESHOLD,
+                wrong_floor=CRAG_WRONG_FLOOR,
+            )
+            log_node_event(
+                state["job_id"], "GradeDocuments", "ok", t.ms(),
+                {"grade": grade, "rewrite_count": int(state.get("rewrite_count") or 0)},
+            )
+            return {**state, "doc_grade": grade, "progress": 55, "current_node": "GradeDocuments", "error": None}
+        except Exception as e:
+            log_node_event(state["job_id"], "GradeDocuments", "error", t.ms(), {"error": str(e)})
+            return {**state, "error": str(e), "current_node": "GradeDocuments"}
+
+    def rewrite_query_node(state: dict) -> dict:
+        t = _Timer()
+        rc = int(state.get("rewrite_count") or 0)
+        original_q = state["q"]
+        new_q = original_q
+        try:
+            _set_job(state["job_id"], progress=58, current_node="RewriteQuery")
+            try:
+                new_q = _call_llm_with_timeout(lambda: query_rewrite.rewrite_query(original_q))
+            except TimeoutError:
+                # LLM rewrite quá hạn → giữ câu gốc nhưng vẫn tăng budget để chặn vòng lặp.
+                new_q = original_q
+            log_node_event(
+                state["job_id"], "RewriteQuery", "ok", t.ms(),
+                {"changed": bool((new_q or "").strip() and new_q != original_q), "rewrite_count": rc + 1},
+            )
+            # Clear output truy hồi cũ để RetrieveFAISS chạy lại sạch.
+            return {
+                **state,
+                "q": new_q or original_q,
+                "rewrite_count": rc + 1,
+                "retrieved_chunks": [],
+                "retrieved_sources": [],
+                "context": "",
+                "progress": 58,
+                "current_node": "RewriteQuery",
+                "error": None,
+            }
+        except Exception as e:
+            # LLM lỗi cũng không fail pipeline — tăng budget rồi để vòng tiếp quyết định.
+            log_node_event(state["job_id"], "RewriteQuery", "error", t.ms(), {"error": str(e)})
+            return {
+                **state,
+                "rewrite_count": rc + 1,
+                "retrieved_chunks": [],
+                "retrieved_sources": [],
+                "context": "",
+                "progress": 58,
+                "current_node": "RewriteQuery",
+                "error": None,
+            }
+
+    def crag_fallback_node(state: dict) -> dict:
+        t = _Timer()
+        answer = "Xin lỗi, mình không tìm thấy thông tin phù hợp trong tài liệu đã chọn để trả lời câu hỏi này."
+        payload = {"answer": answer}
+        if state.get("processing_message"):
+            payload["processing_message"] = state["processing_message"]
+        log_node_event(state["job_id"], "CRAGFallback", "ok", t.ms())
+        return {
+            **state,
+            "payload": payload,
+            "status_code": 200,
+            "answer": answer,
+            "crag_fallback": True,
+            "done": True,
+            "current_node": "CRAGFallback",
+            "error": None,
+        }
+
+    # ---- Supervisor node (chỉ entry khi SUPERVISOR_ENABLED) — Option A: set route + lever sẵn có ----
+    def supervisor_node(state: dict) -> dict:
+        t = _Timer()
+        try:
+            _set_job(state["job_id"], progress=1, current_node="Supervisor")
+            q = (state.get("q") or "").strip().lower()
+            mem_kw = ("tóm tắt", "tom tat", "tổng quan", "tong quan", "overview", "summary", "ý chính", "y chinh")
+            route = "memory" if any(k in q for k in mem_kw) else "retrieval"
+            patch: dict = {"route": route, "current_node": "Supervisor", "error": None}
+            if route == "retrieval":
+                patch["use_memory_tree"] = False
+            log_node_event(state["job_id"], "Supervisor", "ok", t.ms(), {"route": route})
+            return {**state, **patch}
+        except Exception as e:
+            log_node_event(state["job_id"], "Supervisor", "error", t.ms(), {"error": str(e)})
+            return {**state, "error": str(e), "current_node": "Supervisor"}
+
+    # ---- HITL review gate (chỉ wire khi HITL_ENABLED và có checkpointer) ----
+    def review_gate_node(state: dict) -> dict:
+        decision = state.get("review_decision")
+        if not decision:
+            # Chưa duyệt → tạm dừng chờ người (side-effect-free trước interrupt để idempotent khi re-run).
+            # Khi resume bằng Command(resume=...), interrupt() trả về giá trị resume tại đúng đây.
+            from langgraph.types import interrupt
+
+            payload = state.get("payload") or {}
+            decision = interrupt({"type": "review", "answer": payload.get("answer"), "job_id": state.get("job_id")})
+
+        # Áp dụng quyết định của người duyệt (dùng chung cho cả resume lẫn review_decision pre-set).
+        decision = decision or {}
+        payload = dict(state.get("payload") or {})
+        action = str(decision.get("action") or "approve").lower()
+        answer = state.get("answer") or payload.get("answer") or ""
+        if action == "edit" and (decision.get("answer") or "").strip():
+            answer = str(decision["answer"]).strip()
+        elif action == "reject":
+            answer = "Câu trả lời đã bị người duyệt từ chối."
+        payload["answer"] = answer
+        log_node_event(state["job_id"], "ReviewGate", "ok", 0.0, {"action": action})
+        return {**state, "payload": payload, "answer": answer, "review_decision": decision, "awaiting_review": False, "current_node": "ReviewGate"}
+
+    def _route_after_grade(s: dict) -> str:
+        if s.get("error"):
+            return "ErrorHandler"
+        grade = s.get("doc_grade") or "correct"
+        rc = int(s.get("rewrite_count") or 0)
+        if grade == "correct":
+            return "Generate"
+        if rc >= CRAG_REWRITE_MAX:
+            return "Fallback" if grade == "wrong" else "Generate"
+        return "Rewrite"
+
     # LangGraph không cho router trả về '' — phải là một key trong mapping conditional_edges.
     def _route_pre_retrieval(s: dict) -> str:
         if s.get("error"):
@@ -486,6 +700,20 @@ def build_query_graph(
             return "GenerateAnswer"
         return "Finalize"
 
+    # Dựng checkpointer TRƯỚC khi wiring — HITL (interrupt) bắt buộc có checkpointer.
+    ck_path = data_dir / "checkpoints.sqlite"
+    checkpointer = None
+    try:
+        checkpointer = sqlite_saver_from_path(ck_path)
+    except Exception as exc:
+        _log.warning(
+            "Query graph: checkpoint SqliteSaver failed (%s); compiling without checkpointer.",
+            exc,
+        )
+    hitl_on = HITL_ENABLED and checkpointer is not None
+    if HITL_ENABLED and checkpointer is None:
+        _log.warning("HITL_ENABLED nhưng không có checkpointer — bỏ qua review gate.")
+
     g = StateGraph(QueryState)
     g.add_node("CheckSources", check_sources_node)
     g.add_node("CacheLookup", cache_lookup_node)
@@ -498,13 +726,21 @@ def build_query_graph(
     g.add_node("Finalize", finalize_node)
     g.add_node("ErrorHandler", error_handler_node)
 
-    g.set_entry_point("CheckSources")
+    # Supervisor: entry point khi bật, fall-through về CheckSources.
+    if SUPERVISOR_ENABLED:
+        g.add_node("Supervisor", supervisor_node)
+        g.set_entry_point("Supervisor")
+        g.add_edge("Supervisor", "CheckSources")
+    else:
+        g.set_entry_point("CheckSources")
 
+    # Rerank (Stage 2): chèn RerankDocuments giữa RetrieveFAISS và ContextBuilder khi bật.
+    retrieve_faiss_next = "RerankDocuments" if RERANK_ENABLED else "ContextBuilder"
     for node_name, next_name in (
         ("CheckSources", "CacheLookup"),
         ("CacheLookup", "RetrieveMemory"),
         ("RetrieveMemory", "RetrieveFAISS"),
-        ("RetrieveFAISS", "ContextBuilder"),
+        ("RetrieveFAISS", retrieve_faiss_next),
     ):
         g.add_conditional_edges(
             node_name,
@@ -512,11 +748,41 @@ def build_query_graph(
             {"Finalize": "Finalize", "ErrorHandler": "ErrorHandler", "Continue": next_name},
         )
 
+    if RERANK_ENABLED:
+        g.add_node("RerankDocuments", rerank_documents_node)
+        g.add_conditional_edges(
+            "RerankDocuments",
+            _route_err_or_continue,
+            {"ErrorHandler": "ErrorHandler", "Continue": "ContextBuilder"},
+        )
+
+    # CRAG: ContextBuilder → GradeDocuments (bật) hoặc → GenerateAnswer (tắt).
+    ctx_target = "GradeDocuments" if CRAG_ENABLED else "GenerateAnswer"
     g.add_conditional_edges(
         "ContextBuilder",
         _route_err_or_continue,
-        {"ErrorHandler": "ErrorHandler", "Continue": "GenerateAnswer"},
+        {"ErrorHandler": "ErrorHandler", "Continue": ctx_target},
     )
+    if CRAG_ENABLED:
+        g.add_node("GradeDocuments", grade_documents_node)
+        g.add_node("RewriteQuery", rewrite_query_node)
+        g.add_node("CRAGFallback", crag_fallback_node)
+        g.add_conditional_edges(
+            "GradeDocuments",
+            _route_after_grade,
+            {"Generate": "GenerateAnswer", "Rewrite": "RewriteQuery", "Fallback": "CRAGFallback", "ErrorHandler": "ErrorHandler"},
+        )
+        g.add_conditional_edges(
+            "RewriteQuery",
+            _route_err_or_continue,
+            {"ErrorHandler": "ErrorHandler", "Continue": "RetrieveFAISS"},
+        )
+        g.add_conditional_edges(
+            "CRAGFallback",
+            _route_err_or_continue,
+            {"ErrorHandler": "ErrorHandler", "Continue": "Finalize"},
+        )
+
     g.add_conditional_edges(
         "GenerateAnswer",
         _route_err_or_continue,
@@ -527,23 +793,25 @@ def build_query_graph(
         _route_err_or_continue,
         {"ErrorHandler": "ErrorHandler", "Continue": "FeedbackLoop"},
     )
+    # HITL: nhánh sinh-mới đi qua ReviewGate trước Finalize (cache/memory/fallback vẫn vào thẳng Finalize).
+    fb_finalize_target = "ReviewGate" if hitl_on else "Finalize"
     g.add_conditional_edges(
         "FeedbackLoop",
         _route_feedback_loop,
-        {"GenerateAnswer": "GenerateAnswer", "Finalize": "Finalize", "ErrorHandler": "ErrorHandler"},
+        {"GenerateAnswer": "GenerateAnswer", "Finalize": fb_finalize_target, "ErrorHandler": "ErrorHandler"},
     )
+    if hitl_on:
+        g.add_node("ReviewGate", review_gate_node)
+        g.add_conditional_edges(
+            "ReviewGate",
+            _route_err_or_continue,
+            {"ErrorHandler": "ErrorHandler", "Continue": "Finalize"},
+        )
 
     g.add_edge("Finalize", END)
     g.add_edge("ErrorHandler", END)
 
-    ck_path = data_dir / "checkpoints.sqlite"
-    try:
-        checkpointer = sqlite_saver_from_path(ck_path)
+    if checkpointer is not None:
         return g.compile(checkpointer=checkpointer)
-    except Exception as exc:
-        _log.warning(
-            "Query graph: checkpoint SqliteSaver failed (%s); compiling without checkpointer.",
-            exc,
-        )
-        return g.compile()
+    return g.compile()
 

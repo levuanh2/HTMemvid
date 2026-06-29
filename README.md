@@ -679,7 +679,7 @@ pytest tests/ --cov=. --cov-report=html
 
 Dự án được phát triển cho mục đích nghiên cứu khoa học.
 
-**Authors**: Lê Vũ Anh, Nguyễn Minh Hiếu
+**Authors**: Lê Vũ Anh
 
 **Tech Stack**:
 - Backend: Python, Flask, LangChain, LangGraph, FAISS

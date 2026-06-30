@@ -177,7 +177,23 @@
   2. KHÔNG suy lại định danh source ở đây (đúng bài học "một nguồn sự thật cho source_stem"):
      chỉ tái dùng stem có sẵn trong state / prefix; FE so khớp bằng `normStem` (mirror `stemBaseLoose`).
   3. Prefix citation là hợp đồng ngầm giữa `query_graph` (RetrieveFAISS) và FE
-     (`utils/evidence.js::processCitations`, regex `[Nguồn: …, đoạn N]`). Đổi format ở một phía
+      (`utils/evidence.js::processCitations`, regex `[Nguồn: …, đoạn N]`). Đổi format ở một phía
      PHẢI đổi phía kia.
   4. Verify: `python -m pytest BE/tests/test_query.py` (global python) — payload có `sources`/`chunks`
      khi có answer, vắng khi lỗi.
+
+## QR Canonical Text Store: video=canonical, index slim, sqlite derived
+
+- **Bối cảnh / root cause:** Sau khi thêm late chunking, `index.json` lưu cả `text` lẫn vector/metadata cho mỗi chunk (~13MB cho 245 chunk) trong khi QR video (`videos/*.mp4`) cũng chứa chính text đó dạng QR — trùng lặp dữ liệu và video đóng vai trò "write-only". Đồng thời, BM25 nạp corpus hàng loạt từ `index.json` khi khởi động/thay đổi, các site khác cũng đọc text rất nhiều lần, nên không thể giải mã video on-demand hàng loạt được vì quá chậm.
+- **Thiết kế (đã làm):** 
+  1. Tách biệt 3 store: `videos/*.mp4` làm canonical archive + recovery, `index/index.json` gọn nhẹ chỉ chứa pointer `(video, frame_index)` + metadata, và `index/chunks.sqlite` lưu trữ text runtime (dẫn xuất, tái dựng được từ video).
+  2. Module truy cập duy nhất `chunk_text_store.py` (Sqlite + fallback inline index.json + decode-on-demand từng frame với LRU cache).
+  3. Quá trình ingest: lưu video QR ở `save_qr_frames_to_video`, luôn lưu text vào SQLite qua `chunk_text_store.put_many`, và loại bỏ field `text` trong `index.json` nếu có video QR hợp lệ (giữ lại inline `text` làm fallback an toàn khi ghi video lỗi).
+  4. Chuyển đổi toàn bộ các nơi đọc text (BM25, memory tree, mindmap worker, main app endpoints) sang `chunk_text_store`.
+- **Prevention / lessons:**
+  - Thứ tự frame giải mã trong video QR cực kỳ quan trọng; đổi `decode_video_qr` sang trả về list tuple `(frame_index, chunk_text)` theo đúng thứ tự frame thay vì dùng set mất thứ tự.
+  - Gán `frame_index` ở `chunk_processor` phải thực hiện SAU khi đã lọc các frame hỏng để khớp chính xác 1-1 với video ghi ra.
+  - Video chỉ ghi `.mp4` để đồng bộ với cơ chế recovery quét file `.mp4`.
+- **Regression / testing:**
+  - Unit test `test_chunk_text_store.py` (kiểm thử 3 tầng fallback, reset cache, iter_all, put_many).
+  - Integration test `test_store_precomputed.py` và `test_late_chunk_ingest.py` (verify index.json không còn text khi có video, sqlite có text, query/BM25 hoạt động tốt).

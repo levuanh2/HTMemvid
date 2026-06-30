@@ -303,8 +303,11 @@ def _update_tree_status(source_stem: str, status: str) -> None:
 def _join_chunk_text(chunks: List[Dict[str, Any]], max_chars: int = 8000) -> str:
     texts: List[str] = []
     total = 0
+    from app.domains.vectorstore import chunk_text_store
     for c in chunks:
         t = (c.get("text") or "").strip()
+        if not t and c.get("chunk_id") is not None:
+            t = (chunk_text_store.get_text(int(c["chunk_id"])) or "").strip()
         if not t:
             continue
         if total + len(t) > max_chars and texts:
@@ -808,8 +811,11 @@ def build_human_context(top_nodes: List[Dict[str, Any]], evidence_chunks: List[D
 
     snippets = []
     total = 0
+    from app.domains.vectorstore import chunk_text_store
     for c in evidence_chunks:
         t = (c.get("text") or "").strip()
+        if not t and c.get("chunk_id") is not None:
+            t = (chunk_text_store.get_text(int(c["chunk_id"])) or "").strip()
         if not t:
             continue
         snippet = t[:400]
@@ -1152,8 +1158,11 @@ def build_human_context(top_nodes: List[Dict[str, Any]], evidence_chunks: List[D
 
     snippets: List[str] = []
     total = 0
+    from app.domains.vectorstore import chunk_text_store
     for c in evidence_chunks:
         t = (c.get("text") or "").strip()
+        if not t and c.get("chunk_id") is not None:
+            t = (chunk_text_store.get_text(int(c["chunk_id"])) or "").strip()
         if not t:
             continue
         snippet = t[:400]

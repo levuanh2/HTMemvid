@@ -411,10 +411,12 @@ def rebuild_lc_index_from_meta(meta: Dict[str, Any]) -> None:
 
     pairs.sort(key=lambda x: x[0])
     docs: List[Document] = []
+    from app.domains.vectorstore import chunk_text_store
     for cid, v in pairs:
+        t = chunk_text_store.get_text(cid) or v.get("text") or ""
         docs.append(
             Document(
-                page_content=v.get("text") or "",
+                page_content=t,
                 metadata={
                     "chunk_id": cid,
                     "video": v.get("video") or "",
@@ -619,7 +621,10 @@ def search_index(query: str, k: int = 5) -> List[str]:
             continue
         key = str(int(iid))
         if key in meta:
-            results.append(meta[key]["text"])
+            from app.domains.vectorstore import chunk_text_store
+            t = chunk_text_store.get_text(int(key))
+            if t:
+                results.append(t)
     return results
 
 
@@ -671,14 +676,16 @@ def rebuild_chunk_index(existing_meta: Dict[str, Dict] | None = None) -> None:
                 pass
         return
 
+    from app.domains.vectorstore import chunk_text_store
     texts: List[str] = []
     ids: List[int] = []
     for k, v in meta.items():
         try:
             if not isinstance(k, str) or not k.isdigit():
                 continue
+            t = chunk_text_store.get_text(int(k)) or v.get("text") or ""
             ids.append(int(k))
-            texts.append(v.get("text", ""))
+            texts.append(t)
         except ValueError:
             continue
 

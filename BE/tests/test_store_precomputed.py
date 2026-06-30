@@ -111,3 +111,18 @@ def test_append_keeps_inline_text_when_no_video(tmp_path, monkeypatch):
     meta = json.load(open(vs.META_PATH, encoding="utf-8"))
     assert meta["0"].get("text") == "x", "video lỗi → giữ inline text (an toàn)"
 
+
+def test_search_index_text_from_sqlite(tmp_path, monkeypatch):
+    monkeypatch.setenv("SKIP_MODEL_LOAD", "1")
+    import app.domains.vectorstore.store as vs
+    import app.domains.vectorstore.chunk_text_store as cts
+    vs.INDEX_DIR = tmp_path
+    vs.META_PATH = str(tmp_path / "index.json")
+    vs.INDEX_PATH = str(tmp_path / "index.faiss")
+    cts.reset_cache()
+    import json
+    json.dump({"0": {"video": "d.mp4", "frame_index": 0}}, open(vs.META_PATH, "w", encoding="utf-8"))
+    cts.put_many([(0, "hello world")])
+    assert cts.get_text(0) == "hello world"
+
+

@@ -1172,7 +1172,10 @@ def list_indexed():
             pass
 
         video_map = {}
-        for item in meta.values():
+        from app.domains.vectorstore import chunk_text_store
+        for key, item in meta.items():
+            if not isinstance(key, str) or not key.isdigit():
+                continue
             video = item.get('video', '').strip()
             if not video or video.lower() == 'unknown':
                 continue
@@ -1181,7 +1184,8 @@ def list_indexed():
             video_stem = _normalize_video_stem(item.get('source_stem') or video)
             if not video_stem:
                 continue
-            video_map.setdefault(video_stem, []).append(item.get('text', ''))
+            t = chunk_text_store.get_text(int(key)) or item.get('text') or ''
+            video_map.setdefault(video_stem, []).append(t)
 
         sources = []
         for video_stem, chunks in video_map.items():
@@ -1549,13 +1553,16 @@ def summarize_documents():
         
         # Lấy tất cả chunks từ các sources đã chọn
         all_texts = []
+        from app.domains.vectorstore import chunk_text_store
         for key, m in meta.items():
+            if not isinstance(key, str) or not key.isdigit():
+                continue
             video_raw = m.get("video", "").strip()
             if not video_raw:
                 continue
             video_clean = normalize_video_name(video_raw)
             if video_clean in normalized_sources:
-                text = m.get("text", "").strip()
+                text = (chunk_text_store.get_text(int(key)) or m.get("text") or "").strip()
                 if text:
                     all_texts.append(text)
         

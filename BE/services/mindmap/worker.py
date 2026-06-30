@@ -61,8 +61,10 @@ def collect_chunks_for_sources(meta: dict, source_names: list) -> list:
         stem = canonical_source_stem(m.get("source_stem") or m.get("video") or "")
         if not stem or stem not in wanted:
             continue
+        from app.domains.vectorstore import chunk_text_store
+        t = (m.get("text") or "").strip() or (chunk_text_store.get_text(int(key)) or "").strip()
         out.append({
-            "text": m.get("text", ""),
+            "text": t,
             "parent_id": m.get("parent_id"),
             "sub_order": m.get("sub_order"),
             "total_parts": m.get("total_parts"),

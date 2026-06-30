@@ -2,7 +2,7 @@ import os
 import cv2
 import qrcode
 import numpy as np
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
 import hashlib
@@ -75,7 +75,7 @@ def save_qr_frames_to_video(frames: List[np.ndarray], prefix: str = 'memory') ->
     bgr = [_to_bgr_uint8(f) for f in frames]
 
     # (codec, đuôi container ăn khớp). Ưu tiên .mp4 (mp4v/avc1), fallback .avi (MJPG/XVID).
-    candidates = [('mp4v', '.mp4'), ('avc1', '.mp4'), ('MJPG', '.avi'), ('XVID', '.avi')]
+    candidates = [('mp4v', '.mp4'), ('avc1', '.mp4')]
     tried: list[str] = []
     for codec_str, ext in candidates:
         out_path = f"{VIDEOS_DIR}/{safe_prefix}_{ts}{ext}"
@@ -110,51 +110,58 @@ def save_qr_frames_to_video(frames: List[np.ndarray], prefix: str = 'memory') ->
 
     raise RuntimeError(f"Không codec nào ghi được video hợp lệ (đã thử {tried})")
 
-def decode_video_qr(path: str) -> List[str]:
+def decode_video_qr(path: str) -> List[tuple[int, str]]:
+    """Decode QR theo THỨ TỰ frame. Trả [(frame_index, chunk_text)]. Verify checksum nếu có
+    (sai → bỏ frame đó nhưng KHÔNG đổi frame_index của frame khác)."""
     cap = cv2.VideoCapture(path)
     detector = cv2.QRCodeDetector()
-    decoded_texts: set[str] = set()  # Use set to avoid duplicates
-    idx = 0
+    QR_METADATA_PREFIX, QR_METADATA_SUFFIX = "[METADATA:", "]"
 
-    QR_METADATA_PREFIX = "[METADATA:"
-    QR_METADATA_SUFFIX = "]"
-
-    def _compute_checksum(text: str) -> str:
+    def _checksum(text: str) -> str:
         return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:16]
 
-    def _extract_metadata(decoded: str) -> tuple[dict, str] | tuple[None, None]:
+    def _extract(decoded: str):
         if not decoded.startswith(QR_METADATA_PREFIX):
-            return None, None
-        end_pos = decoded.find(QR_METADATA_SUFFIX)
-        if end_pos == -1:
-            return None, None
-        meta_str = decoded[len(QR_METADATA_PREFIX):end_pos]
-        parts = meta_str.split(',')
+            return None, decoded.strip()
+        end = decoded.find(QR_METADATA_SUFFIX)
+        if end == -1:
+            return None, decoded.strip()
         meta = {}
-        for part in parts:
+        for part in decoded[len(QR_METADATA_PREFIX):end].split(','):
             if '=' in part:
-                k, v = part.split('=', 1)
-                meta[k.strip()] = v.strip()
-        chunk_text = decoded[end_pos + 1:].strip()  # bỏ ']' + khoảng trắng
-        return meta, chunk_text
+                k, v = part.split('=', 1); meta[k.strip()] = v.strip()
+        return meta, decoded[end + 1:].strip()
 
+    out: List[tuple[int, str]] = []
+    idx = 0
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        text, points, _ = detector.detectAndDecode(frame)
+        text, _pts, _ = detector.detectAndDecode(frame)
         if text:
-            meta, chunk_text = _extract_metadata(text)
-            # Backward compatible: nếu không có metadata checksum thì vẫn chấp nhận
-            if meta is None or meta.get("checksum") is None:
-                decoded_texts.add(text)
-            else:
-                expected = _compute_checksum(chunk_text)
-                if str(meta.get("checksum")) == expected:
-                    decoded_texts.add(text)
-                else:
-                    print(f"[QR] checksum mismatch (skip) expected={expected} got={meta.get('checksum')}")
+            meta, chunk_text = _extract(text)
+            ok = (not meta) or (meta.get("checksum") is None) or (str(meta.get("checksum")) == _checksum(chunk_text))
+            if ok:
+                out.append((idx, chunk_text))
         idx += 1
-
     cap.release()
-    return list(decoded_texts)
+    return out
+
+
+def decode_frame(path: str, frame_index: int) -> Optional[str]:
+    """Decode 1 frame theo index (recovery on-demand)."""
+    cap = cv2.VideoCapture(path)
+    try:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_index))
+        ret, frame = cap.read()
+        if not ret:
+            return None
+        detector = cv2.QRCodeDetector()
+        text, _pts, _ = detector.detectAndDecode(frame)
+        if not text:
+            return None
+        end = text.find("]")
+        return text[end + 1:].strip() if text.startswith("[METADATA:") and end != -1 else text.strip()
+    finally:
+        cap.release()

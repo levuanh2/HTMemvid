@@ -77,3 +77,37 @@ def test_append_to_index_rejects_mismatched_embedding_count(tmp_path, monkeypatc
             chunks=["a", "b", "c"],
             embeddings=np.zeros((2, 8), dtype="float32"),  # lệch số lượng
         )
+
+
+def test_append_writes_sqlite_and_slims_index(tmp_path, monkeypatch):
+    monkeypatch.setenv("SKIP_MODEL_LOAD", "1")
+    monkeypatch.delenv("USE_LC_VECTOR_STORE", raising=False)
+    import app.domains.vectorstore.store as vs
+    import app.domains.vectorstore.chunk_text_store as cts
+    _patch_paths(vs, tmp_path)
+    cts.reset_cache()
+    import numpy as np
+    vs.append_to_index(
+        chunks=["alpha", "beta"], video_name="doc.mp4",
+        embeddings=np.zeros((2, 8), dtype="float32"),
+        custom_metadata=[{"video": "doc.mp4", "frame_index": 0}, {"video": "doc.mp4", "frame_index": 1}],
+    )
+    meta = json.load(open(vs.META_PATH, encoding="utf-8"))
+    assert "text" not in meta["0"], "index.json không giữ text khi có video"
+    assert meta["0"]["frame_index"] == 0
+    assert cts.get_text(0) == "alpha", "text nằm ở sqlite"
+
+
+def test_append_keeps_inline_text_when_no_video(tmp_path, monkeypatch):
+    monkeypatch.setenv("SKIP_MODEL_LOAD", "1")
+    monkeypatch.delenv("USE_LC_VECTOR_STORE", raising=False)
+    import app.domains.vectorstore.store as vs
+    import app.domains.vectorstore.chunk_text_store as cts
+    _patch_paths(vs, tmp_path)
+    cts.reset_cache()
+    import numpy as np
+    vs.append_to_index(chunks=["x"], video_name="", embeddings=np.zeros((1, 8), dtype="float32"),
+                       custom_metadata=[{"video": "", "frame_index": None}])
+    meta = json.load(open(vs.META_PATH, encoding="utf-8"))
+    assert meta["0"].get("text") == "x", "video lỗi → giữ inline text (an toàn)"
+

@@ -329,18 +329,32 @@ def append_chunks_to_lc_index(
     _backup_dir_before_write(INDEX_DIR, keep=keep)
     vs.save_local(str(INDEX_DIR))
 
+    text_items = []
     for i, chunk in enumerate(chunks):
+        cid = ids[i]
         meta_entry: Dict[str, Any] = {
-            "text": chunk,
             "video": video_name,
             "timestamp": now,
         }
         if custom_metadata and i < len(custom_metadata):
             meta_entry.update(custom_metadata[i])
+
+        has_video = bool(meta_entry.get("video")) and meta_entry.get("frame_index") is not None
+        if has_video:
+            text_items.append((cid, chunk))
+        else:
+            meta_entry["text"] = chunk
+            text_items.append((cid, chunk))
+
         emb_vec = _optional_prefix_embedding_list(chunk)
         if emb_vec is not None:
             meta_entry["embedding"] = emb_vec
-        meta[str(ids[i])] = meta_entry
+        meta[str(cid)] = meta_entry
+
+    if text_items:
+        import app.domains.vectorstore.chunk_text_store as chunk_text_store
+        chunk_text_store.put_many(text_items)
+
 
     num_chunks = sum(1 for k in meta.keys() if isinstance(k, str) and k.isdigit())
     model_name = MODEL_NAME
@@ -515,19 +529,33 @@ def append_to_index(
     save_index_with_backup(idx, INDEX_DIR, keep=keep)
 
     now = datetime.now().isoformat()
+    text_items = []
     for i, chunk in enumerate(chunks):
+        cid = int(ids[i])
         meta_entry = {
-            "text": chunk,
             "video": video_name,
             "timestamp": now,
         }
         if custom_metadata and i < len(custom_metadata):
             meta_entry.update(custom_metadata[i])
+
+        has_video = bool(meta_entry.get("video")) and meta_entry.get("frame_index") is not None
+        if has_video:
+            text_items.append((cid, chunk))
+        else:
+            meta_entry["text"] = chunk
+            text_items.append((cid, chunk))
+
         emb_vec = _optional_prefix_embedding_list(chunk)
         if emb_vec is not None:
             meta_entry["embedding"] = emb_vec
 
-        meta[str(int(ids[i]))] = meta_entry
+        meta[str(cid)] = meta_entry
+
+    if text_items:
+        import app.domains.vectorstore.chunk_text_store as chunk_text_store
+        chunk_text_store.put_many(text_items)
+
 
     num_chunks = sum(1 for k in meta.keys() if isinstance(k, str) and k.isdigit())
     meta["__meta__"] = {

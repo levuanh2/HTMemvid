@@ -238,6 +238,8 @@ def build_ingest_graph(
                     "is_subchunk": entry.get("is_subchunk", False),
                     "source_stem": src_stem,
                     "source_id": state.get("source_id"),
+                    "video": state.get("video_path") or "",
+                    "frame_index": entry.get("frame_index"),
                 }
                 if doc_meta:
                     md.update(doc_meta)  # source/category/date/language (doc-level)

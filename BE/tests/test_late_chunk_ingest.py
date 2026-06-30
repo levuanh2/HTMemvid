@@ -41,6 +41,7 @@ def test_late_embeddings_flow_to_append(tmp_path, monkeypatch):
                     "text": c, "video": video_name, "timestamp": timestamp,
                     "parent_id": None, "sub_order": s, "total_parts": n,
                     "is_subchunk": n > 1, "chunk_index": i,
+                    "frame_index": len(entries),
                 })
         return ("fake_video.mp4", entries)
 
@@ -83,3 +84,6 @@ def test_late_embeddings_flow_to_append(tmp_path, monkeypatch):
     # entry 0 và 1 đều là chunk 0 → vector [0,0,0,0]; phải bằng nhau
     assert np.allclose(embs[0], embs[1]), "2 sub-chunk của chunk 0 dùng chung vector"
     assert np.allclose(embs[0], np.zeros(4)), "chunk 0 → span index 0 → vector 0"
+
+    assert all("frame_index" in m for m in cm)
+    assert all(m.get("video") == "fake_video.mp4" for m in cm)

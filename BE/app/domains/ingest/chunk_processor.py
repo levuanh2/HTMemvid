@@ -264,7 +264,12 @@ def process_and_store_chunks(chunks:list[str],video_name:str,timestamp:str,max_w
     if not qr_frames:
         raise ValueError("No valid QR frames created")
 
-    # Lưu video
-    video_path = save_qr_frames_to_video(qr_frames, prefix=os.path.splitext(video_name)[0])
+    # Lưu video QR là lưu trữ PHỤ (text chunk đã nằm trong FAISS index). Ghi hỏng (headless
+    # thiếu codec) KHÔNG được chặn indexing → nuốt lỗi, trả video_path rỗng, pipeline đi tiếp.
+    try:
+        video_path = save_qr_frames_to_video(qr_frames, prefix=os.path.splitext(video_name)[0])
+    except Exception as e:
+        print(f"⚠️ [chunk_processor] Lưu video thất bại (bỏ qua, vẫn index): {e}")
+        video_path = ""
 
     return video_path, metadata_entries

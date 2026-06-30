@@ -1,5 +1,34 @@
 # Known Issues
 
+## Late chunking + EMBEDDING_MODEL_NAME chưa set → tách không gian embedding (MiniLM vs bge-m3)
+
+- **Triệu chứng:** Bật late chunking nhưng query/memory/một số path lại embed bằng
+  all-MiniLM (384) trong khi chunk index là bge-m3 (1024) → cosine vô nghĩa, retrieve trật.
+  Trong Docker: log `model=sentence-transformers/all-MiniLM-L6-v2 dim=384`.
+- **Nguyên nhân:** `get_embedding_model(model_name)` tôn trọng tên caller truyền; nhiều nơi
+  truyền `store.MODEL_NAME` (đóng băng lúc import = default all-MiniLM khi env chưa set).
+  Late chunking là scheme TOÀN CỤC nhưng lại nhận model ngắn-context → vỡ.
+- **Cách xử lý (đã làm):** dưới late chunking, `get_embedding_model` BỎ QUA `model_name`
+  caller, luôn resolve `get_late_chunk_encoder(os.getenv("EMBEDDING_MODEL_NAME") or None)`
+  (env hoặc bge-m3) — đồng nhất với `get_embeddings`. ⇒ memory tree / mindmap /
+  `_optional_prefix_embedding_list` / query đều dùng MỘT encoder. Regression:
+  `test_embedding_late_chunk::test_get_embedding_model_ignores_caller_minilm_default`.
+- **Prevention:** Docker vẫn nên set `EMBEDDING_MODEL_NAME=BAAI/bge-m3` (đã thêm vào compose)
+  cho rõ ràng. Đổi model → rebuild index. (Phát hiện qua **codex audit** + Docker log thật.)
+
+## Video QR ghi 0 frame trong container headless (opencv-python-headless)
+
+- **Triệu chứng:** `Completed: 0/N frames written successfully` / `Failed to write frame`;
+  file .mp4 tạo ra rỗng/hỏng. Local Windows cũng từng in 0/N dù video vẫn tạo.
+- **Nguyên nhân:** `writer.isOpened()` chỉ chứng minh writer mở được, KHÔNG chứng minh
+  codec↔container encode được; `cv2.VideoWriter.write()` trả None (không tin được làm
+  tín hiệu thành công). Code cũ thử XVID/DIVX/MJPG nhưng ghi vào `.mp4` (sai cặp).
+- **Cách xử lý (đã làm):** `video_utils.save_qr_frames_to_video` ghép codec↔đuôi (mp4v/avc1→.mp4,
+  MJPG/XVID→.avi), ghi xong rồi `_video_is_valid()` (tồn tại + size + `VideoCapture.read()`
+  đọc được ≥1 frame) mới chấp nhận; không thì thử codec/đuôi khác. Và video là LƯU TRỮ PHỤ →
+  `chunk_processor` nuốt lỗi save (video_path="") để KHÔNG chặn indexing (text đã ở FAISS).
+  Regression: `test_video_codec.py`, `test_chunk_processor_index::test_video_failure_is_non_fatal`.
+
 ## UnboundLocalError 'get_embeddings' ở append_chunks_to_lc_index (LangChain FAISS path)
 
 - **Triệu chứng:** Khi `USE_LC_VECTOR_STORE=1`, append chunk in `[vector_store] LangChain

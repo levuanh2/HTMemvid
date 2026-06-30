@@ -415,10 +415,13 @@ def get_embedding_model(model_name: Optional[str] = None) -> Optional[LangChainE
 
     # Late chunking: embed CỤC BỘ bằng encoder mean-pool (bỏ qua gateway Embed — model/pooling
     # của gateway khác → cosine query↔chunk sai). Encoder .encode() tương thích SentenceTransformer.
+    # BỎ QUA model_name của caller: late chunking là scheme TOÀN CỤC → MỘT encoder duy nhất
+    # (env EMBEDDING_MODEL_NAME hoặc bge-m3). Nhiều caller truyền MODEL_NAME = all-MiniLM (default
+    # khi env chưa set) → nếu tôn trọng sẽ tách không gian embedding (MiniLM 384 vs bge-m3 1024).
     if _late_chunking_enabled():
         from app.domains.ingest.late_chunk import get_late_chunk_encoder
 
-        return get_late_chunk_encoder(model_name)
+        return get_late_chunk_encoder(os.getenv("EMBEDDING_MODEL_NAME") or None)
 
     _addr = _gateway_addr()
     if _addr:

@@ -38,66 +38,77 @@ os.makedirs(VIDEOS_DIR, exist_ok=True)
 #     return frames
 
 # Lưu các frame thành video MP4 với tên động
-def save_qr_frames_to_video(frames: List[np.ndarray], prefix: str = 'memory') -> str:
-    """
-    Lưu video QR với các fix dành riêng cho Windows
-    """
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    # FIX 1: Thay khoảng trắng và ký tự đặc biệt trong tên file
-    safe_prefix = "".join(c if c.isalnum() or c in ('_', '-') else '_' for c in prefix)
-    out_path = f"{VIDEOS_DIR}/{safe_prefix}_{ts}.mp4"
-    print(f"Saving video to: {out_path}")
+def _to_bgr_uint8(frame: np.ndarray) -> np.ndarray:
+    """Chuẩn hoá frame về BGR uint8 cho VideoWriter."""
+    if frame.dtype != np.uint8:
+        frame = frame.astype(np.uint8)
+    if frame.ndim == 3 and frame.shape[2] == 4:
+        return cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+    return frame
 
+
+def _video_is_valid(path: str) -> bool:
+    """File video coi là HỢP LỆ khi tồn tại, đủ lớn, và đọc lại được ≥1 frame.
+    Tin cậy hơn writer.isOpened()/write() (headless: open OK nhưng không encode)."""
+    try:
+        if not os.path.exists(path) or os.path.getsize(path) < 1024:
+            return False
+        cap = cv2.VideoCapture(path)
+        ok, _ = cap.read()
+        cap.release()
+        return bool(ok)
+    except Exception:
+        return False
+
+
+def save_qr_frames_to_video(frames: List[np.ndarray], prefix: str = 'memory') -> str:
+    """Lưu video QR. Chọn codec bằng cách GHI THỬ rồi KIỂM TRA file đọc được —
+    headless (opencv-python-headless) thường mở writer OK nhưng không encode được
+    (0 frame). Ghép codec↔container đúng: mp4v/avc1→.mp4, MJPG/XVID→.avi.
+    """
     if not frames:
         raise ValueError("No frames to save")
 
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    safe_prefix = "".join(c if c.isalnum() or c in ('_', '-') else '_' for c in prefix)
     height, width = frames[0].shape[:2]
-    print(f"Frame size: {width}x{height}, Total frames: {len(frames)}")
+    bgr = [_to_bgr_uint8(f) for f in frames]
 
-    # Ưu tiên codec ổn định trên Windows
-    codecs_to_try = ['XVID', 'DIVX', 'MJPG', 'mp4v']
-    writer = None
-
-    for codec_str in codecs_to_try:
+    # (codec, đuôi container ăn khớp). Ưu tiên .mp4 (mp4v/avc1), fallback .avi (MJPG/XVID).
+    candidates = [('mp4v', '.mp4'), ('avc1', '.mp4'), ('MJPG', '.avi'), ('XVID', '.avi')]
+    tried: list[str] = []
+    for codec_str, ext in candidates:
+        out_path = f"{VIDEOS_DIR}/{safe_prefix}_{ts}{ext}"
+        tried.append(codec_str)
+        writer = None
         try:
             fourcc = cv2.VideoWriter_fourcc(*codec_str)  # type: ignore[attr-defined]
-            writer = cv2.VideoWriter(
-                out_path,
-                fourcc,
-                QR_FRAME_RATE,
-                (width, height),
-                isColor=True
-            )
-
-            if writer.isOpened():
-                print(f"✓ Success: Using codec '{codec_str}'")
-                break
+            writer = cv2.VideoWriter(out_path, fourcc, QR_FRAME_RATE, (width, height), isColor=True)
+            if not writer.isOpened():
+                writer.release()
+                continue
+            for frame in bgr:
+                writer.write(frame)
+            writer.release()
         except Exception as e:
-            print(f"✗ Exception with codec '{codec_str}': {e}")
+            print(f"[video] codec '{codec_str}' lỗi: {e}")
+            try:
+                if writer is not None:
+                    writer.release()
+            except Exception:
+                pass
+            continue
 
-    if writer is None or not writer.isOpened():
-        raise RuntimeError(f"Cannot initialize VideoWriter for {out_path}")
+        if _video_is_valid(out_path):
+            print(f"[video] saved {len(frames)} frames via '{codec_str}' -> {out_path}")
+            return out_path
+        # file hỏng (0 frame) → xoá, thử codec/đuôi khác
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
 
-    success_count = 0
-    for i, frame in enumerate(frames):
-        # FIX 2: Đảm bảo frame là uint8 và BGR
-        if frame.dtype != np.uint8:
-            frame = frame.astype(np.uint8)
-        if frame.shape[2] == 3:  # BGR
-            frame_to_write = frame
-        else:
-            frame_to_write = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
-
-        ret = writer.write(frame_to_write)
-        if ret:
-            success_count += 1
-        else:
-            print(f"Warning: Failed to write frame {i}")
-
-    writer.release()
-    print(f"Completed: {success_count}/{len(frames)} frames written successfully")
-
-    return out_path
+    raise RuntimeError(f"Không codec nào ghi được video hợp lệ (đã thử {tried})")
 
 def decode_video_qr(path: str) -> List[str]:
     cap = cv2.VideoCapture(path)

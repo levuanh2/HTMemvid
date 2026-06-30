@@ -23,3 +23,20 @@ def test_entries_carry_source_chunk_index(monkeypatch, tmp_path):
     long_entries = [e for e in entries if e["chunk_index"] == 1]
     assert len(long_entries) > 1
     assert {e["chunk_index"] for e in entries} == {0, 1}
+
+
+def test_video_failure_is_non_fatal(monkeypatch):
+    """Video QR là lưu trữ phụ — ghi hỏng (headless thiếu codec) KHÔNG được chặn indexing.
+    process_and_store_chunks phải trả entries + video_path rỗng thay vì ném."""
+    def _boom(frames, prefix=""):
+        raise RuntimeError("no working codec")
+
+    monkeypatch.setattr(cp, "save_qr_frames_to_video", _boom)
+    import app.domains.vectorstore.store as store
+    monkeypatch.setattr(store, "_load_meta", lambda: {})
+
+    vp, entries = cp.process_and_store_chunks(
+        ["đoạn một", "đoạn hai"], video_name="doc.mp4", timestamp="2026-06-30T00:00:00"
+    )
+    assert entries, "entries (để index) phải còn nguyên dù video lỗi"
+    assert vp == "", "video lỗi → path rỗng, không chặn pipeline"

@@ -10,6 +10,7 @@ services:
       - ./data/index:/app/index
       - ./data/memory:/app/memory
       - ./data/input_docs:/app/input_docs
+      - hf_cache:/root/.cache/huggingface   # bge-m3 tải 1 lần, dùng lại qua restart
     environment:
       DATA_DIR: /app
       PORT: "8080"
@@ -26,6 +27,10 @@ services:
       USE_LC_QA_CHAIN: "1"
       USE_LC_ENSEMBLE: "1"
       USE_LC_INGEST: "1"
+      # Late chunking (mặc định ON): bge-m3 long-context, mean-pool query+chunk cùng encoder.
+      EMBEDDING_MODEL_NAME: BAAI/bge-m3
+      LATE_CHUNKING: "1"
+      HF_HOME: /root/.cache/huggingface
       LLM_GATEWAY_ADDR: llm-gateway:50051
       MINDMAP_SERVICE_ADDR: mindmap-service:50052
     restart: always
@@ -52,6 +57,7 @@ services:
       - ./data/index:/app/index
       - ./data/memory:/app/memory
       - ./data/input_docs:/app/input_docs
+      - hf_cache:/root/.cache/huggingface
     environment:
       DATA_DIR: /app
       OLLAMA_HOST: http://host.docker.internal:11434
@@ -67,6 +73,9 @@ services:
       USE_LC_QA_CHAIN: "1"
       USE_LC_ENSEMBLE: "1"
       USE_LC_INGEST: "1"
+      EMBEDDING_MODEL_NAME: BAAI/bge-m3
+      LATE_CHUNKING: "1"
+      HF_HOME: /root/.cache/huggingface
       LLM_GATEWAY_PORT: "50051"
     restart: always
     extra_hosts:
@@ -82,6 +91,7 @@ services:
     volumes:
       - ./data/index:/app/index
       - ./data/memory:/app/memory
+      - hf_cache:/root/.cache/huggingface
     environment:
       DATA_DIR: /app
       OLLAMA_HOST: http://host.docker.internal:11434
@@ -97,6 +107,9 @@ services:
       USE_LC_QA_CHAIN: "1"
       USE_LC_ENSEMBLE: "1"
       USE_LC_INGEST: "1"
+      EMBEDDING_MODEL_NAME: BAAI/bge-m3
+      LATE_CHUNKING: "1"
+      HF_HOME: /root/.cache/huggingface
       MINDMAP_SERVICE_PORT: "50052"
       # mindmap-service cũng là client của llm-gateway (dùng chung 1 model embedding + policy provider)
       LLM_GATEWAY_ADDR: llm-gateway:50051
@@ -117,3 +130,8 @@ services:
     depends_on:
       - backend
     restart: always
+
+volumes:
+  # Cache HuggingFace dùng chung 3 service (bge-m3 ~2GB tải 1 lần). Muốn tái dùng cache
+  # sẵn trên máy thay vì tải lại: đổi thành bind mount host ~/.cache/huggingface.
+  hf_cache:

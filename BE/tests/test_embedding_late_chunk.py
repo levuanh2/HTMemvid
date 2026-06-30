@@ -29,6 +29,16 @@ def test_get_embedding_model_is_late_chunk_encoder(monkeypatch):
     assert isinstance(m, LateChunkEncoder)
 
 
+def test_get_embedding_model_ignores_caller_minilm_default(monkeypatch):
+    """Critical: caller truyền MODEL_NAME = all-MiniLM (default khi EMBEDDING_MODEL_NAME
+    chưa set) KHÔNG được làm encoder dùng MiniLM → phải vẫn là bge-m3 (một encoder duy nhất)."""
+    lf = _fresh(monkeypatch, LATE_CHUNKING="1")  # EMBEDDING_MODEL_NAME đã bị xoá trong _fresh
+    m = lf.get_embedding_model("sentence-transformers/all-MiniLM-L6-v2")
+    assert m.model_name == "BAAI/bge-m3", "late chunking phải bỏ qua model_name ngắn-context của caller"
+    # cùng singleton với get_embeddings()
+    assert lf.get_embeddings()._enc.model_name == "BAAI/bge-m3"
+
+
 def test_get_embeddings_is_late_chunk_wrapper(monkeypatch):
     lf = _fresh(monkeypatch, LATE_CHUNKING="1")
     emb = lf.get_embeddings()

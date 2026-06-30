@@ -109,27 +109,30 @@ class HybridRetriever:
             self._bm25_tokens = []
             return
 
-        mtime = self.meta_path.stat().st_mtime
+        import app.domains.vectorstore.chunk_text_store as chunk_text_store
+        mtime = max(self.meta_path.stat().st_mtime, chunk_text_store.mtime())
         if self._meta_mtime is not None and mtime == self._meta_mtime and self._bm25 is not None:
             return
 
         with open(self.meta_path, encoding="utf-8") as f:
             meta = json.load(f) or {}
 
+        texts = dict(chunk_text_store.iter_all())
         chunks: list[RetrievedChunk] = []
         for k, v in meta.items():
             if not isinstance(k, str) or not k.isdigit():
                 continue
             if not isinstance(v, dict):
                 continue
-            text = (v.get("text") or "").strip()
+            cid = int(k)
+            text = (texts.get(cid) or v.get("text") or "").strip()
             if not text:
                 continue
             # Ưu tiên canonical source_stem ghi sẵn (chunk mới); fallback suy từ
             # video_path (chunk cũ) — cả hai qua cùng canonicalizer nên khớp selected.
             video_stem = _norm_stem(v.get("source_stem") or v.get("video") or "")
             chunks.append(RetrievedChunk(
-                chunk_id=int(k),
+                chunk_id=cid,
                 text=text,
                 video_stem=video_stem,
                 category=(v.get("category") or None),

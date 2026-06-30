@@ -1,5 +1,36 @@
 # Lessons Learned
 
+## Late Chunking (bge-m3): embed toàn văn → mean-pool theo span (mặc định ON)
+
+- **Bối cảnh / root cause:** naive chunking (cắt chunk rồi embed từng chunk độc lập, pooling
+  CLS của bge-m3) khiến mỗi vector "mù" ngữ cảnh xung quanh → mất thông tin ở tài liệu dài,
+  nhiều tham chiếu ngược ("như đã trình bày ở trên", đại từ "thành phố này"). Late chunking
+  embed token TOÀN VĂN trước (`AutoModel.last_hidden_state`) rồi mean-pool theo ranh giới chunk
+  → mỗi vector "thấm" ngữ cảnh toàn cục.
+- **Thiết kế (đã làm):** module `app/domains/ingest/late_chunk.py::LateChunkEncoder` (lazy singleton,
+  cache theo model-name, `warmup()`, sliding-window token cho doc > context, mean-pool + L2-norm).
+  `chunk_markdown_spans()` trả `(doc_text, pieces)` với `doc_text[start:end]==text` (hệ toạ độ char).
+  Vector tính ở **chunk_node** rồi carry `late_embeddings` xuống `embed_index_node` →
+  `append_to_index(embeddings=...)` (store ghi precomputed, `__meta__.pooling="mean_late"`).
+- **2 bẫy then chốt (đã xử lý):**
+  1. **Pooling phải NHẤT QUÁN query↔chunk.** bge-m3 mặc định CLS, late chunking mean → cosine chỉ
+     có nghĩa khi cả hai cùng mean. ⇒ `llm_factory.get_embeddings/get_embedding_model` đổi sang
+     `LateChunkEncoder`/`LateChunkEmbeddings` (mean-pool) cho MỌI single-text embedding (query,
+     memory-tree, mindmap). Late chunking **bypass gateway Embed** (model/pooling gateway khác → sai).
+  2. **Span vỡ ở embed_index_node.** Tại đó text đã enrich + sub-split (QR) → KHÔNG khớp char-span.
+     Phải tính vector ở chunk_node (còn `doc_text`+spans); `chunk_processor` gắn `chunk_index` lên mọi
+     entry để sub-chunk dùng chung vector chunk cha. (Smoke thật: best-match đúng đoạn dùng đại từ;
+     cosine(in-context, standalone)≈0.80<1 ⇒ đã thấm ngữ cảnh.)
+- **Prevention / regression:**
+  1. Đổi scheme (LATE_CHUNKING bật/tắt) hay đổi model → **PHẢI rebuild FAISS index** (pooling/dim
+     đổi). Giữ cờ `LATE_CHUNKING=0` (đường CLS cũ) cho tình huống khẩn — mặc định ON.
+  2. EMBEDDING_MODEL_NAME PHẢI là long-context encoder (bge-m3/jina-v3/nomic). KHÔNG all-MiniLM
+     (max 512 → vỡ window 8192). Đã bỏ fallback all-MiniLM ở đường late; default encoder = bge-m3.
+  3. Tests: `test_late_chunk*` (pure fns + fake model, KHÔNG tải bge-m3), `test_chunking` (span),
+     `test_chunk_processor_index` (chunk_index), `test_store_precomputed`, `test_late_chunk_ingest`
+     (e2e graph với fake encoder), `test_embedding_late_chunk` (wiring). Smoke THẬT (bge-m3) chỉ chạy
+     thủ công (cần model) — đúng bài học "real-engine smoke test bắt lỗi mà unit-với-fake bỏ sót".
+
 ## Per-feature temperature: factual→0, chat→0.3 (chống ảo giác đúng tầng)
 
 - **Bối cảnh:** temperature thấp giảm bịa đặt ở tác vụ factual, NHƯNG không phải "viên đạn bạc"
@@ -129,3 +160,24 @@
 - **Root cause:** Convention `out["__interrupt__"]` là của langgraph 1.x. Ở 0.2.x, `graph.invoke` khi gặp `interrupt()` trả về state đã commit (không có key đó) và graph tạm dừng. Phát hiện đúng: `graph.get_state(config).next` khác rỗng + đọc `state.tasks[].interrupts[0].value`.
 - **Prevention:** Dùng helper `_detect_query_interrupt(graph, thread_id)` trong `main.py` (qua get_state) thay vì kiểm tra key `__interrupt__`. Resume bằng `graph.invoke(Command(resume=decision), config={thread_id})`.
 - **Lưu ý review_gate:** logic áp dụng quyết định (edit/reject) phải nằm SAU khi lấy decision (từ `interrupt()` trả về khi resume), KHÔNG tách thành nhánh `if review_decision` riêng — vì khi resume node re-run và decision đến từ giá trị trả về của `interrupt()`.
+
+## Provenance trong query payload cho "lề bằng chứng" (FE) — additive, KHÔNG suy lại stem
+
+- **Bối cảnh:** redesign UI (Phòng đọc) cần hiện nguồn/chunk đã grounding câu trả lời ở
+  cột phải. Dữ liệu ĐÃ có trong state graph (`retrieved_sources`/`retrieved_stems`/
+  `retrieved_chunks`) nhưng `_finalize_query_job` chỉ copy `answer`/`error` vào payload → FE
+  không thấy.
+- **Thiết kế (đã làm):** thêm `_attach_evidence(payload, out)` (gọi trong `_finalize_query_job`
+  CHỈ khi `has_ans`), set `payload["sources"]` (list stem) + `payload["chunks"]`
+  (`[{stem, chunk_id, snippet}]`, cắt 12 chunk × 600 ký tự). Stem/chunk_id ưu tiên PARSE từ
+  prefix `"[Nguồn: <stem>, đoạn <id>]"` mà node RetrieveFAISS đã gắn, fallback `retrieved_stems[i]`.
+- **Prevention / regression:**
+  1. ADDITIVE thuần — bọc `try/except`, không bao giờ làm hỏng đường answer/error. Không đổi
+     `status_code`, không đổi history-persist.
+  2. KHÔNG suy lại định danh source ở đây (đúng bài học "một nguồn sự thật cho source_stem"):
+     chỉ tái dùng stem có sẵn trong state / prefix; FE so khớp bằng `normStem` (mirror `stemBaseLoose`).
+  3. Prefix citation là hợp đồng ngầm giữa `query_graph` (RetrieveFAISS) và FE
+     (`utils/evidence.js::processCitations`, regex `[Nguồn: …, đoạn N]`). Đổi format ở một phía
+     PHẢI đổi phía kia.
+  4. Verify: `python -m pytest BE/tests/test_query.py` (global python) — payload có `sources`/`chunks`
+     khi có answer, vắng khi lỗi.

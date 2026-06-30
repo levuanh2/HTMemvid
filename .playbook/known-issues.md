@@ -1,5 +1,33 @@
 # Known Issues
 
+## UnboundLocalError 'get_embeddings' ở append_chunks_to_lc_index (LangChain FAISS path)
+
+- **Triệu chứng:** Khi `USE_LC_VECTOR_STORE=1`, append chunk in `[vector_store] LangChain
+  vector store failed, fallback legacy FAISS: cannot access local variable 'get_embeddings'`
+  → âm thầm rơi về raw FAISS (vẫn chạy nhưng sai backend dự kiến). Phát hiện qua WORKFLOW
+  SMOKE THẬT, không phải unit (unit raw-path không chạm nhánh LC).
+- **Nguyên nhân:** Trong `append_chunks_to_lc_index` có `from app.clients.llm_factory import
+  get_embeddings` Ở GIỮA hàm (khối __meta__) → Python coi `get_embeddings` là biến CỤC BỘ cho
+  CẢ hàm → `emb = get_embeddings()` ở đầu hàm ném UnboundLocalError.
+- **Cách xử lý (đã làm):** bỏ import lồng trong hàm; dùng lại `emb` (đã gán từ get_embeddings
+  module-level ở đầu hàm) để lấy `emb_dim`. Regression: `test_store_precomputed.py::
+  test_lc_path_precomputed_no_get_embeddings_shadow` (ép USE_LC_VECTOR_STORE=1 + embeddings).
+- **Prevention:** KHÔNG `from x import y` giữa hàm nếu `y` đã dùng như tên module-level trong
+  cùng hàm — sẽ shadow toàn hàm. Có test chạm nhánh LC FAISS (không chỉ raw).
+
+## AutoModel.from_pretrained nạp .bin bị chặn với torch 2.5.x (late chunking) → dùng safetensors
+
+- **Triệu chứng:** `LateChunkEncoder` nạp bge-m3 qua `AutoModel.from_pretrained` ném
+  `ValueError: Due to a serious vulnerability issue in torch.load ... require torch >= v2.6`
+  (CVE-2025-32434). Late chunking không tạo được vector → ingest rơi về fallback naive.
+- **Nguyên nhân:** transformers chặn `torch.load` file `pytorch_model.bin` khi torch < 2.6.
+  Repo PIN `torch==2.5.1+cpu` (xem lý do CUDA/Docker) → không nâng. Cache bge-m3 có CẢ
+  `model.safetensors` lẫn `pytorch_model.bin`; mặc định transformers thử .bin → bị chặn.
+- **Cách xử lý (đã làm):** `AutoModel.from_pretrained(name, use_safetensors=True)` trong
+  `late_chunk.py::_ensure_backend` → buộc nạp .safetensors (không dính torch.load guard).
+- **Verify:** smoke thật `scratchpad/smoke_late_chunk.py` (hoặc bất kỳ ingest có model) phải
+  nạp bge-m3 OK, trả vector (n,1024). Model mới thêm vào hệ PHẢI có .safetensors trên HF.
+
 ## ormsgpack DLL bị Windows Application Control chặn (langgraph 1.x không import được)
 
 - **Triệu chứng:** `import langgraph.graph` → `ImportError: DLL load failed while importing ormsgpack: An Application Control policy has blocked this file.` Toàn bộ tầng graph (query/ingest/mindmap) không import được → app không chạy.

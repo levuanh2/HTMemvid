@@ -267,9 +267,33 @@ _emb_instance: Any = None
 _emb_bound_name: str | None = None
 
 
+def _late_chunking_enabled() -> bool:
+    """Late chunking bật? (env LATE_CHUNKING, mặc định ON). Đọc env trực tiếp để không
+    phụ thuộc thứ tự reload settings trong test."""
+    return (os.getenv("LATE_CHUNKING", "1") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+class LateChunkEmbeddings:
+    """langchain Embeddings dùng encoder mean-pool (late chunking) cho query-time.
+    PHẢI cùng pooling với vector chunk đã index → cosine query↔chunk có nghĩa."""
+
+    def __init__(self, encoder: Any) -> None:
+        self._enc = encoder
+
+    def embed_query(self, text: str) -> list[float]:
+        return np.asarray(self._enc.embed_query(text), dtype=np.float32).reshape(-1).tolist()
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        arr = np.atleast_2d(np.asarray(self._enc.encode(list(texts), convert_to_numpy=True), dtype=np.float32))
+        return [row.tolist() for row in arr]
+
+
 def get_embeddings() -> Any:
     """
-    Lazy singleton embeddings (HuggingFace hoặc Fake khi SKIP_MODEL_LOAD=1).
+    Lazy singleton embeddings.
+    - SKIP_MODEL_LOAD=1 → FakeEmbeddings.
+    - Late chunking ON (mặc định) → LateChunkEmbeddings (mean-pool, cùng encoder với ingest).
+    - Tắt → HuggingFaceEmbeddings (CLS) như cũ.
     """
     global _emb_instance, _emb_bound_name
 
@@ -279,6 +303,20 @@ def get_embeddings() -> Any:
         from langchain_core.embeddings.fake import FakeEmbeddings
 
         return FakeEmbeddings(size=384)
+
+    if _late_chunking_enabled():
+        from app.domains.ingest.late_chunk import get_late_chunk_encoder
+
+        # KHÔNG fallback all-MiniLM (max 512 → vỡ late chunking): để encoder áp default
+        # bge-m3 khi EMBEDDING_MODEL_NAME chưa set. Bind theo tên model đã resolve để
+        # get_embeddings/get_embedding_model dùng CÙNG encoder.
+        enc = get_late_chunk_encoder(os.getenv("EMBEDDING_MODEL_NAME") or None)
+        bound = f"late:{enc.model_name}"
+        if _emb_instance is not None and _emb_bound_name == bound:
+            return _emb_instance
+        _emb_instance = LateChunkEmbeddings(enc)
+        _emb_bound_name = bound
+        return _emb_instance
 
     model_name = os.getenv("EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
     if _emb_instance is not None and _emb_bound_name == model_name:
@@ -374,6 +412,13 @@ def get_embedding_model(model_name: Optional[str] = None) -> Optional[LangChainE
 
     if os.getenv("SKIP_MODEL_LOAD") == "1":
         return None
+
+    # Late chunking: embed CỤC BỘ bằng encoder mean-pool (bỏ qua gateway Embed — model/pooling
+    # của gateway khác → cosine query↔chunk sai). Encoder .encode() tương thích SentenceTransformer.
+    if _late_chunking_enabled():
+        from app.domains.ingest.late_chunk import get_late_chunk_encoder
+
+        return get_late_chunk_encoder(model_name)
 
     _addr = _gateway_addr()
     if _addr:

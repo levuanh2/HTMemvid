@@ -108,13 +108,15 @@ def build_ingest_graph(
             use_lc = (os.getenv("USE_LC_INGEST", "1") or "").strip().lower() not in ("0", "false", "no", "off")
             markdown = state.get("markdown") or ""
             chunk_headings: list[str] = []
+            doc_text = ""           # hệ toạ độ char cho late chunking (chỉ nhánh markdown)
+            spans: list = []        # span (start,end) trong doc_text, aligned với chunks
 
             if markdown and s.chunk_strategy == "markdown_header":
                 # Structured: cắt theo heading; Enriched: contextual + hypo-QA (gate trong enrich)
-                from app.domains.ingest.chunking import chunk_markdown
+                from app.domains.ingest.chunking import chunk_markdown_spans
                 from app.domains.ingest import enrich
-                pieces = chunk_markdown(markdown)
-                doc_context = markdown[:2000]
+                doc_text, pieces = chunk_markdown_spans(markdown)
+                doc_context = doc_text[:2000]
                 chunks = []
                 for p in pieces:
                     txt = enrich.contextualize(p["text"], doc_context)
@@ -124,6 +126,7 @@ def build_ingest_graph(
                     if txt.strip():
                         chunks.append(txt)
                         chunk_headings.append(p.get("heading_path", ""))
+                        spans.append((p.get("start", -1), p.get("end", -1)))
             elif use_lc and state.get("raw_docs"):
                 from app.domains.ingest.document_loader import split_documents
                 chunk_size = int(os.getenv("CHUNK_SIZE", "500"))
@@ -149,12 +152,34 @@ def build_ingest_graph(
                 dm.pop("page", None)
                 doc_meta = dm
 
+            # LATE CHUNKING: embed token TOÀN VĂN (doc_text) rồi mean-pool theo span →
+            # mỗi vector "thấm" ngữ cảnh toàn cục. Chỉ nhánh markdown (có doc_text+spans).
+            # CI/lỗi/encoder không sẵn → bỏ qua (late_embeddings=None) → EmbedAndIndex tự encode.
+            late_embeddings = None
+            if chunks and spans and len(spans) == len(chunks) and os.getenv("SKIP_MODEL_LOAD") != "1":
+                try:
+                    from app.domains.ingest.late_chunk import get_late_chunk_encoder
+                    enc = get_late_chunk_encoder()
+                    enc.warmup()  # nạp model NGOÀI mọi timeout (bài học playbook)
+                    safe_spans = [(max(s0, 0), max(e0, 0)) for (s0, e0) in spans]
+                    arr = enc.embed_document(doc_text, safe_spans)
+                    # piece không định vị được (start<0) → fallback embed standalone (tránh vector 0)
+                    for i, (s0, e0) in enumerate(spans):
+                        if s0 < 0 or e0 <= s0:
+                            arr[i] = enc.embed_query(chunks[i])[0]
+                    late_embeddings = [row.tolist() for row in arr]
+                    log_node_event(state["job_id"], "Chunk", "late_chunk_ok", t.ms(), {"vecs": len(late_embeddings)})
+                except Exception as le:
+                    log_node_event(state["job_id"], "Chunk", "late_chunk_skip", t.ms(), {"reason": str(le)})
+                    late_embeddings = None
+
             log_node_event(state["job_id"], "Chunk", "ok", t.ms(), {"chunks": len(chunks), "md": bool(markdown)})
             return {
                 **state,
                 "chunks": chunks,
                 "chunk_headings": chunk_headings,
                 "doc_meta": doc_meta,
+                "late_embeddings": late_embeddings,
                 "progress": 30,
                 "current_node": "Chunk",
                 "error": None,
@@ -219,12 +244,43 @@ def build_ingest_graph(
                 if aligned and headings[i]:
                     md["heading_path"] = headings[i]
                 all_metadata.append(md)
-            append_to_index(
-                chunks=all_chunks,
-                video_name=state["video_path"],
-                custom_metadata=all_metadata,
-                batch_size=32,
-            )
+
+            # LATE CHUNKING: lấy lại vector của CHUNK gốc cho mỗi entry (entry có thể bị
+            # sub-split bởi QR processor → dùng chung vector của chunk cha qua chunk_index).
+            late = state.get("late_embeddings")
+            embeddings = None
+            if late:
+                try:
+                    import numpy as _np
+                    rows = []
+                    for entry in entries:
+                        ci = entry.get("chunk_index")
+                        if ci is None or not (0 <= ci < len(late)):
+                            rows = None
+                            break
+                        rows.append(late[ci])
+                    if rows is not None:
+                        embeddings = _np.asarray(rows, dtype="float32")
+                except Exception as ee:
+                    log_node_event(state["job_id"], "EmbedAndIndex", "late_map_skip", t.ms(), {"reason": str(ee)})
+                    embeddings = None
+
+            if embeddings is not None:
+                append_to_index(
+                    chunks=all_chunks,
+                    video_name=state["video_path"],
+                    custom_metadata=all_metadata,
+                    batch_size=32,
+                    embeddings=embeddings,
+                )
+            else:
+                # CI/không có late vector → đường cũ y hệt (fake/inject signature cũ vẫn chạy).
+                append_to_index(
+                    chunks=all_chunks,
+                    video_name=state["video_path"],
+                    custom_metadata=all_metadata,
+                    batch_size=32,
+                )
 
             source_stem = canonical_source_stem(state["filename"])
             update_source_status(

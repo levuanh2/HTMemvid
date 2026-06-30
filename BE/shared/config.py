@@ -74,6 +74,9 @@ class Settings:
     embedding_model_name: str = DEFAULT_EMBEDDING_MODEL_NAME
     query_embed_cache_max: int = 512
     skip_model_load: bool = False
+    # Late chunking (mặc định ON): embed toàn văn + mean-pool theo span; query/chunk CÙNG
+    # encoder mean-pool. Tắt (LATE_CHUNKING=0) = đường embed cũ (CLS) — cho tình huống khẩn.
+    late_chunking: bool = True
 
     # --- LLM params ---
     llm_max_tokens: int = 8192
@@ -152,6 +155,7 @@ class Settings:
             embedding_model_name=os.getenv("EMBEDDING_MODEL_NAME", DEFAULT_EMBEDDING_MODEL_NAME),
             query_embed_cache_max=_int("QUERY_EMBED_CACHE_MAX", 512),
             skip_model_load=_flag("SKIP_MODEL_LOAD"),
+            late_chunking=_flag("LATE_CHUNKING", "1"),
             llm_max_tokens=_int("LLM_MAX_TOKENS", 8192),
             llm_temperature=_float("LLM_TEMPERATURE", 0.3),
             llm_temperature_factual=_float("LLM_TEMPERATURE_FACTUAL", 0.0),

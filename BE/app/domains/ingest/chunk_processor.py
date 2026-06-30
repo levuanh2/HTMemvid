@@ -135,7 +135,7 @@ def process_and_store_chunks(chunks:list[str],video_name:str,timestamp:str,max_w
 
     # Chuẩn bị tasks cho parallel processing
     task_index = 0
-    for chunk in chunks:
+    for chunk_index, chunk in enumerate(chunks):
         current_global_id = next_parent_id
         parent_id_str = str(current_global_id)
 
@@ -168,7 +168,8 @@ def process_and_store_chunks(chunks:list[str],video_name:str,timestamp:str,max_w
                 "parent_id": None,
                 "sub_order": None,
                 "total_parts": None,
-                "is_subchunk": False
+                "is_subchunk": False,
+                "chunk_index": chunk_index,
             }
             qr_tasks.append((task_index, prefixed_text, metadata_entry))
             task_index += 1
@@ -213,7 +214,8 @@ def process_and_store_chunks(chunks:list[str],video_name:str,timestamp:str,max_w
                             "parent_id": parent_id_str,
                             "sub_order": f"{idx}.{mini_idx}",
                             "total_parts": f"{total}.{len(mini_chunks)}",
-                            "is_subchunk": True
+                            "is_subchunk": True,
+                            "chunk_index": chunk_index,
                         }
                         qr_tasks.append((task_index, mini_prefixed, metadata_entry))
                         task_index += 1
@@ -225,7 +227,8 @@ def process_and_store_chunks(chunks:list[str],video_name:str,timestamp:str,max_w
                         "parent_id": parent_id_str,
                         "sub_order": idx,
                         "total_parts": total,
-                        "is_subchunk": True
+                        "is_subchunk": True,
+                        "chunk_index": chunk_index,
                     }
                     qr_tasks.append((task_index, prefixed_text, metadata_entry))
                     task_index += 1

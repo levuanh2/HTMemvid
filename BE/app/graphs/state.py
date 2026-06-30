@@ -23,6 +23,8 @@ class IngestState(TypedDict):
     md_path: NotRequired[str]
     chunk_headings: NotRequired[list[str]]
     doc_meta: NotRequired[dict[str, Any]]
+    # Late chunking: vector mean-pool theo span (aligned 1:1 với `chunks`); vắng nếu tắt/CI.
+    late_embeddings: NotRequired[list]
     # Pipeline sau Chunk — PHẢI khai báo: LangGraph merge state chỉ giữ field có trong TypedDict.
     video_name: NotRequired[str]
     video_path: NotRequired[str]

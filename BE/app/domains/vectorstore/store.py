@@ -273,8 +273,9 @@ def append_chunks_to_lc_index(
     video_name: str = "",
     custom_metadata: Optional[List[Dict[str, Any]]] = None,
     batch_size: int = 32,
+    embeddings: Optional[Any] = None,
 ) -> None:
-    if _skip_faiss_in_ci():
+    if embeddings is None and _skip_faiss_in_ci():
         print("[vector_store] Skipped append (CI mode)")
         return
     if not chunks:
@@ -301,12 +302,28 @@ def append_chunks_to_lc_index(
     emb = get_embeddings()
     os.makedirs(str(INDEX_DIR), exist_ok=True)
 
-    vs_existing = load_vectorstore()
-    if vs_existing is None:
-        vs = FAISS.from_documents(docs, emb)
+    if embeddings is not None:
+        # LATE CHUNKING: dùng vector precomputed; `emb` chỉ để embed query lúc truy vấn.
+        vecs = np.asarray(embeddings, dtype="float32")
+        if vecs.shape[0] != len(chunks):
+            raise ValueError(
+                f"embeddings count {vecs.shape[0]} != chunks {len(chunks)}"
+            )
+        text_embeddings = list(zip(chunks, [v.tolist() for v in vecs]))
+        metadatas = [d.metadata for d in docs]
+        vs_existing = load_vectorstore()
+        if vs_existing is None:
+            vs = FAISS.from_embeddings(text_embeddings, emb, metadatas=metadatas)
+        else:
+            vs = vs_existing
+            vs.add_embeddings(text_embeddings, metadatas=metadatas)
     else:
-        vs = vs_existing
-        vs.add_documents(docs)
+        vs_existing = load_vectorstore()
+        if vs_existing is None:
+            vs = FAISS.from_documents(docs, emb)
+        else:
+            vs = vs_existing
+            vs.add_documents(docs)
 
     keep = int(os.environ.get("FAISS_BACKUP_KEEP", "3"))
     _backup_dir_before_write(INDEX_DIR, keep=keep)
@@ -327,12 +344,17 @@ def append_chunks_to_lc_index(
 
     num_chunks = sum(1 for k in meta.keys() if isinstance(k, str) and k.isdigit())
     model_name = MODEL_NAME
-    try:
-        from app.clients.llm_factory import get_embeddings
-        dummy = get_embeddings().embed_query("dim_check")
-        emb_dim = len(dummy)
-    except Exception:
-        emb_dim = 0
+    if embeddings is not None:
+        emb_dim = int(np.asarray(embeddings).shape[1])
+    else:
+        try:
+            # Dùng lại `emb` (get_embeddings module-level) — KHÔNG re-import trong hàm,
+            # vì `from ... import get_embeddings` ở đây sẽ shadow biến module-level →
+            # `emb = get_embeddings()` phía trên ném UnboundLocalError (lỗi đã gặp).
+            dummy = emb.embed_query("dim_check")
+            emb_dim = len(dummy)
+        except Exception:
+            emb_dim = 0
     meta["__meta__"] = {
         "version": "1.1",
         "created_at": meta.get("__meta__", {}).get("created_at") or now,
@@ -340,6 +362,7 @@ def append_chunks_to_lc_index(
         "embedding_model_name": model_name,
         "embedding_dim": emb_dim,
         "vector_backend": "langchain_faiss",
+        "pooling": "mean_late" if embeddings is not None else "encode",
     }
     _save_meta(meta)
     print(f"[vector_store] added {len(chunks)} chunks video={video_name!r} (total={num_chunks}, model={model_name})")
@@ -419,43 +442,56 @@ def similarity_search_lc(query: str, k: int = 5) -> List[str]:
 
 
 # ----- Public API (thay faiss_utils) -----
-def append_to_index(chunks: List[str], video_name: str = "", custom_metadata: List[Dict] = None, batch_size: int = 32):
+def append_to_index(
+    chunks: List[str],
+    video_name: str = "",
+    custom_metadata: List[Dict] = None,
+    batch_size: int = 32,
+    embeddings: Optional[Any] = None,
+):
+    """Thêm chunk vào index.
+
+    `embeddings` (LATE CHUNKING): mảng (n_chunks, dim) ĐÃ mean-pool sẵn ở chunk_node.
+    Khi có, BỎ QUA encode lại (vector late-chunk không tái tạo được từ text chunk).
+    Vì không cần model, đường này vẫn chạy dưới SKIP_MODEL_LOAD.
+    """
     if not chunks:
         return
 
-    if _skip_faiss_in_ci():
+    if embeddings is None and _skip_faiss_in_ci():
         print("[vector_store] Skipped append_to_index (CI mode)")
         return
 
     if _use_lc_vector_store():
         try:
-            append_chunks_to_lc_index(chunks, video_name, custom_metadata, batch_size)
+            append_chunks_to_lc_index(chunks, video_name, custom_metadata, batch_size, embeddings)
             return
         except Exception as exc:
             print(f"[vector_store] LangChain vector store failed, fallback legacy FAISS: {exc}")
 
-    model = _require_embedding_model()
+    if embeddings is not None:
+        embeds = np.asarray(embeddings, dtype="float32")
+    else:
+        model = _require_embedding_model()
+        all_embeds = []
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i : i + batch_size]
+            batch_embeds = model.encode(
+                batch,
+                convert_to_numpy=True,
+                batch_size=batch_size,
+                show_progress_bar=False,
+            ).astype("float32")
+            print(f"[vector_store] batch {i//batch_size}: type={type(batch_embeds)}, shape={getattr(batch_embeds, 'shape', None)}")
+            all_embeds.append(batch_embeds)
+        embeds = np.vstack(all_embeds) if len(all_embeds) > 1 else all_embeds[0]
 
-    all_embeds = []
-    for i in range(0, len(chunks), batch_size):
-        batch = chunks[i : i + batch_size]
-        batch_embeds = model.encode(
-            batch,
-            convert_to_numpy=True,
-            batch_size=batch_size,
-            show_progress_bar=False,
-        ).astype("float32")
-        print(f"[vector_store] batch {i//batch_size}: type={type(batch_embeds)}, shape={getattr(batch_embeds, 'shape', None)}")
-        all_embeds.append(batch_embeds)
-
-    embeds = np.vstack(all_embeds) if len(all_embeds) > 1 else all_embeds[0]
-    
     # Validate embeddings trước khi add vào index
     try:
         embeds = normalize_embeddings_array(
-            embeds, 
-            expected_count=len(chunks), 
-            context="append_to_index"
+            embeds,
+            expected_count=len(chunks),
+            context="append_to_index",
         )
     except ValueError as e:
         print(f"[vector_store] ERROR: embedding validation failed: {e}")
@@ -500,6 +536,8 @@ def append_to_index(chunks: List[str], video_name: str = "", custom_metadata: Li
         "num_chunks": num_chunks,
         "embedding_model_name": MODEL_NAME,
         "embedding_dim": dim,
+        # mean_late: vector late-chunk (mean-pool theo span); encode: tự encode 1 vector/chunk.
+        "pooling": "mean_late" if embeddings is not None else "encode",
     }
     _save_meta(meta)
     print(f"[INDEX] added {len(chunks)} chunks video={video_name!r} (total={num_chunks}, model={MODEL_NAME}, dim={dim})")

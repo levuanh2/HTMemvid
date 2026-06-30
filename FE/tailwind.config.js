@@ -6,13 +6,16 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        // "brand" is now the seal red (son). Channel syntax so opacity
+        // utilities (bg-brand/8, border-brand/40) work AND the value
+        // flips automatically light↔dark via --brand-rgb.
         brand: {
-          DEFAULT: "#4f46e5",
-          light: "#6366f1",
-          pink: "#ec4899",
+          DEFAULT: "rgb(var(--brand-rgb) / <alpha-value>)",
+          ink:     "rgb(var(--ink-rgb) / <alpha-value>)",
         },
-        // All surface/text/border colors reference CSS variables
-        // so they flip automatically when .dark is toggled on <html>
+        seal: "rgb(var(--brand-rgb) / <alpha-value>)",
+        // Surface/text/border reference CSS variables so they flip
+        // automatically when .dark is toggled on <html>.
         surface: {
           base:     "var(--bg-base)",
           sidebar:  "var(--bg-sidebar)",
@@ -27,44 +30,36 @@ module.exports = {
           muted:     "var(--text-muted)",
           inverse:   "var(--text-inverse)",
         },
+        slate: "var(--slate)",
         border: "var(--border-color)",
         "border-strong": "var(--border-strong)",
       },
       fontFamily: {
-        display: ["Sora", "Plus Jakarta Sans", "Inter", "system-ui", "sans-serif"],
-        body: ["DM Sans", "Inter", "system-ui", "sans-serif"],
+        // Three voices: scholarship (serif), instrument (sans), apparatus (mono)
+        display: ["Spectral", "Georgia", "serif"],
+        reading: ["Spectral", "Georgia", "serif"],
+        body: ["Inter", "system-ui", "sans-serif"],
+        mono: ["IBM Plex Mono", "ui-monospace", "monospace"],
       },
       keyframes: {
         fadeUp: {
           "0%": { opacity: "0", transform: "translateY(12px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
-        shimmer: {
-          "0%": { backgroundPosition: "-200% 0" },
-          "100%": { backgroundPosition: "200% 0" },
-        },
         pulse: {
           "0%,100%": { opacity: "1" },
           "50%": { opacity: "0.4" },
         },
-        bounceUp: {
-          "0%, 80%, 100%": { transform: "translateY(0)" },
-          "40%": { transform: "translateY(-6px)" },
-        },
       },
       animation: {
         fadeUp: "fadeUp 450ms ease-out both",
-        shimmer: "shimmer 1.6s linear infinite",
         pulseSoft: "pulse 1.3s ease-in-out infinite",
-        bounce: "bounceUp 1.2s ease-in-out infinite",
       },
       boxShadow: {
-        glow:          "0 0 20px rgba(79,70,229,0.14)",
-        glowStrong:    "0 0 28px rgba(79,70,229,0.20)",
-        card:          "var(--shadow-card)",
-        "card-hover":  "var(--shadow-card-hover)",
-        "bubble-ai":   "0 1px 4px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)",
-        header:        "0 1px 0 rgba(0,0,0,0.08)",
+        glow:         "0 0 0 2px rgba(178,58,46,0.18)",
+        card:         "var(--shadow-card)",
+        "card-hover": "var(--shadow-card-hover)",
+        header:       "0 1px 0 var(--border-color)",
       },
     },
   },

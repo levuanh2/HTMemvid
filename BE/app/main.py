@@ -768,6 +768,49 @@ def _mark_query_interrupted(jid: str, review: dict) -> None:
             pass
 
 
+_CITE_PREFIX_RE = re.compile(r"^\s*\[\s*Nguồn\s*:\s*(.+?)\s*,\s*đoạn\s*(\d+)\s*\]\s*", re.IGNORECASE)
+
+
+def _attach_evidence(payload: dict, out: dict, max_chunks: int = 12) -> None:
+    """Bổ sung provenance (`sources` + `chunks`) vào payload query từ state của graph,
+    để FE dựng "lề bằng chứng". CHỈ THÊM (additive) — không đổi answer/error.
+
+    Tái dùng stem canonical đã có trong state (`retrieved_sources`/`retrieved_stems`)
+    và prefix "[Nguồn: <stem>, đoạn <id>]" do node RetrieveFAISS gắn — KHÔNG suy lại
+    định danh (xem .playbook: một nguồn sự thật cho source_stem)."""
+    if not isinstance(payload, dict) or not isinstance(out, dict):
+        return
+    srcs = out.get("retrieved_sources")
+    if isinstance(srcs, list) and srcs and not payload.get("sources"):
+        seen: list[str] = []
+        for s in srcs:
+            s = str(s).strip()
+            if s and s not in seen:
+                seen.append(s)
+        if seen:
+            payload["sources"] = seen
+    chunks = out.get("retrieved_chunks")
+    stems = out.get("retrieved_stems")
+    if isinstance(chunks, list) and chunks and not payload.get("chunks"):
+        ev: list[dict] = []
+        for i, c in enumerate(chunks[:max_chunks]):
+            text = str(c) if c is not None else ""
+            stem, chunk_id = "", ""
+            m = _CITE_PREFIX_RE.match(text)
+            if m:
+                stem = m.group(1).strip()
+                chunk_id = m.group(2)
+                text = text[m.end():]
+            elif isinstance(stems, list) and i < len(stems) and stems[i]:
+                stem = str(stems[i]).strip()
+            snippet = text.strip().replace("\x00", "")
+            if len(snippet) > 600:
+                snippet = snippet[:600].rstrip() + "…"
+            ev.append({"stem": stem, "chunk_id": chunk_id, "snippet": snippet})
+        if ev:
+            payload["chunks"] = ev
+
+
 def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> None:
     """Trích payload/status từ kết quả graph → cập nhật query_jobs/jobs_store + persist history.
 
@@ -782,6 +825,11 @@ def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> 
     has_err = bool((payload.get("error") or "").strip())
     if not has_ans and not has_err:
         payload["error"] = out.get("error") or "Unknown error"
+    if has_ans:
+        try:
+            _attach_evidence(payload, out)
+        except Exception:
+            pass
     status = int(out.get("status_code") or 200)
     result_obj = {"payload": payload, "status": status}
 

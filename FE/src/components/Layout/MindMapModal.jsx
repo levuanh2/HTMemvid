@@ -6,21 +6,22 @@ import "reactflow/dist/style.css";
 import ELK from "elkjs/lib/elk.bundled.js";
 import { Handle, Position } from "reactflow";
 import { createPortal } from "react-dom";
+import { Icon } from "../ui/Icon";
 
 const elk = new ELK();
 
 // =====================
-// BRANCH COLORS
+// BRANCH COLORS — muted archival inks (paper-friendly, not candy rainbow)
 // =====================
 const BRANCH_COLORS = [
-  { bg: "bg-blue-50",     border: "border-blue-200",   text: "text-blue-800",    edge: "#3b82f6", badge: "bg-blue-100 text-blue-700" },
-  { bg: "bg-emerald-50",  border: "border-emerald-200", text: "text-emerald-800", edge: "#10b981", badge: "bg-emerald-100 text-emerald-700" },
-  { bg: "bg-violet-50",   border: "border-violet-200",  text: "text-violet-800",  edge: "#8b5cf6", badge: "bg-violet-100 text-violet-700"  },
-  { bg: "bg-amber-50",   border: "border-amber-200",   text: "text-amber-800",   edge: "#f59e0b", badge: "bg-amber-100 text-amber-700"   },
-  { bg: "bg-rose-50",    border: "border-rose-200",    text: "text-rose-800",    edge: "#f43f5e", badge: "bg-rose-100 text-rose-700"    },
-  { bg: "bg-cyan-50",     border: "border-cyan-200",    text: "text-cyan-800",    edge: "#06b6d4", badge: "bg-cyan-100 text-cyan-700"    },
-  { bg: "bg-fuchsia-50", border: "border-fuchsia-200",  text: "text-fuchsia-800", edge: "#d946ef", badge: "bg-fuchsia-100 text-fuchsia-700"  },
-  { bg: "bg-teal-50",    border: "border-teal-200",    text: "text-teal-800",    edge: "#14b8a6", badge: "bg-teal-100 text-teal-700"    },
+  { bg: "bg-slate-50",   border: "border-slate-300",   text: "text-slate-800",   edge: "#5C6B7A", badge: "bg-slate-100 text-slate-600" },
+  { bg: "bg-teal-50",    border: "border-teal-300",    text: "text-teal-900",    edge: "#3E6B57", badge: "bg-teal-100 text-teal-700" },
+  { bg: "bg-amber-50",   border: "border-amber-300",   text: "text-amber-900",   edge: "#B5821F", badge: "bg-amber-100 text-amber-700" },
+  { bg: "bg-rose-50",    border: "border-rose-300",    text: "text-rose-900",    edge: "#B23A2E", badge: "bg-rose-100 text-rose-700" },
+  { bg: "bg-indigo-50",  border: "border-indigo-300",  text: "text-indigo-900",  edge: "#4A5A8A", badge: "bg-indigo-100 text-indigo-700" },
+  { bg: "bg-stone-50",   border: "border-stone-300",   text: "text-stone-800",   edge: "#8A7A66", badge: "bg-stone-100 text-stone-600" },
+  { bg: "bg-cyan-50",    border: "border-cyan-300",    text: "text-cyan-900",    edge: "#3F7E8C", badge: "bg-cyan-100 text-cyan-700" },
+  { bg: "bg-orange-50",  border: "border-orange-300",  text: "text-orange-900",  edge: "#B5651F", badge: "bg-orange-100 text-orange-700" },
 ];
 
 export const LAYOUT_OPTIONS = [
@@ -2088,7 +2089,7 @@ const NapkinNode = ({ data }) => {
   const hiddenCount = data?.hiddenCount ?? 0;
 
   const toneClass = isRoot
-    ? "border-violet-300 bg-gradient-to-br from-violet-50 via-white to-fuchsia-50 shadow-lg"
+    ? "border-rose-300 bg-rose-50 shadow-md"
     : level === 1 && bc ? `${bc.bg} ${bc.border} shadow-sm`
     : ["problem", "risk"].includes(type) ? "border-amber-200 bg-amber-50 shadow-sm"
     : ["solution", "output"].includes(type) ? "border-emerald-200 bg-emerald-50 shadow-sm"
@@ -2111,14 +2112,14 @@ const NapkinNode = ({ data }) => {
 
       {hasChildren && (
         <button type="button" onClick={(e) => { e.stopPropagation(); e.preventDefault(); data?.onToggle?.(data.id); }}
-          className={`absolute -right-2.5 -top-2.5 z-10 flex items-center justify-center rounded-full border bg-white text-slate-500 shadow-sm transition-transform hover:scale-110 hover:bg-violet-50 hover:border-violet-300 hover:text-violet-600 ${toggleSz}`}
+          className={`absolute -right-2.5 -top-2.5 z-10 flex items-center justify-center rounded-full border bg-white text-slate-500 shadow-sm transition-transform hover:scale-110 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700 ${toggleSz}`}
           title={isExpanded ? "Thu gọn" : "Mở rộng"}>
           {isExpanded ? "−" : "+"}
         </button>
       )}
 
       <div className="flex items-start gap-2">
-        <div className={["flex shrink-0 items-center justify-center rounded-xl", isMobile ? "h-7 w-7 text-sm" : "h-8 w-8 text-base", isRoot ? "bg-violet-100" : level === 1 && bc ? bc.bg : "bg-slate-50"].join(" ")}>
+        <div className={["flex shrink-0 items-center justify-center rounded-xl", isMobile ? "h-7 w-7 text-sm" : "h-8 w-8 text-base", isRoot ? "bg-rose-100" : level === 1 && bc ? bc.bg : "bg-slate-50"].join(" ")}>
           {getNapkinIcon(data?.icon, type)}
         </div>
         <div className="min-w-0 flex-1">
@@ -2507,23 +2508,25 @@ function MindMapContent({ data, onClose, initialLayoutType }) {
       {/* Header */}
       <div className="flex-shrink-0 bg-surface-sidebar border-b border-border px-3 py-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-3 md:px-4 md:py-2.5">
         <div className="flex flex-wrap items-center gap-2 min-w-0 md:gap-3">
-          <h3 className="font-bold text-text-primary truncate text-sm md:text-[14px]">🧠 {data?.title || "Sơ đồ tư duy"}</h3>
+          <h3 className="font-display font-semibold text-text-primary truncate text-sm md:text-[15px] flex items-center gap-1.5">
+            <Icon name="Network" size={15} className="text-brand flex-shrink-0" /> {data?.title || "Sơ đồ tư duy"}
+          </h3>
 
           {/* Display mode */}
-          <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-slate-50 text-[11px]">
+          <div className="flex rounded-[7px] border border-border overflow-hidden bg-surface-elevated text-[11px]">
             {DISPLAY_MODES.map((mode) => (
               <button key={mode.value} onClick={() => handleDisplayModeChange(mode.value)}
-                className={`px-2 py-1.5 transition-colors ${displayMode === mode.value ? "bg-white font-semibold text-violet-700 shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}>
+                className={`px-2 py-1.5 transition-colors ${displayMode === mode.value ? "bg-surface-card font-semibold text-brand shadow-card" : "text-text-muted hover:bg-surface-hover"}`}>
                 {mode.label}
               </button>
             ))}
           </div>
 
           {/* Edge mode */}
-          <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-slate-50 text-[11px]">
+          <div className="flex rounded-[7px] border border-border overflow-hidden bg-surface-elevated text-[11px]">
             {EDGE_MODES.map((mode) => (
               <button key={mode.value} onClick={() => { lastInteractionRef.current = "layout-change"; setEdgeMode(mode.value); }}
-                className={`px-2 py-1.5 transition-colors ${edgeMode === mode.value ? "bg-white font-semibold text-sky-700 shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}>
+                className={`px-2 py-1.5 transition-colors ${edgeMode === mode.value ? "bg-surface-card font-semibold text-brand shadow-card" : "text-text-muted hover:bg-surface-hover"}`}>
                 {mode.label}
               </button>
             ))}
@@ -2542,10 +2545,10 @@ function MindMapContent({ data, onClose, initialLayoutType }) {
         </div>
 
         <div className="flex items-center gap-1.5 flex-wrap">
-          <button onClick={handleCenterView} className="btn-secondary border-slate-300 text-slate-600 px-2 py-1.5 text-[11px]" title="Căn giữa sơ đồ">⛶</button>
-          <button onClick={handleExpandAll} className="btn-secondary text-sky-400 border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-[11px]">＋<span className="hidden sm:inline ml-1">Mở hết</span></button>
-          <button onClick={handleCollapseAll} className="btn-secondary px-2 py-1.5 text-[11px]">−<span className="hidden sm:inline ml-1">Thu hết</span></button>
-          <button onClick={onClose} className="btn-secondary px-2 py-1.5 text-[11px]">✕<span className="hidden sm:inline ml-1">Đóng</span></button>
+          <button onClick={handleCenterView} className="btn-secondary px-2 py-1.5 text-[11px] gap-1" title="Căn giữa sơ đồ"><Icon name="Maximize2" size={13} /></button>
+          <button onClick={handleExpandAll} className="btn-secondary px-2 py-1.5 text-[11px] gap-1"><Icon name="Plus" size={13} /><span className="hidden sm:inline">Mở hết</span></button>
+          <button onClick={handleCollapseAll} className="btn-secondary px-2 py-1.5 text-[11px] gap-1"><Icon name="Minus" size={13} /><span className="hidden sm:inline">Thu hết</span></button>
+          <button onClick={onClose} className="btn-secondary px-2 py-1.5 text-[11px] gap-1"><Icon name="X" size={13} /><span className="hidden sm:inline">Đóng</span></button>
         </div>
       </div>
 
@@ -2575,13 +2578,13 @@ function MindMapContent({ data, onClose, initialLayoutType }) {
           onNodeDragStop={handleNodeDragStop}
           className="h-full w-full bg-surface-base"
           proOptions={{ hideAttribution: true }}>
-          {!isMobile && <MiniMap zoomable pannable maskColor="rgba(13,15,20,0.5)" style={{ width: 100, height: 65 }} />}
+          {!isMobile && <MiniMap zoomable pannable maskColor="rgba(27,42,65,0.18)" style={{ width: 100, height: 65 }} />}
           <Controls />
-          <Background variant="dots" gap={16} size={1} color="#1e2d3d" />
+          <Background variant="dots" gap={16} size={1} color="rgba(92,107,122,0.3)" />
         </ReactFlow>
         {innerNodes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center text-text-muted flex-col gap-2">
-            <div className="text-3xl">🧠</div><p className="text-sm">Đang tải sơ đồ...</p>
+            <Icon name="Network" size={28} /><p className="text-sm">Đang tải sơ đồ…</p>
           </div>
         )}
       </div>
@@ -2601,12 +2604,12 @@ export default function MindMapModal({ data, onClose, initialLayoutType }) {
     (Array.isArray(data?.diagram?.nodes) && data.diagram.nodes.length > 0);
   if (!hasNodes) {
     return createPortal(
-      <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50" onClick={onClose}>
-        <div className="bg-white rounded-[12px] p-6 max-w-sm text-center shadow-xl" onClick={(e) => e.stopPropagation()}>
-          <div className="text-3xl mb-2">🧠</div>
-          <p className="text-[14px] font-semibold text-gray-800 mb-1">Sơ đồ trống</p>
-          <p className="text-[12px] text-gray-500 mb-4">Không có nội dung để hiển thị. Hãy thử tạo lại với tài liệu khác hoặc chế độ Quality.</p>
-          <button onClick={onClose} className="px-4 py-1.5 rounded-[8px] bg-gray-800 text-white text-[13px]">Đóng</button>
+      <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/45 backdrop-blur-sm" onClick={onClose}>
+        <div className="rounded-[10px] p-6 max-w-sm text-center border" style={{ background: "var(--bg-card)", borderColor: "var(--border-strong)", boxShadow: "var(--shadow-card-hover)" }} onClick={(e) => e.stopPropagation()}>
+          <Icon name="Network" size={26} className="mx-auto mb-2 text-text-muted" />
+          <p className="font-display text-[15px] font-semibold text-text-primary mb-1">Sơ đồ trống</p>
+          <p className="text-[12px] text-text-secondary mb-4">Không có nội dung để hiển thị. Hãy thử tạo lại với tài liệu khác.</p>
+          <button onClick={onClose} className="btn-primary text-[13px]">Đóng</button>
         </div>
       </div>,
       document.body

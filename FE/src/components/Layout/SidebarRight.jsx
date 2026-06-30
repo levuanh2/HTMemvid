@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { FiTrash2, FiClock, FiMaximize2 } from "react-icons/fi";
 import MindMapModal from "./MindMapModal";
 import SummaryModal from "./SummaryModal";
 import { apiFetch } from "../../utils/api";
+import { Icon } from "../ui/Icon";
+import Spinner from "../ui/Spinner";
+import { normStem } from "../../utils/evidence";
 
 // ── Helpers ──────────────────────────────────────────
 const formatTimeAgo = (isoDate) => {
@@ -15,105 +17,42 @@ const formatTimeAgo = (isoDate) => {
   return `${Math.floor(diff / 86400)} ngày trước`;
 };
 
-// ── Spinner ──────────────────────────────────────────
-const Spinner = ({ className = "" }) => (
-  <span className={`w-3.5 h-3.5 flex-shrink-0 border-2 border-current/20 border-t-current rounded-full inline-block animate-spin ${className}`} />
-);
-
-// ── Empty placeholder ─────────────────────────────────
-const EmptyPlaceholder = ({ icon, text }) => (
-  <div className="text-center py-8 px-4 text-text-muted">
-    <div className="text-3xl mb-2">{icon}</div>
-    <p className="text-[13px] leading-5 m-0 text-text-secondary">{text}</p>
-  </div>
-);
-
-// ── List card item ────────────────────────────────────
-const ListCard = ({ title, meta, onOpen, onDelete, deleteLabel = "Xóa" }) => (
+// ── Saved-artifact card ───────────────────────────────
+const ListCard = ({ title, meta, icon, onOpen, onDelete, deleteLabel = "Xóa" }) => (
   <div
     onClick={onOpen}
-    className="flex items-center gap-3 px-3 py-2.5 rounded-[10px] border border-border hover:border-brand/30 hover:shadow-card-hover cursor-pointer transition-all group transition-theme"
-    style={{ background: 'var(--bg-card)', boxShadow: 'var(--shadow-card)' }}
+    className="flex items-center gap-3 px-3 py-2.5 rounded-[7px] border border-border hover:border-brand/30 cursor-pointer transition-all group transition-theme"
+    style={{ background: "var(--bg-card)" }}
   >
-    <div className="w-8 h-8 rounded-[8px] bg-brand/8 flex items-center justify-center flex-shrink-0 text-[16px]">
-      📋
+    <div className="w-8 h-8 rounded-[6px] flex items-center justify-center flex-shrink-0 text-brand" style={{ background: "color-mix(in srgb, var(--accent) 10%, transparent)" }}>
+      <Icon name={icon} size={15} />
     </div>
     <div className="flex-1 min-w-0">
       <div className="text-[13px] font-semibold text-text-primary truncate">{title}</div>
-      <div className="text-[11px] text-text-muted flex items-center gap-1 mt-0.5">
-        <FiClock size={10} />{meta}
+      <div className="text-[11px] text-text-muted flex items-center gap-1 mt-0.5 font-mono">
+        <Icon name="Clock" size={10} />{meta}
       </div>
     </div>
     <button
       onClick={(e) => { e.stopPropagation(); onDelete(); }}
       title={deleteLabel}
-      className="w-7 h-7 rounded-[7px] inline-flex items-center justify-center text-text-muted opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 transition-all"
+      aria-label={deleteLabel}
+      className="w-7 h-7 rounded-[6px] inline-flex items-center justify-center text-text-muted opacity-0 group-hover:opacity-100 hover:text-[var(--err)] transition-all"
     >
-      <FiTrash2 size={13} />
+      <Icon name="Trash2" size={13} />
     </button>
   </div>
 );
 
-// ── Mini MindMap Preview (static SVG) ────────────────
-const MiniMindMapPreview = ({ mindmap, onOpen }) => {
-  if (!mindmap || !mindmap.nodes?.length) return null;
-
-  const rootNode = mindmap.nodes.find((n) => n.parent === null);
-  const branches = mindmap.nodes.filter((n) => n.parent === rootNode?.id).slice(0, 6);
-
-  return (
-    <div
-      onClick={onOpen}
-      className="relative w-full rounded-[12px] border border-border bg-surface-elevated overflow-hidden cursor-pointer hover:border-brand/30 transition-all group"
-      style={{ height: 160, boxShadow: "inset 0 1px 3px rgba(0,0,0,0.04)" }}
-    >
-      <svg width="100%" height="100%" viewBox="0 0 280 160" className="select-none">
-        {/* Center node */}
-        <ellipse cx="140" cy="80" rx="38" ry="20" fill="#4f46e5" />
-        <text x="140" y="85" textAnchor="middle" fill="white" fontSize="11" fontWeight="700" fontFamily="DM Sans, sans-serif">
-          {(rootNode?.title || "Root").slice(0, 12)}
-        </text>
-
-        {/* Branch nodes */}
-        {branches.map((node, i) => {
-          const angle = (i * Math.PI * 2) / branches.length - Math.PI / 2;
-          const r = 68;
-          const x = 140 + Math.cos(angle) * r;
-          const y = 80 + Math.sin(angle) * r;
-          const colors = ["#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
-          const color = colors[i % colors.length];
-          return (
-            <g key={node.id}>
-              <line x1="140" y1="80" x2={x} y2={y} stroke={color} strokeWidth="1.5" strokeOpacity="0.5" />
-              <ellipse cx={x} cy={y} rx="28" ry="14" fill={color} fillOpacity="0.15" stroke={color} strokeWidth="1.2" strokeOpacity="0.6" />
-              <text x={x} y={y + 4} textAnchor="middle" fill={color} fontSize="9" fontFamily="DM Sans, sans-serif" fontWeight="600">
-                {(node.title || "").slice(0, 10)}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-
-      {/* Hover overlay */}
-      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-white/60 backdrop-blur-sm rounded-[12px]">
-        <span className="text-[13px] font-semibold text-brand flex items-center gap-1.5">
-          <FiMaximize2 size={14} /> Mở rộng
-        </span>
-      </div>
-    </div>
-  );
-};
-
-// ── Tabs config ───────────────────────────────────────
-const TABS = [
-  { key: "mindmap", label: "Sơ đồ" },
-  { key: "summary", label: "Tóm tắt" },
-  { key: "history", label: "Lịch sử" },
+// ── Artifact selector chips ───────────────────────────
+const ARTIFACTS = [
+  { key: "mindmap", label: "Sơ đồ", icon: "Network" },
+  { key: "summary", label: "Tóm tắt", icon: "ScrollText" },
 ];
 
 // ── Main component ────────────────────────────────────
-export default function SidebarRight({ selectedSources, onClose }) {
-  const [activeTab, setActiveTab] = useState("mindmap");
+export default function SidebarRight({ selectedSources, evidence, highlight, onHighlight, onClose }) {
+  const [artifactTab, setArtifactTab] = useState("mindmap");
   const [mindMaps, setMindMaps]           = useState([]);
   const [showModalMap, setShowModalMap]   = useState(null);
   const [showSummaryModal, setShowSummaryModal] = useState(null);
@@ -121,19 +60,15 @@ export default function SidebarRight({ selectedSources, onClose }) {
   const [loading, setLoading]             = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [mindmapMode, setMindmapMode] = useState("mindmap"); // Kept for compatibility but not shown in UI
   const [summaries, setSummaries]         = useState([]);
 
+  const frameRefs = useRef(new Map());
+
   // ── Polling refs (guard duplicate + cleanup) ──────
-  // Active job id being polled, null if no active polling
   const pollingJobIdRef = useRef(null);
-  // Current interval handle
   const pollingIntervalRef = useRef(null);
-  // Current timeout handle (for auto-stop after jobTimeout+10s)
   const pollingTimeoutRef = useRef(null);
-  // Generation counter to discard late responses after user started a new job
   const pollingGenerationRef = useRef(0);
-  // Cho phép HUỶ job mindmap đang chạy (reject promise + stop polling).
   const cancelMindmapRef = useRef(null);
 
   // ── Fetchers (logic unchanged) ────────────────────
@@ -158,126 +93,82 @@ export default function SidebarRight({ selectedSources, onClose }) {
 
   useEffect(() => { fetchMindMaps(); fetchSummaries(); }, [fetchMindMaps, fetchSummaries]);
 
+  // ── Scroll the highlighted source frame into view ──
+  useEffect(() => {
+    if (!highlight) return;
+    const key = `${normStem(highlight.stem)}::${String(highlight.chunkId ?? "")}`;
+    const el = frameRefs.current.get(key);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [highlight]);
+
   // ── Poll mindmap job (adaptive interval, deduped, auto-cleanup) ────
-  // Adaptive interval:
-  //   - 0-30s   elapsed: 2s/req
-  //   - 30-120s elapsed: 5s/req
-  //   - > maxElapsed (jobTimeout+10s or 120s): stop, treat as timeout
-  // Stops automatically on: done, error, timeout, new job, unmount.
-  // Only 1 polling loop active at a time (per jobId).
   const stopPolling = useCallback((reason = "manual") => {
-    if (pollingIntervalRef.current != null) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
-    }
-    if (pollingTimeoutRef.current != null) {
-      clearTimeout(pollingTimeoutRef.current);
-      pollingTimeoutRef.current = null;
-    }
+    if (pollingIntervalRef.current != null) { clearInterval(pollingIntervalRef.current); pollingIntervalRef.current = null; }
+    if (pollingTimeoutRef.current != null) { clearTimeout(pollingTimeoutRef.current); pollingTimeoutRef.current = null; }
     const prevId = pollingJobIdRef.current;
-    if (prevId) {
-      console.log(`[MindMap Poll Stop] job_id=${prevId} reason=${reason}`);
-    }
+    if (prevId) console.log(`[MindMap Poll Stop] job_id=${prevId} reason=${reason}`);
     pollingJobIdRef.current = null;
   }, []);
 
   const startPolling = useCallback((jobId, opts = {}) => {
-    const {
-      onDone,
-      onError,
-      onTick,
-      jobTimeoutMs = 180 * 1000, // matches backend JOB_TIMEOUT_BALANCED
-      maxExtraMs = 10 * 1000,    // +10s buffer
-    } = opts;
+    const { onDone, onError, onTick, jobTimeoutMs = 180 * 1000, maxExtraMs = 10 * 1000 } = opts;
 
-    // GUARD 1: If a polling loop is already running for THIS job, do nothing.
     if (pollingJobIdRef.current === jobId) {
       console.log(`[MindMap Poll] job_id=${jobId} already polling, skip duplicate start`);
       return;
     }
-
-    // GUARD 2: If a polling loop is running for ANOTHER job, stop it first.
-    if (pollingJobIdRef.current) {
-      stopPolling("new_job");
-    }
+    if (pollingJobIdRef.current) stopPolling("new_job");
 
     pollingJobIdRef.current = jobId;
-    // Bump generation so any in-flight request becomes stale.
     const generation = ++pollingGenerationRef.current;
     const startTs = Date.now();
     const maxElapsedMs = jobTimeoutMs + maxExtraMs;
 
-    // Compute current interval based on elapsed
     const computeInterval = (elapsedMs) => {
       if (elapsedMs < 30 * 1000) return 2000;
       if (elapsedMs < 120 * 1000) return 5000;
-      return 5000; // > 120s, still poll every 5s until maxElapsedMs hit
+      return 5000;
     };
 
-    let inFlight = false; // prevent overlapping requests
+    let inFlight = false;
 
     const tick = async () => {
-      // Bail out if a newer polling cycle started or polling was stopped
       if (pollingGenerationRef.current !== generation) return;
       if (pollingJobIdRef.current !== jobId) return;
-      if (inFlight) return; // skip overlap
+      if (inFlight) return;
 
       const elapsed = Date.now() - startTs;
-
-      // Hard cap: stop polling after jobTimeout + 10s
       if (elapsed > maxElapsedMs) {
         console.log(`[MindMap Poll Stop] job_id=${jobId} reason=timeout elapsed=${Math.round(elapsed / 1000)}s`);
         stopPolling("timeout");
-        if (typeof onError === "function") {
-          onError(new Error("Quá thời gian chờ tạo Mind Map (frontend timeout)."));
-        }
+        if (typeof onError === "function") onError(new Error("Quá thời gian chờ tạo Sơ đồ (frontend timeout)."));
         return;
       }
 
       inFlight = true;
       try {
-        const res = await apiFetch(`/mindmap-status/${encodeURIComponent(jobId)}`, {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-        });
-        // Discard late responses from old generations
+        const res = await apiFetch(`/mindmap-status/${encodeURIComponent(jobId)}`, { method: "GET", headers: { "Content-Type": "application/json" } });
         if (pollingGenerationRef.current !== generation) return;
         if (pollingJobIdRef.current !== jobId) return;
-
-        if (!res.ok) {
-          const d = await res.json().catch(() => ({}));
-          throw new Error(d.error || `HTTP ${res.status}`);
-        }
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
         const data = await res.json();
-        const interval = computeInterval(Date.now() - startTs);
-        console.log(`[MindMap Poll] job_id=${jobId} interval=${interval} elapsed=${Math.round((Date.now() - startTs) / 1000)}s status=${data.status}`);
         if (typeof onTick === "function") onTick(data);
-
-        if (data.status === "done") {
-          stopPolling("done");
-          if (typeof onDone === "function") onDone(data.result);
-          return;
-        }
+        if (data.status === "done") { stopPolling("done"); if (typeof onDone === "function") onDone(data.result); return; }
         if (data.status === "error" || data.status === "timeout") {
           stopPolling(data.status);
-          if (typeof onError === "function") {
-            onError(new Error(data.error || "Lỗi khi tạo Mind Map."));
-          }
+          if (typeof onError === "function") onError(new Error(data.error || "Lỗi khi tạo Sơ đồ."));
           return;
         }
       } catch (err) {
         if (pollingGenerationRef.current !== generation) return;
         if (pollingJobIdRef.current !== jobId) return;
         console.error(`[MindMap Poll] job_id=${jobId} error:`, err);
-        // Don't stop on network error - retry next tick.
       } finally {
         inFlight = false;
       }
     };
 
-    // First tick immediately
     tick();
-    // Then schedule on adaptive interval
     const schedule = () => {
       if (pollingGenerationRef.current !== generation) return;
       if (pollingJobIdRef.current !== jobId) return;
@@ -288,14 +179,11 @@ export default function SidebarRight({ selectedSources, onClose }) {
     pollingIntervalRef.current = setTimeout(schedule, 2000);
   }, [stopPolling]);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => stopPolling("unmount");
-  }, [stopPolling]);
+  useEffect(() => () => stopPolling("unmount"), [stopPolling]);
 
   // ── Handlers (logic unchanged) ────────────────────
   const handleGenerateMindMap = async () => {
-    if (!selectedSources?.length) { alert("Vui lòng chọn ít nhất một file để tạo Mind Map!"); return; }
+    if (!selectedSources?.length) { alert("Vui lòng chọn ít nhất một tài liệu để tạo Sơ đồ!"); return; }
     setLoading(true);
     setMindmapJobHint({ progress: null, current_node: null });
     try {
@@ -305,8 +193,6 @@ export default function SidebarRight({ selectedSources, onClose }) {
       if (startData.error) throw new Error(startData.error);
       if (!startData.job_id) throw new Error("Server không trả job_id.");
 
-      // Use adaptive interval-based polling (deduped, auto-cleanup).
-      // jobTimeout từ BE (đúng theo mode fast/balanced/quality), fallback 180.
       const data = await new Promise((resolve, reject) => {
         cancelMindmapRef.current = () => reject(new Error("__cancelled__"));
         startPolling(startData.job_id, {
@@ -316,18 +202,12 @@ export default function SidebarRight({ selectedSources, onClose }) {
           onError: (err) => reject(err),
         });
       });
-      // Empty-state: BE trả nhưng không có node nào → báo rõ, không lưu map rỗng.
       const hasNodes = (Array.isArray(data?.nodes) && data.nodes.length > 0) ||
         (Array.isArray(data?.diagram?.nodes) && data.diagram.nodes.length > 0);
       if (!hasNodes) {
-        alert("Không tạo được sơ đồ từ tài liệu đã chọn (nội dung quá ngắn hoặc không trích được ý chính). Thử chọn tài liệu khác hoặc chế độ Quality.");
+        alert("Không tạo được sơ đồ từ tài liệu đã chọn (nội dung quá ngắn hoặc không trích được ý chính). Thử chọn tài liệu khác.");
         return;
       }
-      if (import.meta.env.DEV) {
-        console.log("[SidebarRight] mindmap result", data);
-        console.log("[SidebarRight] nodes", data?.nodes?.length, "diagram", data?.diagram?.nodes?.length);
-      }
-      // Build record with diagram
       const record = {
         id: data.id || Date.now().toString(),
         title: data.title || "Sơ đồ tư duy",
@@ -340,13 +220,10 @@ export default function SidebarRight({ selectedSources, onClose }) {
       };
       setMindMaps((prev) => [record, ...prev.filter((item) => item.id !== record.id)]);
       await fetchMindMaps();
+      setShowModalMap(record);
     } catch (err) {
-      if (err?.message === "__cancelled__") {
-        console.log("[MindMap] cancelled by user");
-      } else {
-        console.error("Mind Map Error:", err);
-        alert(err?.message ? `Không tạo được sơ đồ tư duy: ${err.message}` : "Không tạo được sơ đồ tư duy, kiểm tra console!");
-      }
+      if (err?.message === "__cancelled__") { console.log("[MindMap] cancelled by user"); }
+      else { console.error("Mind Map Error:", err); alert(err?.message ? `Không tạo được sơ đồ: ${err.message}` : "Không tạo được sơ đồ, kiểm tra console!"); }
     }
     finally {
       cancelMindmapRef.current = null;
@@ -357,25 +234,22 @@ export default function SidebarRight({ selectedSources, onClose }) {
   };
 
   const handleCancelMindMap = () => {
-    // Lưu ý: chỉ DỪNG CHỜ ở FE. Job BE có thể vẫn chạy xong và lưu map (append_mindmap
-    // ghi trong lúc sinh) → map có thể xuất hiện ở lần fetch sau. Huỷ mid-LLM cần
-    // cooperative-abort phía worker (chưa làm).
     stopPolling("cancel");
     if (cancelMindmapRef.current) cancelMindmapRef.current();
   };
 
   const handleDeleteMap = async (id) => {
-    if (!window.confirm("Xóa mind map này?")) return;
+    if (!window.confirm("Xóa sơ đồ này?")) return;
     try {
       const res = await apiFetch(`/mindmaps/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setMindMaps((prev) => prev.filter((m) => m.id !== id));
       await fetchMindMaps();
-    } catch (err) { console.error("Mind Map delete error:", err); alert("Không xóa được mind map!"); }
+    } catch (err) { console.error("Mind Map delete error:", err); alert("Không xóa được sơ đồ!"); }
   };
 
   const handleGenerateSummary = async () => {
-    if (!selectedSources?.length) { alert("Vui lòng chọn ít nhất một file để tóm tắt!"); return; }
+    if (!selectedSources?.length) { alert("Vui lòng chọn ít nhất một tài liệu để tóm tắt!"); return; }
     setSummaryLoading(true);
     try {
       const res = await apiFetch(`/summarize-documents`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources: selectedSources, use_dancer: true, use_entity_chain: true, use_cod: true, use_structured: true, use_fact_check: true }) });
@@ -405,160 +279,163 @@ export default function SidebarRight({ selectedSources, onClose }) {
     } catch (err) { console.error("Delete summary error:", err); alert("Không xóa được tóm tắt!"); }
   };
 
+  // ── Derived ───────────────────────────────────────
+  const chunks = Array.isArray(evidence?.chunks) ? evidence.chunks : [];
+  const sourceStems = Array.isArray(evidence?.sources) ? evidence.sources : [];
+  const isGenerating = artifactTab === "mindmap" ? loading : summaryLoading;
+  const onGenerate = artifactTab === "mindmap" ? handleGenerateMindMap : handleGenerateSummary;
+
   // ── Render ────────────────────────────────────────
   return (
-    <div className="flex flex-col h-full overflow-hidden transition-theme" style={{ background: 'var(--bg-sidebar)' }}>
+    <div className="flex flex-col h-full overflow-hidden transition-theme" style={{ background: "var(--bg-sidebar)" }}>
 
-      {/* ── TAB BAR ── */}
-      <div className="flex border-b border-border px-1 flex-shrink-0">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`sidebar-tab ${activeTab === tab.key ? "sidebar-tab-active" : ""}`}
-          >
-            {tab.label}
-          </button>
-        ))}
-        {/* Mobile close */}
-        <button
-          onClick={onClose}
-          className="md:hidden ml-auto w-8 h-8 my-1 mr-1 rounded-[8px] inline-flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-elevated transition-colors"
-          aria-label="Đóng"
-        >
-          ✕
+      {/* Header */}
+      <div className="px-4 pt-4 pb-3 border-b border-border flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <Icon name="Quote" size={15} className="text-brand flex-shrink-0" />
+          <span className="text-[13px] font-semibold text-text-primary">Lề bằng chứng</span>
+        </div>
+        <button onClick={onClose} className="md:hidden icon-btn w-8 h-8" aria-label="Đóng">
+          <Icon name="X" size={16} />
         </button>
       </div>
 
-      {/* ── TAB CONTENT ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
-
-        {/* ── MINDMAP TAB ── */}
-        {activeTab === "mindmap" && (
-          <div className="flex flex-col h-full">
-            {/* Mindmap preview area */}
-            <div className="p-3 flex-shrink-0">
-              {initialLoading ? (
-                <div className="flex items-center justify-center h-[160px] text-text-muted text-[13px] gap-2">
-                  <Spinner /> Đang tải…
-                </div>
-              ) : mindMaps.length > 0 ? (
-                <MiniMindMapPreview mindmap={mindMaps[0]} onOpen={() => setShowModalMap(mindMaps[0])} />
-              ) : (
-                <div className="h-[160px] rounded-[12px] border border-dashed border-border bg-surface-elevated flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="text-3xl mb-1">🧠</div>
-                    <p className="text-[12px] text-text-muted">Chưa có sơ đồ tư duy</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Loading progress + huỷ */}
-              {loading && (
-                <div className="mt-2 flex items-center gap-2 text-[12px] text-text-secondary">
-                  <Spinner className="text-brand" />
-                  <span className="font-medium">{mindmapJobHint.progress != null ? `${mindmapJobHint.progress}%` : "Đang tạo…"}</span>
-                  {mindmapJobHint.current_node && (
-                    <span className="text-text-muted truncate flex-1">{mindmapJobHint.current_node}</span>
-                  )}
-                  <button
-                    onClick={handleCancelMindMap}
-                    className="ml-auto px-2 py-0.5 rounded-[6px] border border-border text-[11px] text-text-muted hover:text-red-500 hover:border-red-500/40 transition-colors"
+      {/* ── EVIDENCE MARGIN ── */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
+        {chunks.length > 0 ? (
+          <>
+            <div className="text-[11px] font-mono uppercase tracking-[0.12em] text-text-muted mb-2 px-1">
+              Nguồn của câu trả lời ({chunks.length})
+            </div>
+            <div className="flex flex-col gap-2">
+              {chunks.map((c, i) => {
+                const stem = c.stem || "";
+                const chunkId = c.chunk_id ?? "";
+                const key = `${normStem(stem)}::${String(chunkId)}`;
+                const active = highlight && normStem(highlight.stem) === normStem(stem) && String(highlight.chunkId) === String(chunkId);
+                return (
+                  <div
+                    key={`${key}-${i}`}
+                    ref={(el) => { if (el) frameRefs.current.set(key, el); else frameRefs.current.delete(key); }}
+                    className={`evidence-frame ${active ? "evidence-frame--active" : ""} p-3 cursor-default`}
+                    onMouseEnter={() => onHighlight?.({ stem, chunkId })}
+                    onMouseLeave={() => onHighlight?.(null)}
                   >
-                    Huỷ
-                  </button>
-                </div>
-              )}
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="w-5 h-5 rounded-[4px] inline-flex items-center justify-center text-[11px] font-mono font-semibold flex-shrink-0"
+                        style={{ color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 35%, transparent)" }}>
+                        {i + 1}
+                      </span>
+                      <span className="coord truncate flex-1" title={stem}>
+                        {stem || "nguồn"}{chunkId !== "" ? ` · đoạn ${chunkId}` : ""}
+                      </span>
+                    </div>
+                    {c.snippet && (
+                      <p className="font-reading text-[13px] leading-[1.55] text-text-secondary line-clamp-4">{c.snippet}</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+          </>
+        ) : sourceStems.length > 0 ? (
+          <>
+            <div className="text-[11px] font-mono uppercase tracking-[0.12em] text-text-muted mb-2 px-1">
+              Tài liệu đã dùng ({sourceStems.length})
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {sourceStems.map((s, i) => (
+                <div key={`${s}-${i}`} className="evidence-frame p-2.5 flex items-center gap-2">
+                  <Icon name="FileText" size={13} className="text-slate flex-shrink-0" />
+                  <span className="coord truncate" title={s}>{s}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="text-center px-5 pt-12 text-text-muted">
+            <Icon name="Quote" size={26} className="mx-auto mb-3 text-text-muted opacity-60" />
+            <p className="text-[13px] leading-[1.6] text-text-secondary">
+              Đặt một câu hỏi — nguồn dẫn chứng của câu trả lời sẽ hiện ở đây, khớp với các chú thích<sup className="cite-chip mx-0.5">n</sup>trong câu trả lời.
+            </p>
+          </div>
+        )}
+      </div>
 
-            {/* Action buttons */}
-            <div className="px-3 pb-3 flex flex-col gap-2 flex-shrink-0">
+      {/* ── ARTIFACTS — tạo từ tài liệu ── */}
+      <div className="flex-shrink-0 border-t border-border px-3 pt-3 pb-3">
+        <div className="flex items-center gap-2 mb-2.5">
+          <span className="text-[11px] font-mono uppercase tracking-[0.12em] text-text-muted">Tạo từ tài liệu</span>
+          <div className="flex gap-1 ml-auto">
+            {ARTIFACTS.map((a) => (
               <button
-                onClick={handleGenerateMindMap}
-                disabled={loading || !selectedSources?.length}
-                className="w-full h-10 rounded-[10px] border border-border text-[13px] font-semibold text-text-primary inline-flex items-center justify-center gap-2 hover:border-brand/30 hover:text-brand transition-all disabled:opacity-50 disabled:cursor-not-allowed transition-theme"
-                style={{ background: 'var(--bg-card)', boxShadow: 'var(--shadow-card)' }}
+                key={a.key}
+                onClick={() => setArtifactTab(a.key)}
+                className={`pill-tab !px-2.5 !py-1 ${artifactTab === a.key ? "pill-tab-active" : ""}`}
+                aria-pressed={artifactTab === a.key}
               >
-                {loading ? <><Spinner /> Đang tạo…</> : <><span>🧠</span> Tạo sơ đồ tư duy</>}
+                <Icon name={a.icon} size={13} /> {a.label}
               </button>
-              {mindMaps.length > 0 && (
-                <button
-                  onClick={() => setShowModalMap(mindMaps[0])}
-                  className="w-full h-10 rounded-[10px] border border-border text-[13px] font-semibold text-text-secondary inline-flex items-center justify-center gap-2 hover:border-brand/30 hover:text-brand transition-all transition-theme"
-                  style={{ background: 'var(--bg-card)', boxShadow: 'var(--shadow-card)' }}
-                >
-                  <FiMaximize2 size={14} /> Mở rộng toàn màn hình
-                </button>
-              )}
-            </div>
+            ))}
+          </div>
+        </div>
 
-            {/* Mind map list */}
-            {mindMaps.length > 0 && (
-              <div className="px-3 pb-3 border-t border-border pt-3 flex-1 overflow-y-auto">
-                <div className="text-[11px] font-bold tracking-wider uppercase text-text-muted mb-2">
-                  Đã lưu ({mindMaps.length})
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  {mindMaps.map((map) => (
-                    <ListCard
-                      key={map.id}
-                      title={map.title}
-                      meta={`${map.sources?.length || 0} tài liệu · ${formatTimeAgo(map.createdAt)}`}
-                      onOpen={() => setShowModalMap(map)}
-                      onDelete={() => handleDeleteMap(map.id)}
-                      deleteLabel="Xóa sơ đồ"
-                    />
-                  ))}
-                </div>
+        <button
+          onClick={onGenerate}
+          disabled={isGenerating || !selectedSources?.length}
+          className="btn-secondary w-full !py-2.5 inline-flex items-center justify-center gap-2"
+        >
+          {isGenerating ? (
+            <><Spinner size={14} /> Đang tạo…</>
+          ) : (
+            <><Icon name="Plus" size={15} /> Tạo {artifactTab === "mindmap" ? "sơ đồ" : "tóm tắt"}</>
+          )}
+        </button>
+
+        {/* Mindmap generation progress + cancel */}
+        {artifactTab === "mindmap" && loading && (
+          <div className="mt-2 flex items-center gap-2 text-[12px] text-text-secondary">
+            <span className="font-mono tabular-nums">{mindmapJobHint.progress != null ? `${mindmapJobHint.progress}%` : "…"}</span>
+            {mindmapJobHint.current_node && <span className="text-text-muted truncate flex-1">{mindmapJobHint.current_node}</span>}
+            <button onClick={handleCancelMindMap} className="ml-auto px-2 py-0.5 rounded-[5px] border border-border text-[11px] text-text-muted hover:text-[var(--err)] hover:border-[var(--err)]/40 transition-colors">
+              Huỷ
+            </button>
+          </div>
+        )}
+
+        {/* Saved list */}
+        <div className="mt-3 max-h-[34vh] overflow-y-auto">
+          {artifactTab === "mindmap" ? (
+            initialLoading ? (
+              <div className="flex items-center justify-center py-6 text-text-muted text-[12px] gap-2"><Spinner size={14} /> Đang tải…</div>
+            ) : mindMaps.length === 0 ? (
+              <p className="text-[12px] text-text-muted text-center py-4">Chưa có sơ đồ nào được lưu.</p>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                {mindMaps.map((map) => (
+                  <ListCard key={map.id} icon="Network" title={map.title}
+                    meta={`${map.sources?.length || 0} tài liệu · ${formatTimeAgo(map.createdAt)}`}
+                    onOpen={() => setShowModalMap(map)} onDelete={() => handleDeleteMap(map.id)} deleteLabel="Xóa sơ đồ" />
+                ))}
               </div>
-            )}
-          </div>
-        )}
-
-        {/* ── SUMMARY TAB ── */}
-        {activeTab === "summary" && (
-          <div className="flex flex-col h-full">
-            {/* Generate button */}
-            <div className="p-3 flex-shrink-0 border-b border-border">
-              <button
-                onClick={handleGenerateSummary}
-                disabled={summaryLoading || !selectedSources?.length}
-                className="w-full h-10 rounded-[10px] text-[13px] font-semibold text-white inline-flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: "linear-gradient(135deg, #4f46e5, #6366f1)", boxShadow: "0 2px 8px rgba(79,70,229,0.25)" }}
-              >
-                {summaryLoading ? <><Spinner /> Đang tạo…</> : <><span>📄</span> + Tạo tóm tắt mới</>}
-              </button>
-            </div>
-
-            {/* Summary list */}
-            <div className="flex-1 overflow-y-auto px-3 py-3">
-              {summaries.length === 0 ? (
-                <EmptyPlaceholder icon="📝" text="Chưa có tóm tắt nào được lưu." />
-              ) : (
-                <div className="flex flex-col gap-1.5">
-                  {summaries.map((item) => {
-                    const summaryId = item.id || item?.data?.id;
-                    return (
-                      <ListCard
-                        key={item.id}
-                        title={item.title || "Tóm tắt"}
-                        meta={formatTimeAgo(item.createdAt)}
-                        onOpen={() => setShowSummaryModal(item.data || item)}
-                        onDelete={() => handleDeleteSummary(summaryId)}
-                        deleteLabel="Xóa tóm tắt"
-                      />
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── HISTORY TAB ── */}
-        {activeTab === "history" && (
-          <EmptyPlaceholder icon="🕐" text={"Lịch sử trò chuyện\nsẽ xuất hiện ở đây."} />
-        )}
+            )
+          ) : (
+            summaries.length === 0 ? (
+              <p className="text-[12px] text-text-muted text-center py-4">Chưa có tóm tắt nào được lưu.</p>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                {summaries.map((item) => {
+                  const summaryId = item.id || item?.data?.id;
+                  return (
+                    <ListCard key={item.id} icon="ScrollText" title={item.title || "Tóm tắt"}
+                      meta={formatTimeAgo(item.createdAt)}
+                      onOpen={() => setShowSummaryModal(item.data || item)} onDelete={() => handleDeleteSummary(summaryId)} deleteLabel="Xóa tóm tắt" />
+                  );
+                })}
+              </div>
+            )
+          )}
+        </div>
       </div>
 
       {/* ── MODALS ── */}
@@ -567,11 +444,7 @@ export default function SidebarRight({ selectedSources, onClose }) {
         <SummaryModal data={showSummaryModal} onClose={() => setShowSummaryModal(null)} onSave={handleSaveSummary} />
       )}
 
-      <style>{`
-        .bg-brand\\/4 { background: rgba(79,70,229,0.04); }
-        .bg-brand\\/8 { background: rgba(79,70,229,0.08); }
-        @media (min-width: 768px) { .md\\:hidden { display: none !important; } }
-      `}</style>
+      <style>{`@media (min-width: 768px) { .md\\:hidden { display: none !important; } }`}</style>
     </div>
   );
 }

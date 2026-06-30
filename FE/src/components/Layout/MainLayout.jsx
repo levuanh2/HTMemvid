@@ -1,25 +1,9 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import SidebarLeft from "./SidebarLeft";
 import ChatArea from "./ChatArea";
 import SidebarRight from "./SidebarRight";
 import { useTheme } from "../../hooks/useTheme";
-
-// ── Icons ────────────────────────────────────────
-const SearchIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-text-muted flex-shrink-0">
-    <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-  </svg>
-);
-const MenuIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-    <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
-  </svg>
-);
-const ToolsIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-    <circle cx="12" cy="12" r="3" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14" />
-  </svg>
-);
+import { Icon } from "../ui/Icon";
 
 export default function MainLayout({ selectedSources, setSelectedSources }) {
   const [sources, setSources] = useState([]);
@@ -27,67 +11,61 @@ export default function MainLayout({ selectedSources, setSelectedSources }) {
   const [rightOpen, setRightOpen] = useState(false);
   const { isDark, setLight, setDark } = useTheme();
 
+  // ── Signature state: evidence margin ⇄ citation chips ──
+  // `evidence` = provenance of the latest answer ({ sources, chunks }).
+  // `highlight` = the citation a user is pointing at, shared so a chip in the
+  // answer and its source frame light up together (either direction).
+  const [evidence, setEvidence] = useState(null);
+  const [highlight, setHighlight] = useState(null); // { stem, chunkId } | null
+  const onHighlight = useCallback((c) => setHighlight(c), []);
+
   return (
-    <div className="flex flex-col h-screen overflow-hidden font-body transition-theme" style={{ background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
+    <div className="flex flex-col h-screen overflow-hidden font-body transition-theme" style={{ background: "var(--bg-base)", color: "var(--text-primary)" }}>
 
       {/* ── TOP HEADER ── */}
       <header
-        className="flex items-center gap-4 px-5 h-[56px] border-b border-border flex-shrink-0 transition-theme"
-        style={{ background: 'var(--bg-sidebar)', boxShadow: '0 1px 0 var(--border-color)' }}>
-
-        {/* Mobile left sidebar toggle */}
-        <button
-          onClick={() => setLeftOpen(true)}
-          className="md:hidden icon-btn w-9 h-9 border-0 shadow-none bg-transparent"
-          aria-label="Mở danh sách tài liệu"
-        >
-          <MenuIcon />
+        className="flex items-center gap-4 px-4 sm:px-5 h-[58px] border-b border-border flex-shrink-0 transition-theme"
+        style={{ background: "var(--bg-sidebar)" }}
+      >
+        {/* Mobile: open source library */}
+        <button onClick={() => setLeftOpen(true)} className="md:hidden icon-btn w-9 h-9" aria-label="Mở thư mục nguồn">
+          <Icon name="Menu" size={18} />
         </button>
 
-        {/* Logo */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <div className="w-8 h-8 rounded-[9px] flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
-            style={{ background: "linear-gradient(135deg, #4f46e5, #6366f1)" }}>
+        {/* Wordmark — a stamped seal + serif name */}
+        <div className="flex items-center gap-2.5 flex-shrink-0 select-none">
+          <span
+            className="w-[30px] h-[30px] rounded-[6px] inline-flex items-center justify-center font-display text-[16px] font-semibold flex-shrink-0"
+            style={{ color: "var(--accent)", border: "1.5px solid var(--accent)", transform: "rotate(-4deg)" }}
+            aria-hidden
+          >
             M
-          </div>
-          <span className="font-display font-bold text-[15px] text-text-primary hidden sm:block">MemVid AI</span>
+          </span>
+          <span className="font-display font-semibold text-[17px] tracking-tight text-text-primary hidden sm:block">
+            MemVid<span className="text-brand">X</span>
+          </span>
         </div>
 
-        {/* Search bar (center) */}
-        <div className="flex-1 flex justify-center px-2">
-          <label className="header-search cursor-text">
-            <SearchIcon />
-            <span className="text-text-muted text-[14px]">Tìm kiếm tài liệu...</span>
-          </label>
+        {/* Center eyebrow — the thesis, not a dead search box */}
+        <div className="flex-1 flex justify-center px-2 min-w-0">
+          <span className="hidden md:block text-[12px] tracking-[0.14em] uppercase text-text-muted font-mono truncate">
+            Đọc · Truy hồi · Dẫn chứng
+          </span>
         </div>
 
         {/* Right actions */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          {/* Mobile right sidebar toggle */}
-          <button
-            onClick={() => setRightOpen(true)}
-            className="md:hidden icon-btn w-9 h-9"
-            aria-label="Mở công cụ"
-          >
-            <ToolsIcon />
+          {/* Mobile: open evidence margin */}
+          <button onClick={() => setRightOpen(true)} className="md:hidden icon-btn w-9 h-9" aria-label="Mở lề bằng chứng">
+            <Icon name="PanelRight" size={18} />
           </button>
-          {/* Theme toggle — actual logic */}
-          <div className="hidden sm:flex theme-toggle">
-            <button
-              onClick={setLight}
-              title="Light mode"
-              className={`theme-toggle-btn ${!isDark ? "theme-toggle-btn-active" : ""}`}
-              aria-label="Light mode"
-            >
-              ☀️
+          {/* Theme toggle */}
+          <div className="hidden sm:flex theme-toggle" role="group" aria-label="Chế độ sáng/tối">
+            <button onClick={setLight} title="Nền sáng" aria-pressed={!isDark} className={`theme-toggle-btn ${!isDark ? "theme-toggle-btn-active" : ""}`} aria-label="Nền sáng">
+              <Icon name="Sun" size={15} />
             </button>
-            <button
-              onClick={setDark}
-              title="Dark mode"
-              className={`theme-toggle-btn ${isDark ? "theme-toggle-btn-active" : ""}`}
-              aria-label="Dark mode"
-            >
-              🌙
+            <button onClick={setDark} title="Nền tối" aria-pressed={isDark} className={`theme-toggle-btn ${isDark ? "theme-toggle-btn-active" : ""}`} aria-label="Nền tối">
+              <Icon name="Moon" size={15} />
             </button>
           </div>
         </div>
@@ -99,17 +77,17 @@ export default function MainLayout({ selectedSources, setSelectedSources }) {
         {/* Mobile overlay */}
         {(leftOpen || rightOpen) && (
           <div
-            className="fixed inset-0 bg-black/30 z-30 md:hidden backdrop-blur-sm"
+            className="fixed inset-0 bg-black/40 z-30 md:hidden backdrop-blur-sm"
             onClick={() => { setLeftOpen(false); setRightOpen(false); }}
           />
         )}
 
-        {/* ── LEFT SIDEBAR ── */}
+        {/* ── LEFT — Thư mục nguồn ── */}
         <aside
           className={`
-            fixed top-[56px] left-0 h-[calc(100vh-56px)] z-40 transition-transform duration-300 ease-in-out
+            fixed top-[58px] left-0 h-[calc(100vh-58px)] z-40 transition-transform duration-300 ease-in-out
             md:static md:top-auto md:h-auto md:translate-x-0 md:z-auto
-            w-[240px] shrink-0 bg-surface-sidebar border-r border-border
+            w-[252px] shrink-0 bg-surface-sidebar border-r border-border
             ${leftOpen ? "translate-x-0" : "-translate-x-full"}
           `}
         >
@@ -121,27 +99,33 @@ export default function MainLayout({ selectedSources, setSelectedSources }) {
           />
         </aside>
 
-        {/* ── MAIN CHAT ── */}
+        {/* ── CENTER — Phiên đọc ── */}
         <main className="flex flex-1 flex-col min-w-0 min-h-0">
           <ChatArea
             selectedSources={selectedSources}
             sources={sources}
+            onEvidence={setEvidence}
+            highlight={highlight}
+            onHighlight={onHighlight}
             onOpenLeft={() => setLeftOpen(true)}
             onOpenRight={() => setRightOpen(true)}
           />
         </main>
 
-        {/* ── RIGHT SIDEBAR ── */}
+        {/* ── RIGHT — Lề bằng chứng ── */}
         <aside
           className={`
-            fixed top-[56px] right-0 h-[calc(100vh-56px)] z-40 transition-transform duration-300 ease-in-out
+            fixed top-[58px] right-0 h-[calc(100vh-58px)] z-40 transition-transform duration-300 ease-in-out
             md:static md:top-auto md:h-auto md:translate-x-0 md:z-auto
-            w-[300px] shrink-0 bg-surface-sidebar border-l border-border
+            w-[326px] shrink-0 bg-surface-sidebar border-l border-border
             ${rightOpen ? "translate-x-0" : "translate-x-full"}
           `}
         >
           <SidebarRight
             selectedSources={selectedSources}
+            evidence={evidence}
+            highlight={highlight}
+            onHighlight={onHighlight}
             onClose={() => setRightOpen(false)}
           />
         </aside>

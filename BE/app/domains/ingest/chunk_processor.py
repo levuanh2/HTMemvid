@@ -261,6 +261,9 @@ def process_and_store_chunks(chunks:list[str],video_name:str,timestamp:str,max_w
     qr_frames = [f for f in qr_frames if f is not None]
     metadata_entries = [e for e in metadata_entries if e is not None]
     
+    for i, e in enumerate(metadata_entries):
+        e["frame_index"] = i
+    
     if not qr_frames:
         raise ValueError("No valid QR frames created")
 

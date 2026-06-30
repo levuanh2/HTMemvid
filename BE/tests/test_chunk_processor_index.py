@@ -40,3 +40,12 @@ def test_video_failure_is_non_fatal(monkeypatch):
     )
     assert entries, "entries (để index) phải còn nguyên dù video lỗi"
     assert vp == "", "video lỗi → path rỗng, không chặn pipeline"
+
+
+def test_entries_get_frame_index_after_filter(monkeypatch, tmp_path):
+    monkeypatch.setattr(cp, "save_qr_frames_to_video", lambda frames, prefix="": str(tmp_path / "v.mp4"))
+    import app.domains.vectorstore.store as store
+    monkeypatch.setattr(store, "_load_meta", lambda: {})
+    _v, entries = cp.process_and_store_chunks(["a", "b", "c"], "doc.mp4", "2026-06-30T00:00:00")
+    assert [e["frame_index"] for e in entries] == list(range(len(entries)))
+

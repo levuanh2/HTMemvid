@@ -86,7 +86,7 @@ def collect_mindmap_input(index_meta_path: Path, source_names: list[str]) -> dic
         text = "\n\n".join(t for _o, _k, t in group if t).strip()
         if text:
             chunks.append({"key": pk, "text": text, "heading_path": "",
-                           "chunk_keys": [k for _o, k, _t in group]})
+                           "chunk_keys": [k for _o, k, t in group if t]})
 
     return {"title": _title_for(source_names), "sources": sorted(wanted),
             "chunks": chunks, "tree_sections": _load_tree_sections(wanted)}

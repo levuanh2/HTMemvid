@@ -50,3 +50,19 @@ def test_title_single_vs_multi(tmp_path, monkeypatch):
     assert ic.collect_mindmap_input(p, ["bao_cao.docx"])["title"] == "bao_cao"
     out = ic.collect_mindmap_input(p, ["a.docx", "b.docx", "c.docx", "d.docx"])
     assert out["title"].startswith("Tổng hợp:")
+
+
+def test_orphan_subgroup_becomes_own_chunk_excluding_empty(tmp_path, monkeypatch):
+    # parent "99" KHÔNG có trong meta → sub-group mồ côi; sub 21 rỗng text phải bị loại khỏi chunk_keys
+    monkeypatch.setattr(chunk_text_store, "get_text", lambda cid: "" if cid == 21 else f"t{cid}")
+    meta = {
+        "20": {"source_stem": "a_docx", "is_subchunk": True, "parent_id": "99", "sub_order": 2},
+        "21": {"source_stem": "a_docx", "is_subchunk": True, "parent_id": "99", "sub_order": 1},
+        "22": {"source_stem": "a_docx", "is_subchunk": True, "parent_id": "99", "sub_order": 3},
+    }
+    out = ic.collect_mindmap_input(_write_meta(tmp_path, meta), ["a_docx"])
+    assert len(out["chunks"]) == 1
+    c = out["chunks"][0]
+    assert c["key"] == "99"
+    assert c["text"] == "t20\n\nt22"          # sub_order 1 rỗng bị bỏ, 2 rồi 3
+    assert c["chunk_keys"] == ["20", "22"]     # KHÔNG chứa "21" (text rỗng)

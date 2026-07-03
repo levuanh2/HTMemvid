@@ -37,6 +37,8 @@ def _ensure_job_columns(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in cur.fetchall()}
     if "token_buffer" not in cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN token_buffer TEXT DEFAULT ''")
+    if "cancel_requested" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN cancel_requested INT DEFAULT 0")
 
 
 def init_db() -> None:
@@ -130,7 +132,7 @@ def get_job(job_id: str) -> Optional[dict]:
         conn = get_conn()
         try:
             cur = conn.execute(
-                "SELECT job_id, job_type, status, progress, current_node, created_at, updated_at, result_json, error_text, token_buffer FROM jobs WHERE job_id=?",
+                "SELECT job_id, job_type, status, progress, current_node, created_at, updated_at, result_json, error_text, token_buffer, cancel_requested FROM jobs WHERE job_id=?",
                 (job_id,),
             )
             row = cur.fetchone()
@@ -153,8 +155,40 @@ def get_job(job_id: str) -> Optional[dict]:
                 "result": result_val,
                 "error": row[8],
                 "token_buffer": row[9] if len(row) > 9 and row[9] is not None else "",
+                "cancel_requested": bool(row[10]) if len(row) > 10 and row[10] is not None else False,
             }
             return job
+        finally:
+            conn.close()
+
+
+def request_cancel(job_id: str) -> None:
+    init_db()
+    with _lock:
+        conn = get_conn()
+        try:
+            conn.execute(
+                "UPDATE jobs SET cancel_requested=1, updated_at=? WHERE job_id=?",
+                (_now(), job_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def is_cancel_requested(job_id: str) -> bool:
+    init_db()
+    with _lock:
+        conn = get_conn()
+        try:
+            cur = conn.execute(
+                "SELECT cancel_requested FROM jobs WHERE job_id=?",
+                (job_id,),
+            )
+            row = cur.fetchone()
+            if not row or row[0] is None:
+                return False
+            return bool(row[0])
         finally:
             conn.close()
 

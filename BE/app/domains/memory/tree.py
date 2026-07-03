@@ -305,9 +305,11 @@ def _join_chunk_text(chunks: List[Dict[str, Any]], max_chars: int = 8000) -> str
     total = 0
     from app.domains.vectorstore import chunk_text_store
     for c in chunks:
-        t = (c.get("text") or "").strip()
-        if not t and c.get("chunk_id") is not None:
+        t = ""
+        if c.get("chunk_id") is not None:
             t = (chunk_text_store.get_text(int(c["chunk_id"])) or "").strip()
+        if not t:
+            t = (c.get("text") or "").strip()
         if not t:
             continue
         if total + len(t) > max_chars and texts:
@@ -797,40 +799,6 @@ def _classify_query_type(query: str) -> str:
 # UX helpers: build clean context & answer
 # =========================
 
-def build_human_context(top_nodes: List[Dict[str, Any]], evidence_chunks: List[Dict[str, Any]], max_len: int = 4000) -> str:
-    """
-    Tạo context sạch, không lộ metadata kỹ thuật.
-    - Dùng summary từ node (đã là ý chính).
-    - Thêm vài trích đoạn ngắn từ evidence.
-    """
-    summaries = []
-    for n in top_nodes:
-        s = (n.get("summary") or "").strip()
-        if s:
-            summaries.append(s)
-
-    snippets = []
-    total = 0
-    from app.domains.vectorstore import chunk_text_store
-    for c in evidence_chunks:
-        t = (c.get("text") or "").strip()
-        if not t and c.get("chunk_id") is not None:
-            t = (chunk_text_store.get_text(int(c["chunk_id"])) or "").strip()
-        if not t:
-            continue
-        snippet = t[:400]
-        if total + len(snippet) > max_len and snippets:
-            break
-        snippets.append(snippet)
-        total += len(snippet)
-
-    parts = []
-    if summaries:
-        parts.append("Tài liệu đề cập đến:\n- " + "\n- ".join(summaries))
-    if snippets:
-        parts.append("Một vài trích đoạn:\n- " + "\n- ".join(snippets[:5]))
-
-    return "\n\n".join(parts) if parts else ""
 
 
 def generate_notebooklm_style_answer(question: str, human_context: str, intent_type: Optional[str] = None) -> str:
@@ -1160,9 +1128,11 @@ def build_human_context(top_nodes: List[Dict[str, Any]], evidence_chunks: List[D
     total = 0
     from app.domains.vectorstore import chunk_text_store
     for c in evidence_chunks:
-        t = (c.get("text") or "").strip()
-        if not t and c.get("chunk_id") is not None:
+        t = ""
+        if c.get("chunk_id") is not None:
             t = (chunk_text_store.get_text(int(c["chunk_id"])) or "").strip()
+        if not t:
+            t = (c.get("text") or "").strip()
         if not t:
             continue
         snippet = t[:400]

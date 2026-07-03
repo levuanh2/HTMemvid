@@ -1573,11 +1573,18 @@ def summarize_documents():
         combined_text = "\n\n".join(all_texts)
         
         # Cấu hình các phương pháp (có thể override từ request)
-        use_dancer = data.get('use_dancer', True)
-        use_entity_chain = data.get('use_entity_chain', True)
-        use_cod = data.get('use_cod', True)
-        use_structured = data.get('use_structured', True)
-        use_fact_check = data.get('use_fact_check', True)
+        use_dancer = data.get('use_dancer')
+        use_entity_chain = data.get('use_entity_chain')
+        use_cod = data.get('use_cod')
+        use_structured = data.get('use_structured')
+        use_fact_check = data.get('use_fact_check')
+
+        # Chế độ tóm tắt: fast | balanced | quality
+        raw_mode = (data.get("mode") or data.get("generation_mode") or "").strip().lower()
+        if raw_mode in {"fast", "balanced", "quality"}:
+            generation_mode = raw_mode
+        else:
+            generation_mode = "balanced"
         
         # Gọi hàm tóm tắt nâng cao
         result = advanced_summarize(
@@ -1588,7 +1595,8 @@ def summarize_documents():
             use_cod=use_cod,
             use_structured=use_structured,
             use_fact_check=use_fact_check,
-            model=SLM_MODEL_SUMMARY
+            model=SLM_MODEL_SUMMARY,
+            mode=generation_mode
         )
         result["sources"] = list(normalized_sources)
         return jsonify(result)

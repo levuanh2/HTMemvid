@@ -62,7 +62,7 @@ def collect_chunks_for_sources(meta: dict, source_names: list) -> list:
         if not stem or stem not in wanted:
             continue
         from app.domains.vectorstore import chunk_text_store
-        t = (m.get("text") or "").strip() or (chunk_text_store.get_text(int(key)) or "").strip()
+        t = (chunk_text_store.get_text(int(key)) or "").strip() or (m.get("text") or "").strip()
         out.append({
             "text": t,
             "parent_id": m.get("parent_id"),

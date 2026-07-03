@@ -296,12 +296,13 @@ def fact_check(source_text: str, summary: str, model: str = None) -> Dict:
 def advanced_summarize(
     text: str,
     pre_chunks: Optional[List[str]] = None,
-    use_dancer: bool = True,
-    use_entity_chain: bool = True,
-    use_cod: bool = True,
-    use_structured: bool = True,
-    use_fact_check: bool = True,
-    model: str = None
+    use_dancer: Optional[bool] = None,
+    use_entity_chain: Optional[bool] = None,
+    use_cod: Optional[bool] = None,
+    use_structured: Optional[bool] = None,
+    use_fact_check: Optional[bool] = None,
+    model: str = None,
+    mode: str = "balanced"
 ) -> Dict:
     """
     Quy trình tóm tắt nâng cao kết hợp các công thức:
@@ -314,21 +315,51 @@ def advanced_summarize(
         use_cod: Sử dụng Chain of Density
         use_structured: Sử dụng Structured Extraction
         use_fact_check: Sử dụng FactCC
+        mode: Chế độ tóm tắt ("fast", "balanced", "quality")
     
     Returns:
         Dict chứa kết quả tóm tắt và metadata
     """
+    import time
+    start_total = time.perf_counter()
     model = model or SLM_MODEL_SUMMARY
 
+    mode = (mode or "balanced").strip().lower()
+    if mode not in {"fast", "balanced", "quality"}:
+        mode = "balanced"
+
     # D: Data Preprocessing
+    start_prep = time.perf_counter()
     chunks_input = pre_chunks if pre_chunks else preprocess_data(text)
     processed_text = "\n\n".join(chunks_input)
     text_len = len(processed_text)
+    t_prep = time.perf_counter() - start_prep
 
-    # Dynamic CoD iterations theo độ dài văn bản
-    cod_iterations = 1 if text_len < 1000 else (2 if text_len < 4000 else 3)
+    # Thiết lập cấu hình tự động dựa trên mode
+    if mode == "fast":
+        if use_dancer is None: use_dancer = False
+        if use_entity_chain is None: use_entity_chain = False
+        if use_cod is None: use_cod = False
+        if use_structured is None: use_structured = False
+        if use_fact_check is None: use_fact_check = False
+        cod_iterations = 0
+    elif mode == "balanced":
+        if use_dancer is None: use_dancer = (text_len > 4000)
+        if use_entity_chain is None: use_entity_chain = True
+        if use_cod is None: use_cod = True
+        if use_structured is None: use_structured = True
+        if use_fact_check is None: use_fact_check = False
+        cod_iterations = 1
+    else:  # quality
+        if use_dancer is None: use_dancer = (text_len > 2000)
+        if use_entity_chain is None: use_entity_chain = True
+        if use_cod is None: use_cod = True
+        if use_structured is None: use_structured = True
+        if use_fact_check is None: use_fact_check = True
+        cod_iterations = 1 if text_len < 1000 else (2 if text_len < 4000 else 3)
 
     # M + G: Bước 1 (DANCER) và Bước 2 (Entity) chạy SONG SONG
+    start_dancer_entity = time.perf_counter()
     base_summary = ""
     entities: List[str] = []
 
@@ -348,6 +379,7 @@ def advanced_summarize(
         f_entities = ex.submit(_run_entities)
         base_summary = f_dancer.result()
         entities = f_entities.result()
+    t_dancer_entity = time.perf_counter() - start_dancer_entity
 
     # Bước 2 (Entity Chain) — dùng kết quả đã có
     final_summary = base_summary
@@ -355,12 +387,15 @@ def advanced_summarize(
         final_summary = summarize_with_entity_chain(processed_text[:3000], entities, model=model)
 
     # Bước 3: Chain of Density — dynamic iterations
-    if use_cod:
+    start_cod = time.perf_counter()
+    if use_cod and cod_iterations > 0:
         final_summary = chain_of_density(
             processed_text[:3000], final_summary, iterations=cod_iterations, model=model
         )
+    t_cod = time.perf_counter() - start_cod
 
     # Bước 4 & E: structured + fact_check SONG SONG
+    start_struct_fact = time.perf_counter()
     structured_data = None
     fact_check_result = None
 
@@ -379,6 +414,22 @@ def advanced_summarize(
         f_fact = ex.submit(_run_fact_check)
         structured_data = f_struct.result()
         fact_check_result = f_fact.result()
+    
+    # Fallback deterministic structured data nếu tắt hoặc lỗi
+    if structured_data is None:
+        structured_data = {
+            "title": "Tóm tắt tài liệu",
+            "keyPoints": [s.strip() for s in final_summary.split(".") if s.strip() and len(s.strip()) > 5][:5],
+            "summary": final_summary,
+            "entities": entities,
+            "formulas": [],
+            "applications": []
+        }
+    t_struct_fact = time.perf_counter() - start_struct_fact
+
+    t_total = time.perf_counter() - start_total
+    print(f"[Summarize Timing] mode={mode} total={t_total:.1f}s prep={t_prep:.2f}s "
+          f"dancer_entity={t_dancer_entity:.1f}s cod={t_cod:.1f}s struct_fact={t_struct_fact:.1f}s")
 
     return {
         "summary": final_summary,
@@ -387,6 +438,7 @@ def advanced_summarize(
         "structured": structured_data,
         "fact_check": fact_check_result,
         "metadata": {
+            "mode": mode,
             "used_dancer": use_dancer,
             "used_entity_chain": use_entity_chain,
             "used_cod": use_cod,
@@ -395,6 +447,7 @@ def advanced_summarize(
             "text_length": len(text),
             "summary_length": len(final_summary),
             "cod_iterations": cod_iterations,
+            "time_elapsed": t_total,
         },
     }
 

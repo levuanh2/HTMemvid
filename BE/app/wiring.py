@@ -44,8 +44,9 @@ def build_graphs(
     query_with_memory_tree: Callable[..., Any],
     get_session_history: Callable[..., Any] | None,
     # mindmap deps
-    run_mindmap_generation: Callable[..., Any],
-    append_mindmap: Callable[..., None],
+    collect_mindmap_input: Callable[..., dict],
+    mindmap_pipeline: Any,
+    persist_mindmap: Callable[[dict], None],
     retriever: Any | None = None,
 ) -> Graphs:
     """Dựng 3 graph; lỗi từng graph được nuốt (trả None) để app vẫn chạy phần còn lại."""
@@ -93,8 +94,9 @@ def build_graphs(
             data_dir=data_dir,
             index_meta_path=index_meta_path,
             jobs_update=jobs_update,
-            run_mindmap_generation=run_mindmap_generation,
-            append_mindmap=append_mindmap,
+            collect_input=collect_mindmap_input,
+            pipeline=mindmap_pipeline,
+            persist_record=persist_mindmap,
         )
     except Exception as exc:
         print(f"[WARN] MINDMAP_GRAPH không khởi tạo được: {exc}")

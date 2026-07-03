@@ -12,18 +12,36 @@ class _MockQueryGraph:
 
 
 class _MockMindmapGraph:
+    """Mock graph THẬT KHÔNG dựng StateGraph(MindmapState) — xem test_mindmap_graph.py.
+
+    Trả về dict có key "result" (giữ nguyên interface) VÀ cập nhật jobs_store
+    (status=done + result) để mô phỏng node AssemblePersist của graph thật —
+    cần thiết vì run_mindmap_job (Task 10) không tự set status=done, nó trông cậy
+    vào graph invoke() làm việc đó qua jobs_update.
+    """
+
     def invoke(self, state, config=None, **_kwargs):
-        return {
-            "result": {
-                "id": "mock",
-                "title": "mock mindmap",
-                "nodes": [{"id": "root", "parent": None, "title": "mock mindmap"}],
-                "sources": state.get("source_names") or [],
-                "createdAt": time.time(),
-                "strategy": state.get("strategy") or "iterative",
-            },
-            "status_code": 200,
+        record = {
+            "id": "mock",
+            "schema_version": 2,
+            "title": "mock mindmap",
+            "nodes": [{"id": "root", "parent": None, "kind": "root", "title": "mock mindmap"}],
+            "relations": [],
+            "sources": state.get("source_names") or [],
+            "content_hash": state.get("content_hash") or "",
+            "created_at": "2026-01-01T00:00:00Z",
+            "generator": {"pipeline": "mock", "model": "mock", "elapsed_sec": 0.0,
+                          "degraded": False, "missing": []},
         }
+        job_id = state.get("job_id")
+        if job_id:
+            try:
+                from app.domains.jobs.jobs_store import update_job
+                update_job(job_id, status="done", progress=100,
+                          current_node="AssemblePersist", result=record)
+            except Exception:
+                pass
+        return {"result": record, "status_code": 200}
 
 
 @pytest.fixture(scope="session")

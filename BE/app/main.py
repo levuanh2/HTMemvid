@@ -44,31 +44,9 @@ from app.clients.llm_factory import ask_ai, summarize_whole_document, summarize_
 # Chỉ dùng cho local Ollama (Gemini sẽ bỏ qua model).
 SLM_MODEL = os.environ.get("SLM_MODEL_CHAT", os.environ.get("SLM_MODEL", "qwen3.6:35b-a3b"))
 SLM_MODEL_SUMMARY = os.environ.get("SLM_MODEL_SUMMARY", "gemma2:2b")
-from services.mindmap.worker import (
-    attach_mindmap_job_context,
-    run_mindmap_generation,
-    MODE_FAST,
-    MODE_BALANCED,
-    MODE_QUALITY,
-    VALID_MODES,
-    DEFAULT_MODE,
-    get_llm_timeout_for_mode,
-    get_job_timeout_for_mode,
-    get_llm_call_budget_for_mode,
-    get_mindmap_model_for_mode,
-)
-
-# Valid strategies for mindmap generation
-VALID_STRATEGIES = {
-    "auto",
-    "single_call_schema",
-    "mindmap_v2",
-    "cmgn_light",
-    "cmgn",
-    "multilevel_fast",
-    "multilevel",
-    "iterative",
-}
+from app.domains.mindmap import store as mindmap_store
+from app.domains.mindmap.input_collector import collect_mindmap_input
+from services.mindmap.pipeline import schema as mindmap_schema
 from app.domains.ingest.chunk_processor import process_and_store_chunks
 from app.domains.summary.summarize_advanced import advanced_summarize
 from app.domains.memory.tree import (
@@ -218,32 +196,6 @@ def _cleanup_old_query_jobs() -> None:
         ]
         for jid in expired:
             query_jobs.pop(jid, None)
-
-# Mindmap async jobs (tách biệt `jobs` dùng cho rebuild-index)
-mindmap_jobs: Dict[str, Dict[str, Any]] = {}
-mindmap_jobs_lock = threading.Lock()
-MINDMAP_JOB_TTL_MINUTES = int(os.environ.get("MINDMAP_JOB_TTL_MINUTES", "30"))
-
-# Migrate legacy in-memory mindmap_jobs dict sang SQLite (idempotent)
-try:
-    if _jobs_migrate_from_dict is not None:
-        _jobs_migrate_from_dict(mindmap_jobs, job_type="mindmap")
-except Exception:
-    pass
-
-
-def _cleanup_old_mindmap_jobs() -> None:
-    if MINDMAP_JOB_TTL_MINUTES <= 0:
-        return
-    cutoff = time.time() - (MINDMAP_JOB_TTL_MINUTES * 60)
-    with mindmap_jobs_lock:
-        expired = [
-            jid for jid, j in mindmap_jobs.items()
-            if isinstance(j.get("created_at"), (int, float)) and j["created_at"] < cutoff
-        ]
-        for jid in expired:
-            mindmap_jobs.pop(jid, None)
-
 
 def _make_query_cache_key(q: str, selected_sources: list, use_memory_tree: bool, filters: dict | None = None) -> str:
     # Normalize list để key ổn định theo thứ tự chọn
@@ -582,7 +534,7 @@ def _check_sources_status(selected_sources: List[str]) -> Dict[str, str]:
 
 
 # LangGraph pipelines được dựng tập trung ở app/wiring.py — gọi ở CUỐI khối init
-# (sau khi mọi callback/helper như _append_mindmap đã sẵn sàng).
+# (sau khi mọi callback/helper cần thiết đã sẵn sàng).
 
 def _get_session_history_safe(session_id: str, limit: int) -> list:
     try:
@@ -627,60 +579,15 @@ def _warmup_ollama_background() -> None:
 _warmup_ollama_background()
 
 
-def _load_mindmaps() -> list[dict]:
-    if not MINDMAPS_PATH.exists():
-        return []
-    try:
-        with open(MINDMAPS_PATH, encoding='utf-8') as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return data
-    except Exception as exc:
-        print(f"⚠️ Không thể đọc mindmaps.json: {exc}")
-    return []
-
-
-def _save_mindmaps(records: list[dict]) -> None:
-    try:
-        tmp_path = MINDMAPS_PATH.with_suffix('.tmp')
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            json.dump(records, f, ensure_ascii=False, indent=2)
-        tmp_path.replace(MINDMAPS_PATH)
-    except Exception as exc:
-        print(f"⚠️ Không thể lưu mindmaps.json: {exc}")
-
-
-def _append_mindmap(record: dict) -> None:
-    records = _load_mindmaps()
-    records.insert(0, record)
-    _save_mindmaps(records)
-
-
-def _mindmap_response(record: dict) -> dict:
-    nodes = record.get("nodes")
-    if not isinstance(nodes, list):
-        nodes = []
-    diagram = record.get("diagram")
-    print(f"[mindmap response] nodes={len(nodes)}, diagram_nodes={len((diagram or {}).get('nodes') or [])}")
-    response = {
-        "id": record.get("id"),
-        "title": record.get("title"),
-        "nodes": nodes,
-        "diagram": diagram,  # Include visual diagram for Napkin AI
-        "sources": record.get("sources", []),
-        "createdAt": record.get("createdAt"),
-        "strategy": record.get("strategy") or "iterative",
-        "mode": record.get("mode") or DEFAULT_MODE,
-    }
-    # Thêm visualDiagramMode nếu có
-    if "visualDiagramMode" in record:
-        response["visualDiagramMode"] = record["visualDiagramMode"]
-    return response
-
-
 # === Dựng toàn bộ LangGraph pipeline qua wiring tập trung (T4) ===
 from app.wiring import build_graphs as _build_graphs
-from app.clients.mindmap_factory import get_mindmap_runner as _get_mindmap_runner
+from app.clients.mindmap_factory import get_mindmap_pipeline as _get_mindmap_pipeline
+
+# Migrate legacy mindmaps.json → sqlite một lần khi startup (best-effort, idempotent).
+try:
+    mindmap_store.migrate_from_json(MINDMAPS_PATH)
+except Exception:
+    pass
 
 _graphs = _build_graphs(
     data_dir=DATA_DIR,
@@ -701,8 +608,9 @@ _graphs = _build_graphs(
     summarize_results=summarize_results,
     query_with_memory_tree=query_with_memory_tree,
     get_session_history=_get_session_history_safe,
-    run_mindmap_generation=_get_mindmap_runner(),
-    append_mindmap=_append_mindmap,
+    collect_mindmap_input=collect_mindmap_input,
+    mindmap_pipeline=_get_mindmap_pipeline(),
+    persist_mindmap=mindmap_store.save_record,
 )
 INGEST_GRAPH = _graphs.ingest
 QUERY_GRAPH = _graphs.query
@@ -1757,6 +1665,11 @@ def delete_source():
         except Exception as e:
             print("registry cleanup failed:", e)
 
+        try:
+            mindmap_store.delete_by_source(target_stem)
+        except Exception as e:
+            print("mindmap store cleanup failed:", e)
+
         return jsonify({'message': 'Deleted', 'removed': removed_total})
 
     except Exception as e:
@@ -1764,222 +1677,120 @@ def delete_source():
         return jsonify({'error': str(e)}), 500
 
 
-def run_mindmap_job(job_id: str, source_names: list[str], generation_mode: str, strategy_requested: str = "auto") -> None:
-    """Background: sinh mindmap + lưu file; cập nhật mindmap_jobs thread-safe."""
-    attach_mindmap_job_context(job_id)
-    try:
-        with mindmap_jobs_lock:
-            if job_id in mindmap_jobs:
-                mindmap_jobs[job_id]["status"] = "running"
-                mindmap_jobs[job_id]["progress"] = max(int(mindmap_jobs[job_id].get("progress") or 0), 5)
-                mindmap_jobs[job_id]["current_node"] = f"Chế độ: {generation_mode}"
+def _mindmap_input_and_hash(source_names: list[str]) -> tuple[dict, str]:
+    mm = collect_mindmap_input(INDEX_META_JSON_PATH, source_names)
+    h = mindmap_schema.content_hash(mm.get("sources") or [],
+                                    [c["text"] for c in mm.get("chunks") or []])
+    return mm, h
 
+
+def _start_mindmap_job(source_names: list[str], mm_input: dict, content_hash: str) -> str:
+    job_id = str(uuid.uuid4())
+    from app.domains.jobs.jobs_store import create_job
+    create_job(job_id, job_type="mindmap", status="pending", progress=0, current_node="Queued")
+    threading.Thread(target=run_mindmap_job,
+                     args=(job_id, source_names, mm_input, content_hash), daemon=True).start()
+    return job_id
+
+
+def run_mindmap_job(job_id: str, source_names: list[str], mm_input: dict, content_hash: str) -> None:
+    try:
         if MINDMAP_GRAPH is None:
             raise RuntimeError("MINDMAP_GRAPH chưa khởi tạo — kiểm tra logs khởi động.")
-
-        init_state = {
-            "job_id": job_id,
-            "source_names": source_names,
-            "strategy": strategy_requested,            # giữ field cũ = strategy yêu cầu
-            "generation_mode": generation_mode,        # mode THỰC (trước đây bị bỏ → luôn balanced)
-            "strategy_requested": strategy_requested,  # generate_node đọc field này
-            "result": {},
-            "progress": 0,
-            "current_node": f"Chế độ: {generation_mode}",
-            "error": None,
-        }
-        out = _langgraph_invoke(MINDMAP_GRAPH, init_state, thread_id=job_id)
-        record = out.get("result") or {}
-
-        with mindmap_jobs_lock:
-            if job_id in mindmap_jobs:
-                mindmap_jobs[job_id]["status"] = "done"
-                mindmap_jobs[job_id]["progress"] = 100
-                mindmap_jobs[job_id]["result"] = _mindmap_response(record)
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        with mindmap_jobs_lock:
-            if job_id in mindmap_jobs:
-                mindmap_jobs[job_id]["status"] = "error"
-                mindmap_jobs[job_id]["error"] = str(exc)
-        print(f"[MINDMAP_JOB] job_id={job_id} failed: {exc}")
-    finally:
-        attach_mindmap_job_context(None)
+        _langgraph_invoke(MINDMAP_GRAPH, {
+            "job_id": job_id, "source_names": source_names, "mm_input": mm_input,
+            "content_hash": content_hash, "progress": 0, "current_node": "", "error": None,
+        }, thread_id=job_id)
+    except Exception as e:
+        from app.domains.jobs.jobs_store import update_job
+        update_job(job_id, status="error", error_text=str(e))
 
 
 # -------------------------
 @app.post("/generate-mindmap")
 def generate_mindmap():
-    _cleanup_old_mindmap_jobs()
+    data = request.json or {}
+    raw_sources = data.get("sources") or []
+    if not isinstance(raw_sources, list):
+        return jsonify({"error": "Sources phải là list"}), 400
+
+    source_names: list[str] = []
+    for item in raw_sources:
+        candidate = None
+        if isinstance(item, str):
+            candidate = item.strip()
+        elif isinstance(item, dict):
+            for key in ("video", "name", "id", "source", "title"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    candidate = value.strip()
+                    break
+        if candidate:
+            if candidate not in source_names:
+                source_names.append(candidate)
+
+    if not source_names:
+        return jsonify({"error": "No sources selected"}), 400
+
+    force = bool(data.get("force"))
     try:
-        data = request.json or {}
-        raw_sources = data.get("sources") or []
-        if not isinstance(raw_sources, list):
-            return jsonify({"error": "Sources phải là list"}), 400
-
-        source_names: list[str] = []
-        for item in raw_sources:
-            candidate = None
-            if isinstance(item, str):
-                candidate = item.strip()
-            elif isinstance(item, dict):
-                for key in ("video", "name", "id", "source", "title"):
-                    value = item.get(key)
-                    if isinstance(value, str) and value.strip():
-                        candidate = value.strip()
-                        break
-            if candidate:
-                if candidate not in source_names:
-                    source_names.append(candidate)
-
-        if not source_names:
-            return jsonify({"error": "No sources selected"}), 400
-
-        # ========== PHASE 1: Parse mode and strategy SEPARATELY ==========
-        # Parse generation_mode: fast | balanced | quality
-        raw_mode = (data.get("mode") or data.get("generation_mode") or "").strip().lower()
-        if raw_mode and raw_mode in VALID_MODES:
-            generation_mode = raw_mode
-        else:
-            generation_mode = os.getenv("MINDMAP_GENERATION_MODE", "balanced")
-            if generation_mode not in VALID_MODES:
-                generation_mode = "balanced"
-
-        # Parse strategy_requested: auto | single_call_schema | mindmap_v2 | ...
-        raw_strategy = (data.get("strategy") or data.get("method") or "auto").strip().lower()
-        if raw_strategy in VALID_STRATEGIES:
-            strategy_requested = raw_strategy
-        else:
-            strategy_requested = "auto"
-
-        # ========== PHASE 2: Guard iterative ==========
-        # Block iterative for non-quality modes
-        if strategy_requested == "iterative" and generation_mode != "quality":
-            print(f"[MindMap Guard] iterative requested with mode={generation_mode}, downgrading to auto")
-            strategy_requested = "auto"
-
-        if generation_mode in {"fast", "balanced"} and strategy_requested in {"cmgn", "iterative"}:
-            print(f"[MindMap Guard] strategy={strategy_requested} is too slow for mode={generation_mode}, downgrading to auto")
-            strategy_requested = "auto"
-
-        # ========== PHASE 3: Log request ==========
-        job_timeout = get_job_timeout_for_mode(generation_mode)
-        llm_timeout = get_llm_timeout_for_mode(generation_mode)
-        print("[MindMap Request]", {
-            "mode": generation_mode,
-            "strategy_requested": strategy_requested,
-            "jobTimeout": job_timeout,
-            "llmTimeoutPerCall": llm_timeout,
-            "sources_count": len(source_names),
-        })
-
-        job_id = str(uuid.uuid4())
-        try:
-            from app.domains.jobs.jobs_store import create_job as _js_create
-            _js_create(job_id, job_type="mindmap", status="pending", progress=0, current_node="Queued")
-        except Exception:
-            pass
-        with mindmap_jobs_lock:
-            mindmap_jobs[job_id] = {
-                "status": "pending",
-                "progress": 0,
-                "result": None,
-                "error": None,
-                "created_at": time.time(),
-            }
-
-        thread = threading.Thread(
-            target=run_mindmap_job,
-            args=(job_id, source_names, generation_mode, strategy_requested),
-            daemon=True,
-        )
-        thread.start()
-
-        return jsonify({
-            "job_id": job_id,
-            "status": "started",
-            "generation_mode": generation_mode,
-            "strategy_requested": strategy_requested,  # sau guard (FE biết strategy thực sẽ chạy)
-            "jobTimeout": job_timeout,                  # FE dùng để set timeout polling đúng mode
-            "llmTimeout": llm_timeout,
-        }), 202
-
+        mm_input, content_hash = _mindmap_input_and_hash(source_names)
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Không đọc được dữ liệu nguồn: {e}"}), 500
+    if not mm_input.get("chunks"):
+        return jsonify({"error": "Nguồn chưa có dữ liệu đã index"}), 400
+    if not force:
+        cached = mindmap_store.get_by_hash(content_hash)
+        if cached:
+            return jsonify({"status": "done", "result": cached, "cached": True}), 200
+    job_id = _start_mindmap_job(source_names, mm_input, content_hash)
+    return jsonify({"job_id": job_id, "status": "started"}), 202
 
 
 @app.get("/mindmap-status/<job_id>")
 def mindmap_status(job_id: str):
-    _cleanup_old_mindmap_jobs()
-    # Uu tien SQLite jobs store neu bat
-    if (os.getenv("USE_SQLITE_JOBS", "1") or "").strip() not in ("0", "false", "False"):
-        try:
-            from app.domains.jobs.jobs_store import get_job as _js_get
-            j = _js_get(job_id)
-            if j and j.get("job_type") in ("mindmap", None):
-                # HARD TIMEOUT: Neu job running qua jobTimeout + 10s, mark timeout
-                if j.get("status") == "running":
-                    started = j.get("started_at", 0)
-                    timeout = j.get("jobTimeout", 180)
-                    if started > 0:
-                        elapsed = time_module.time() - started
-                        if elapsed > timeout + 10:
-                            # Mark as timeout
-                            j["status"] = "timeout"
-                            j["progress"] = 100
-                            j["error"] = f"Mindmap job exceeded timeout: {elapsed:.1f}s > {timeout}s"
-                            try:
-                                from app.domains.jobs.jobs_store import update_job as _js_update
-                                _js_update(job_id, j)
-                            except Exception:
-                                pass
-                return jsonify({
-                    "status": j.get("status"),
-                    "progress": j.get("progress", 0),
-                    "result": j.get("result"),
-                    "error": j.get("error"),
-                }), 200
-        except Exception:
-            pass
-    with mindmap_jobs_lock:
-        job = mindmap_jobs.get(job_id)
-        if not job:
-            return jsonify({"error": "Job not found"}), 404
-        # HARD TIMEOUT: Neu job running qua jobTimeout + 10s, mark timeout
-        if job.get("status") == "running":
-            started = job.get("started_at", 0)
-            timeout = job.get("jobTimeout", 180)
-            if started > 0:
-                elapsed = time_module.time() - started
-                if elapsed > timeout + 10:
-                    job["status"] = "timeout"
-                    job["progress"] = 100
-                    job["error"] = f"Mindmap job exceeded timeout: {elapsed:.1f}s > {timeout}s"
-                    print(f"[MindMap Status] Job {job_id} marked timeout: {elapsed:.1f}s > {timeout}s")
-        return jsonify({
-            "status": job.get("status"),
-            "progress": job.get("progress", 0),
-            "result": job.get("result"),
-            "error": job.get("error"),
-        }), 200
+    from app.domains.jobs.jobs_store import get_job as _js_get
+    j = _js_get(job_id)
+    if not j or j.get("job_type") not in ("mindmap", None):
+        return jsonify({"error": "Job not found"}), 404
+    result = j.get("result")
+    payload: Dict[str, Any] = {
+        "status": j.get("status"),
+        "progress": j.get("progress", 0),
+        "result": result,
+        "error": j.get("error"),
+    }
+    # Passthrough preview khi đang chạy (Skeleton node ghi result={"partial": {...}}).
+    if j.get("status") == "running" and isinstance(result, dict) and "partial" in result:
+        payload["partial"] = result["partial"]
+    return jsonify(payload), 200
+
+
+@app.post("/mindmap-cancel/<job_id>")
+def mindmap_cancel(job_id: str):
+    from app.domains.jobs.jobs_store import request_cancel
+    request_cancel(job_id)
+    return jsonify({"ok": True}), 200
+
+
+@app.get("/chunk-text/<int:chunk_id>")
+def get_chunk_text(chunk_id: int):
+    from app.domains.vectorstore import chunk_text_store
+    text = chunk_text_store.get_text(chunk_id)
+    if text is None:
+        return jsonify({"error": "Chunk not found"}), 404
+    return jsonify({"chunk_id": chunk_id, "text": text}), 200
 
 
 @app.get('/mindmaps')
 def list_mindmaps():
-    records = _load_mindmaps()
-    return jsonify({"mindmaps": [_mindmap_response(r) for r in records]})
+    return jsonify({"mindmaps": mindmap_store.list_records()})
 
 
 @app.delete('/mindmaps/<string:mindmap_id>')
 def delete_mindmap(mindmap_id: str):
-    records = _load_mindmaps()
-    new_records = [r for r in records if r.get("id") != mindmap_id]
-    if len(new_records) == len(records):
+    if not mindmap_store.delete_record(mindmap_id):
         return jsonify({"error": "Mind map not found"}), 404
-    _save_mindmaps(new_records)
     return jsonify({"message": "Deleted"})
 
 
@@ -2278,7 +2089,13 @@ def delete_source_v2(source_id: str):
         
         # 5️⃣ DELETE REGISTRY
         registry_deleted = _delete_registry_entry(source_id)
-        
+
+        # 6️⃣ DELETE MINDMAPS liên quan tới source (best-effort)
+        try:
+            mindmap_store.delete_by_source(source_stem)
+        except Exception as e:
+            print("mindmap store cleanup failed:", e)
+
         # Nếu mọi thứ OK -> cleanup backup
         for orig, bak in backups:
             try:

@@ -134,6 +134,38 @@
 - **Cách xử lý:** pin `pydantic>=2.7.4,<2.11` (dùng 2.10.6, không có typing_inspection).
 - **Verify:** build graph thật (không mock) với cả 3 cờ CRAG/Supervisor/HITL bật phải compile được.
 
+## Global python site-packages trôi khỏi requirements.txt pin (langchain/langgraph/pydantic)
+
+- **Triệu chứng:** `pytest tests/` báo lỗi collection ở các file dùng `ensemble_retriever`
+  (`test_crag_graph.py`, `test_hitl_graph.py`, `test_nli_graph.py`, `test_rerank_graph.py`,
+  `test_supervisor_graph.py`, và trực tiếp `python -c "import app.graphs.query_graph"`):
+  `ModuleNotFoundError: No module named 'langchain_core.pydantic_v1'`.
+- **Nguyên nhân:** Global Python (dùng chung cho nhiều project trên máy dev — thấy cả
+  `day08-langgraph-agent-lab` trong `pip list`) đã bị một lần `pip install` KHÔNG pin cài đè
+  lên site-packages: `langchain==0.2.17` + `langchain-core==1.4.8` (lệch pha nặng — 0.2.x code
+  gọi API chỉ có ở core cũ `pydantic_v1` shim, core 1.4.8 đã bỏ) + `langgraph==1.0.1` +
+  `pydantic==2.13.4`, đều NGOÀI pin của `requirements.txt`
+  (`langchain>=0.3.27,<0.4`, `langgraph>=0.2.57,<0.3`, ngụ ý pydantic<2.11 qua known-issue khác).
+  Đã verify bằng `git stash` — lỗi tồn tại TRƯỚC bất kỳ thay đổi nào trong task hiện tại → môi
+  trường trôi độc lập với code.
+- **Quan sát phụ:** dù `langgraph` đã lên 1.0.1 (khác pin 0.2.x) và `pydantic` lên 2.13.4 (khác
+  pin <2.11), `StateGraph(MindmapState)` với nhiều field `NotRequired[...]` VẪN build và chạy
+  được (xem `tests/test_mindmap_graph.py`) — có thể lỗi `PydanticForbiddenQualifier` cũ (xem
+  known-issue "pydantic 2.11+ làm vỡ StateGraph") đã được vá ở nhánh mới hơn của
+  langchain_core/langgraph. KHÔNG coi đây là "đã an toàn để nâng pin" — chỉ là quan sát, chưa
+  test đủ rộng (rerank/NLI/ensemble vẫn vỡ vì lý do khác — thiếu `pydantic_v1` shim ở core mới).
+- **Cách xử lý:** CHƯA sửa (ngoài phạm vi task mindmap) — sửa bằng cách nào cũng đụng vào global
+  site-packages dùng chung, rủi ro phá project khác trên máy. Test suite chạy OK khi loại 5 file
+  trên: `pytest tests/ --ignore=tests/test_crag_graph.py --ignore=tests/test_hitl_graph.py
+  --ignore=tests/test_nli_graph.py --ignore=tests/test_rerank_graph.py
+  --ignore=tests/test_supervisor_graph.py`.
+- **Prevention:** Trước khi bắt đầu 1 session dài, `pip show langchain langchain-core langgraph
+  pydantic` đối chiếu `requirements.txt`; nếu lệch, cân nhắc venv riêng cho repo này thay vì
+  global python (đánh đổi với lesson "dùng global python" cũ — lesson đó giả định global site-
+  packages KHỚP pin; giờ không còn đúng). Nếu phải sửa global site-packages: `pip install -r
+  BE/requirements.txt` rồi chạy lại toàn bộ suite của MỌI project dùng chung global python đó,
+  không chỉ repo này.
+
 ## chunks.sqlite bị mất hoặc hỏng dữ liệu
 
 - **Triệu chứng:** Không thể thực hiện tìm kiếm lexical (BM25 trả kết quả kém) hoặc tìm kiếm/tóm tắt thất bại khi đọc text của chunk, mặc dù các vector search qua FAISS vẫn trả về các ID tương ứng.

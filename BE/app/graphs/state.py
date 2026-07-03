@@ -71,11 +71,18 @@ class QueryState(TypedDict):
 class MindmapState(TypedDict):
     job_id: str
     source_names: list
-    strategy: str
-    generation_mode: str       # fast | balanced | quality (trước đây bị bỏ qua → luôn balanced)
-    strategy_requested: str    # strategy yêu cầu (sau guard); generate_node đọc field này
-    result: dict
+    mm_input: NotRequired[dict]
+    content_hash: NotRequired[str]
+    skeleton: NotRequired[list]
+    skeleton_method: NotRequired[str]
+    nodes: NotRequired[list]
+    relations: NotRequired[list]
+    degraded_missing: NotRequired[list]
+    result: NotRequired[dict]
+    cancelled: NotRequired[bool]
     progress: int
     current_node: str
     error: Optional[str]
+    # LangGraph chỉ giữ field có trong TypedDict — _t0 dùng để tính elapsed_sec ở AssemblePersist.
+    _t0: NotRequired[float]
 

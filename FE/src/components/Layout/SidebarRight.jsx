@@ -181,13 +181,15 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
 
   useEffect(() => () => stopPolling("unmount"), [stopPolling]);
 
-  // ── Handlers (logic unchanged) ────────────────────
-  const handleGenerateMindMap = async () => {
-    if (!selectedSources?.length) { alert("Vui lòng chọn ít nhất một tài liệu để tạo Sơ đồ!"); return; }
+  // ── Handlers (logic unchanged for the plain-generate path) ─
+  // Shared by "Tạo sơ đồ" (force=false, uses BE content-hash cache) and the
+  // mindmap viewer's degraded-banner "Tạo lại" (force=true, bypasses cache).
+  const runMindmapGeneration = async (sourceList, { force = false } = {}) => {
+    if (!sourceList?.length) { alert("Vui lòng chọn ít nhất một tài liệu để tạo Sơ đồ!"); return; }
     setLoading(true);
     setMindmapJobHint({ progress: null, current_node: null });
     try {
-      const res = await apiFetch(`/generate-mindmap`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources: selectedSources, q: "tóm tắt tài liệu" }) });
+      const res = await apiFetch(`/generate-mindmap`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources: sourceList, q: "tóm tắt tài liệu", force }) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const startData = await res.json();
       if (startData.error) throw new Error(startData.error);
@@ -208,12 +210,16 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
         alert("Không tạo được sơ đồ từ tài liệu đã chọn (nội dung quá ngắn hoặc không trích được ý chính). Thử chọn tài liệu khác.");
         return;
       }
+      // Spread `data` first so v2 fields (schema_version/relations/generator) that
+      // the mindmap viewer needs for relations + the degraded banner survive —
+      // the explicit keys below only backfill defaults, they don't drop anything.
       const record = {
+        ...data,
         id: data.id || Date.now().toString(),
         title: data.title || "Sơ đồ tư duy",
         nodes: Array.isArray(data.nodes) ? data.nodes : [],
         diagram: data.diagram || null,
-        sources: Array.isArray(data.sources) ? data.sources : selectedSources,
+        sources: Array.isArray(data.sources) ? data.sources : sourceList,
         createdAt: data.createdAt || new Date().toISOString(),
         strategy: data.strategy || "iterative",
         initialLayoutType: "napkin",
@@ -231,6 +237,16 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
       setMindmapJobHint({ progress: null, current_node: null });
       stopPolling("done");
     }
+  };
+
+  const handleGenerateMindMap = () => runMindmapGeneration(selectedSources, { force: false });
+
+  // Degraded-banner "Tạo lại": regenerate the map that's currently open, using
+  // the sources it was built from (falls back to the sidebar selection if the
+  // record doesn't carry its own).
+  const handleRegenerateMindMap = () => {
+    const sources = showModalMap?.sources?.length ? showModalMap.sources : selectedSources;
+    return runMindmapGeneration(sources, { force: true });
   };
 
   const handleCancelMindMap = () => {
@@ -439,7 +455,15 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
       </div>
 
       {/* ── MODALS ── */}
-      {showModalMap && <MindMapModal data={showModalMap} initialLayoutType={showModalMap.initialLayoutType || "napkin"} onClose={() => setShowModalMap(null)} />}
+      {showModalMap && (
+        <MindMapModal
+          data={showModalMap}
+          initialLayoutType={showModalMap.initialLayoutType || "napkin"}
+          onClose={() => setShowModalMap(null)}
+          onRegenerate={handleRegenerateMindMap}
+          regenerating={loading}
+        />
+      )}
       {showSummaryModal && (
         <SummaryModal data={showSummaryModal} onClose={() => setShowSummaryModal(null)} onSave={handleSaveSummary} />
       )}

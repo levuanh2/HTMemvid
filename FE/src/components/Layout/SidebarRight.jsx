@@ -79,7 +79,6 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   // ── Mindmap job refs ───────────────────────────────
   const pollerRef = useRef(null); // fresh createMindmapPoller() instance per run
   const currentMindmapJobIdRef = useRef(null);
-  const resumeGuardRef = useRef(false); // StrictMode double-invoke guard for the resume effect
   // Fix Round 1 (Fix 3): guards the "Đã huỷ tạo sơ đồ" notice so it fires exactly
   // once per generation regardless of which path notices the cancel first — the
   // optimistic click path (handleCancelMindMap, fires immediately) or the
@@ -219,10 +218,11 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
 
   // Resume-after-reload (Task 4 point 6): on mount, pick up a job that was
   // still running when the page unloaded and re-attach a poller so the chip
-  // reappears — guarded against React StrictMode's dev double-invoke.
+  // reappears. No StrictMode guard on purpose: the cleanup effect below stops
+  // the poller between StrictMode's dev double-invoke passes, and a run-once
+  // ref would block pass 2 from starting a replacement (chip stuck forever).
+  // Re-running is safe — startMindmapPoller stops the previous instance first.
   useEffect(() => {
-    if (resumeGuardRef.current) return;
-    resumeGuardRef.current = true;
     const active = loadActiveMindmapJob();
     if (active?.jobId) {
       startMindmapPoller(active.jobId, active.sources, { resumed: true, isRegenerate: false });

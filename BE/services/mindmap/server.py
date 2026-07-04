@@ -3,11 +3,15 @@
 from concurrent import futures
 import json
 import os
+import queue
+import threading
 
 import grpc
 
 from app.clients.mindmap_factory import LocalMindmapPipeline
 from shared.proto.gen import mindmap_pb2, mindmap_pb2_grpc
+
+_SENTINEL = object()
 
 
 class MindmapPipelineService(mindmap_pb2_grpc.MindmapPipelineServicer):
@@ -23,34 +27,58 @@ class MindmapPipelineService(mindmap_pb2_grpc.MindmapPipelineServicer):
         )
 
     def EnrichBranches(self, request, context):
+        """Stream progress AS IT HAPPENS: enrich() runs on a worker thread, progress_cb
+        puts events on a queue, this generator yields from the queue until the worker
+        finishes, then yields the final event. (Previously buffered everything into a
+        list during the synchronous call and yielded it all at once afterwards —
+        defeated `stream EnrichEvent`.)"""
         mm_input = json.loads(request.mm_input_json or "{}")
         skeleton_nodes = json.loads(request.skeleton_json or "[]")
-        events: list[mindmap_pb2.EnrichEvent] = []
+        events: "queue.Queue" = queue.Queue()
+        result_box: dict = {}
 
         def progress_cb(progress: int, message: str) -> None:
-            if context.is_active():
-                events.append(
-                    mindmap_pb2.EnrichEvent(
-                        progress=int(progress),
-                        message=message or "",
-                        final=False,
-                    )
+            events.put(
+                mindmap_pb2.EnrichEvent(
+                    progress=int(progress),
+                    message=message or "",
+                    final=False,
                 )
+            )
 
         def cancel_cb() -> bool:
             return not context.is_active()
 
-        nodes, degraded = self._pipeline.enrich(
-            mm_input,
-            skeleton_nodes,
-            progress_cb=progress_cb,
-            cancel_cb=cancel_cb,
-        )
-        for event in events:
-            yield event
+        def _run() -> None:
+            try:
+                nodes, degraded = self._pipeline.enrich(
+                    mm_input,
+                    skeleton_nodes,
+                    progress_cb=progress_cb,
+                    cancel_cb=cancel_cb,
+                )
+                result_box["nodes"] = nodes
+                result_box["degraded"] = degraded
+            except Exception as exc:  # pragma: no cover - defensive
+                result_box["error"] = exc
+            finally:
+                events.put(_SENTINEL)
+
+        worker = threading.Thread(target=_run, daemon=True)
+        worker.start()
+
+        while True:
+            item = events.get()
+            if item is _SENTINEL:
+                break
+            yield item
+
+        worker.join()
+        if "error" in result_box:
+            raise result_box["error"]
         yield mindmap_pb2.EnrichEvent(
-            nodes_json=json.dumps(nodes, ensure_ascii=False),
-            degraded=bool(degraded),
+            nodes_json=json.dumps(result_box["nodes"], ensure_ascii=False),
+            degraded=bool(result_box["degraded"]),
             final=True,
         )
 

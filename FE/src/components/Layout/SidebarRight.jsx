@@ -75,6 +75,16 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   const pollingGenerationRef = useRef(0);
   const cancelMindmapRef = useRef(null);
   const currentMindmapJobIdRef = useRef(null);
+  // Fix Round 1 (Fix 3): guards the "Đã huỷ tạo sơ đồ" notice so it fires exactly
+  // once per generation regardless of which path notices the cancel first — the
+  // optimistic click path (handleCancelMindMap, fires immediately) or the
+  // authoritative status-driven path (poll tick observing status "cancelled").
+  const cancelNoticeShownRef = useRef(false);
+  const showCancelNotice = useCallback(() => {
+    if (cancelNoticeShownRef.current) return;
+    cancelNoticeShownRef.current = true;
+    setMindmapCancelNotice(true);
+  }, []);
 
   // ── Fetchers (logic unchanged) ────────────────────
   const fetchMindMaps = useCallback(async () => {
@@ -116,7 +126,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   }, []);
 
   const startPolling = useCallback((jobId, opts = {}) => {
-    const { onDone, onError, onTick, jobTimeoutMs = 180 * 1000, maxExtraMs = 10 * 1000 } = opts;
+    const { onDone, onError, onTick, onCancelled, jobTimeoutMs = 180 * 1000, maxExtraMs = 10 * 1000 } = opts;
 
     if (pollingJobIdRef.current === jobId) {
       console.log(`[MindMap Poll] job_id=${jobId} already polling, skip duplicate start`);
@@ -164,6 +174,15 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
           if (typeof onError === "function") onError(new Error(data.error || "Lỗi khi tạo Sơ đồ."));
           return;
         }
+        if (data.status === "cancelled") {
+          // Terminal status the BE can report on its own (cooperative-abort
+          // finishing, or a job cancelled outside this click — e.g. reopened
+          // from another tab). Previously unhandled: fell through with no
+          // matching branch and just kept polling until the FE timeout.
+          stopPolling("cancelled");
+          if (typeof onCancelled === "function") onCancelled();
+          return;
+        }
       } catch (err) {
         if (pollingGenerationRef.current !== generation) return;
         if (pollingJobIdRef.current !== jobId) return;
@@ -193,6 +212,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     if (!sourceList?.length) { alert("Vui lòng chọn ít nhất một tài liệu để tạo Sơ đồ!"); return; }
     setLoading(true);
     setMindmapCancelNotice(false);
+    cancelNoticeShownRef.current = false;
     setMindmapJobHint({ progress: null, current_node: null });
     try {
       const startData = await generateMindmap(sourceList, { force });
@@ -229,6 +249,12 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
             },
             onDone: (result) => resolve(result),
             onError: (err) => reject(err),
+            // Status-driven, authoritative: the BE itself reports the job as
+            // cancelled (as opposed to the optimistic FE-side stop below in
+            // handleCancelMindMap). Same rejection sentinel so the catch block
+            // below treats both the same way; showCancelNotice() is a no-op if
+            // the click path already showed the notice first.
+            onCancelled: () => { showCancelNotice(); reject(new Error("__cancelled__")); },
           });
         });
       }
@@ -294,7 +320,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     // on screen — just drops the generating banner (mindmapGenerating below).
     setShowModalMap((prev) => (prev?.id === "preview" ? null : prev));
     setMindmapGenerating(false);
-    setMindmapCancelNotice(true);
+    showCancelNotice();
   };
 
   // "Hỏi về đoạn này" (EvidenceDrawer) → close the mindmap overlay so the chat

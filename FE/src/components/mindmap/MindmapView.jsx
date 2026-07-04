@@ -164,7 +164,9 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
   // shell (MindMapModal.jsx) forwards `data` verbatim already, so this avoids
   // widening that shell's prop surface just to plumb four extra callbacks through.
   const generating = Boolean(data?.generating);
-  const genProgress = Number.isFinite(Number(data?.progress)) ? Number(data.progress) : null;
+  const genProgress = data?.progress == null
+    ? null
+    : (Number.isFinite(Number(data.progress)) ? Number(data.progress) : null);
   const onCancel = typeof data?.onCancel === "function" ? data.onCancel : null;
   const onAskAbout = typeof data?.onAskAbout === "function" ? data.onAskAbout : null;
   const [selectedNodeId, setSelectedNodeId] = useState(null);
@@ -281,6 +283,12 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
   }, []);
 
   const handlePaneClick = useCallback(() => { setSelectedNodeId(null); }, []);
+
+  // Stable identity across renders (canvas hover/poll ticks) so EvidenceDrawer's
+  // Escape-listener effect (deps [onClose]) doesn't re-subscribe every render —
+  // and, more importantly, so it stays a reliable "did anything actually change"
+  // signal for the drawer's other effects (see EvidenceDrawer.jsx Fix 1).
+  const handleDrawerClose = useCallback(() => setSelectedNodeId(null), []);
 
   const selectedDrawerNode = useMemo(
     () => (selectedNodeId ? allNodes.find((n) => n.id === selectedNodeId) || null : null),
@@ -624,7 +632,7 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
         )}
         <EvidenceDrawer
           node={selectedDrawerNode}
-          onClose={() => setSelectedNodeId(null)}
+          onClose={handleDrawerClose}
           generating={generating}
           onAskAbout={onAskAbout}
         />

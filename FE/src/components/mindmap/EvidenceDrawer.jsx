@@ -2,10 +2,12 @@
 // Task 16: click a node, see the note + the actual chunk text(s) it was built
 // from ("lề bằng chứng" pattern, mirrored from SidebarRight's citation margin).
 //
-// Fetched chunk text is cached in a MODULE-level Map (not component state) so
-// re-clicking a node — or opening a different node that shares a chunk ref —
-// never re-fetches. This cache is intentionally never invalidated within a
-// session: chunk text is immutable once ingested.
+// Fetched chunk text is cached in a COMPONENT-scoped ref (`cacheRef`, Fix Round 1)
+// so re-clicking a node — or opening a different node that shares a chunk ref —
+// never re-fetches within the drawer's lifetime, while still bounding staleness:
+// the cache is dropped whenever the drawer instance itself is torn down (e.g. the
+// mindmap overlay closes/reopens), which matters once chunk ids get reused across
+// a re-ingest.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../ui/Icon";
 import Spinner from "../ui/Spinner";
@@ -19,62 +21,87 @@ const cutSnippet = (text) => {
   return { snippet: s.slice(0, SNIPPET_MAX), truncated: true };
 };
 
-// Module-level — shared by every drawer instance for the lifetime of the tab.
-const chunkTextCache = new Map();
-
 export default function EvidenceDrawer({ node, onClose, generating, onAskAbout }) {
   const [entries, setEntries] = useState([]); // [{ chunkId, snippet, truncated, loading, error }]
   const panelRef = useRef(null);
   const closeBtnRef = useRef(null);
+  const cacheRef = useRef(new Map());
+  // Always holds the latest `node` — read at Escape-keydown time so the listener
+  // effect below doesn't need `node` in its own deps (see that effect's comment).
+  const nodeRef = useRef(node);
+  nodeRef.current = node;
 
-  const chunkRefs = useMemo(
-    () => (Array.isArray(node?.chunkRefs) ? node.chunkRefs.filter((c) => c != null && c !== "") : []),
+  // Stable primitive key for the fetch effect below — `node` itself is a NEW
+  // object identity on every poll tick while a mindmap is generating (see
+  // MindmapView's `selectedDrawerNode`), even when the node's actual chunk refs
+  // haven't changed. Joining into a string gives the effect something that only
+  // changes value when the refs actually do (Fix Round 1, Fix 2).
+  const chunkKey = useMemo(
+    () => (Array.isArray(node?.chunkRefs) ? node.chunkRefs.filter((c) => c != null && c !== "").join(",") : ""),
     [node]
   );
 
-  // Fetch each chunk ref once per node, reusing the module cache across nodes.
+  // Fetch each chunk ref once per node, reusing the drawer-lifetime cache.
+  // Deps are [node?.id, chunkKey] — both primitives — so a poll tick that hands
+  // us a new `node` object with the SAME id + same chunk refs does not re-run
+  // this effect or rebuild `entries`.
   useEffect(() => {
-    if (!node) return;
+    if (node?.id == null) { setEntries([]); return; }
+    const refs = chunkKey ? chunkKey.split(",") : [];
     let cancelled = false;
 
-    if (chunkRefs.length === 0) { setEntries([]); return; }
+    if (refs.length === 0) { setEntries([]); return; }
 
-    setEntries(chunkRefs.map((chunkId) => {
-      const cached = chunkTextCache.get(String(chunkId));
+    setEntries(refs.map((chunkId) => {
+      const cached = cacheRef.current.get(chunkId);
       return cached !== undefined
         ? { chunkId, ...cutSnippet(cached), loading: false, error: cached == null }
         : { chunkId, snippet: "", truncated: false, loading: true, error: false };
     }));
 
-    chunkRefs.forEach(async (chunkId) => {
-      const key = String(chunkId);
-      if (chunkTextCache.has(key)) return; // already resolved (hit or miss)
+    refs.forEach(async (chunkId) => {
+      if (cacheRef.current.has(chunkId)) return; // already resolved (hit or miss)
       try {
         const text = await fetchChunkText(chunkId);
-        chunkTextCache.set(key, text); // cache misses too — chunk id won't gain text mid-session
+        cacheRef.current.set(chunkId, text); // cache misses too — chunk id won't gain text mid-session
         if (cancelled) return;
         setEntries((prev) => prev.map((e) => (
-          String(e.chunkId) === key ? { ...e, ...cutSnippet(text), loading: false, error: text == null } : e
+          e.chunkId === chunkId ? { ...e, ...cutSnippet(text), loading: false, error: text == null } : e
         )));
       } catch {
         if (cancelled) return;
         setEntries((prev) => prev.map((e) => (
-          String(e.chunkId) === key ? { ...e, loading: false, error: true } : e
+          e.chunkId === chunkId ? { ...e, loading: false, error: true } : e
         )));
       }
     });
 
     return () => { cancelled = true; };
-  }, [node, chunkRefs]);
+  }, [node?.id, chunkKey]);
 
-  // Esc + outside-click close; focus the close button on open (keyboard reachable).
+  // Focus the close button ONLY when the drawer newly opens or the selected
+  // node actually changes (deps [node?.id]) — not on every re-render a poll
+  // tick causes (Fix Round 1, Fix 1). Previously this ran on every `node`
+  // identity change (every tick), yanking keyboard focus to the close button
+  // even while the user was hovering/interacting elsewhere on the canvas.
   useEffect(() => {
-    if (!node) return;
+    if (node?.id == null) return;
     closeBtnRef.current?.focus();
-    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); onClose?.(); } };
+  }, [node?.id]);
+
+  // Esc-to-close: a SEPARATE effect from the focus one above, deps [onClose]
+  // alone. `onClose` is now a stable useCallback identity from MindmapView, so
+  // this listener is attached exactly once and never torn down/rebuilt purely
+  // because a poll tick re-rendered the parent. Whether the drawer is actually
+  // open is checked at KEYDOWN time via `nodeRef` (always the latest `node`),
+  // not baked into the effect's dependencies or setup/teardown timing.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape" && nodeRef.current) { e.stopPropagation(); onClose?.(); }
+    };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [node, onClose]);
+  }, [onClose]);
 
   if (!node) return null;
 

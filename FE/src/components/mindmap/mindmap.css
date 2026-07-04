@@ -1,0 +1,16 @@
+/* Ẩn layer arrows khi tắt toggle "Quan hệ".
+   Verified against node_modules/mind-elixir/dist/MindElixir.js: mỗi arrow render
+   thành 2 phần DOM riêng — <g id="a-<arrowId>"> (path trong arrowSvg) VÀ
+   <div class="svg-label" data-type="arrow" data-svg-id="a-<arrowId>"> (label text,
+   append vào labelContainer riêng, KHÔNG nằm trong g đó). Phải ẩn cả hai, nếu không
+   nhãn quan hệ (vd "liên quan") vẫn nổi trơ trọi khi tắt toggle. */
+.me-hide-arrows g[id^="a-"] { display: none; }
+.me-hide-arrows .svg-label[data-type="arrow"] { display: none; }
+
+.me-container { outline: none; }
+.me-container :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .me-container * { transition: none !important; animation: none !important; }
+  .animate-spin { animation: none !important; }
+}

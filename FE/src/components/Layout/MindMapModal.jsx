@@ -1,17 +1,11 @@
 // Mindmap modal — thin shell.
-// Task 14 split: the actual viewer (ELK layout engine, custom nodes/edges,
-// toolbar, v2 relations rendering) now lives under FE/src/components/mindmap/.
-// This file keeps its historical export surface (default export `MindMapModal`,
-// named export `LAYOUT_OPTIONS`) so SidebarRight.jsx does not need to change how
-// it imports this component.
+// Task 7 swap: viewer is now MindElixirView (mind-elixir), replacing the
+// ReactFlow/ELK view (MindmapView.jsx, kept for now — removed in Task 9).
+// This file keeps its historical export surface (default export `MindMapModal`)
+// so SidebarRight.jsx does not need to change how it imports this component.
 import { createPortal } from "react-dom";
-import { ReactFlowProvider } from "reactflow";
-import "reactflow/dist/style.css";
 import { Icon } from "../ui/Icon";
-import { LAYOUT_OPTIONS } from "../mindmap/constants";
-import MindmapView from "../mindmap/MindmapView";
-
-export { LAYOUT_OPTIONS };
+import MindElixirView from "../mindmap/MindElixirView";
 
 export default function MindMapModal({ data, onClose, initialLayoutType, onRegenerate, regenerating }) {
   if (typeof document === "undefined") return null;
@@ -33,9 +27,7 @@ export default function MindMapModal({ data, onClose, initialLayoutType, onRegen
     );
   }
   return createPortal(
-    <ReactFlowProvider>
-      <MindmapView data={data} onClose={onClose} initialLayoutType={initialLayoutType} onRegenerate={onRegenerate} regenerating={regenerating} />
-    </ReactFlowProvider>,
+    <MindElixirView data={data} onClose={onClose} onRegenerate={onRegenerate} regenerating={regenerating} />,
     document.body
   );
 }

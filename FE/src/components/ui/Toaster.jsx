@@ -37,7 +37,7 @@ export default function Toaster() {
   useEffect(() => subscribeToasts(setItems), []);
   if (typeof document === "undefined" || !items.length) return null;
   return createPortal(
-    <div className="fixed bottom-4 right-4 z-[1200] flex flex-col gap-2 max-w-xs">
+    <div className="fixed bottom-4 right-4 z-[10000] flex flex-col gap-2 max-w-xs">
       {items.map((t) => (
         <div key={t.id} role={t.type === "error" ? "alert" : "status"}
           onClick={() => dismissToast(t.id)}

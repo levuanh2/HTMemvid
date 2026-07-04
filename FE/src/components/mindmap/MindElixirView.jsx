@@ -4,6 +4,7 @@ import MindElixir from "mind-elixir";
 import { recordToMindElixir } from "../../utils/mindElixirAdapter";
 import EvidenceDrawer from "./EvidenceDrawer";
 import { Icon } from "../ui/Icon";
+import Spinner from "../ui/Spinner";
 import "./mindmap.css";
 
 // Palette nhánh: archival inks (edge hexes từ constants.js::BRANCH_COLORS)
@@ -30,6 +31,10 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
 
   const degraded = Boolean(data?.generator?.degraded);
   const missing = data?.generator?.missing || [];
+  // "Tạo lại" đang chạy nền (SidebarRight bơm generating/progress/onCancel vào
+  // data). Overlay này che luôn progress chip của sidebar → phải có banner +
+  // nút Huỷ NGAY TRONG viewer, giữ parity với MindmapView cũ.
+  const generating = Boolean(data?.generating);
 
   // (re)init khi đổi record
   useEffect(() => {
@@ -98,14 +103,31 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
           <Icon name="X" size={16} />
         </button>
       </div>
-      {/* Degraded banner giữ từ v2 */}
+      {/* Generating banner — overlay che chip tiến độ ở sidebar nên Huỷ phải ở đây */}
+      {generating && (
+        <div className="px-3 py-1.5 text-[12px] flex items-center gap-2 border-b"
+          style={{ color: "var(--text-secondary)", borderColor: "var(--border-color)", background: "var(--bg-elevated)" }}>
+          <Spinner size={12} />
+          <span>
+            Đang tạo lại sơ đồ…{typeof data?.progress === "number" ? ` (${data.progress}%)` : ""}
+          </span>
+          {typeof data?.onCancel === "function" && (
+            <button onClick={data.onCancel} className="underline" style={{ color: "var(--accent)" }}>
+              Huỷ
+            </button>
+          )}
+        </div>
+      )}
+      {/* Degraded banner giữ từ v2 — ẩn nút Tạo lại khi đang generate (tránh double-trigger) */}
       {degraded && (
         <div className="px-3 py-1.5 text-[12px] flex items-center gap-2 border-b"
           style={{ color: "var(--warn)", borderColor: "var(--border-color)", background: "var(--bg-elevated)" }}>
           <span>Bản đồ chưa đầy đủ{missing.length ? ` (thiếu: ${missing.join(", ")})` : ""}.</span>
-          <button onClick={onRegenerate} disabled={regenerating} className="underline">
-            {regenerating ? "Đang tạo lại…" : "Tạo lại"}
-          </button>
+          {!generating && (
+            <button onClick={onRegenerate} disabled={regenerating} className="underline">
+              {regenerating ? "Đang tạo lại…" : "Tạo lại"}
+            </button>
+          )}
         </div>
       )}
       {/* Map */}
@@ -113,7 +135,7 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
       {/* Evidence drawer giữ nguyên component */}
       {selected && (
         <EvidenceDrawer node={selected} onClose={() => setSelected(null)}
-          generating={Boolean(data?.generating)} onAskAbout={data?.onAskAbout} />
+          generating={generating} onAskAbout={data?.onAskAbout} />
       )}
     </div>
   );

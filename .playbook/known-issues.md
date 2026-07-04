@@ -178,6 +178,13 @@
 
 ## (Chưa sửa) `/generate-mindmap` cache-hit không có `job_id` → FE ném lỗi "Server không trả job_id"
 
+> **Rà lại 2026-07-04 (sau rewrite skeleton-first):** vấn đề VẪN CÒN nguyên trong pipeline mới.
+> Cache giờ là thật (`mindmap_store.get_by_hash(content_hash)` trong
+> `app/domains/mindmap/store.py`, xem `docs/MINDMAP_WORKFLOW.md`), nhưng nhánh trả về khi cache hit
+> ở `BE/app/main.py::generate_mindmap` không đổi: vẫn trả thẳng
+> `{"status":"done","result":cached,"cached":true}` KHÔNG có `job_id`. Chưa sửa — vẫn ngoài phạm vi
+> các task đã làm tới nay.
+
 - **Triệu chứng:** Bấm "Tạo sơ đồ" (KHÔNG force) cho nguồn đã có mindmap cache theo `content_hash`
   → thay vì hiện lại map cũ ngay, FE alert lỗi "Không tạo được sơ đồ: Server không trả job_id."
 - **Nguyên nhân:** `POST /generate-mindmap` khi cache hit (`force=False` + `mindmap_store.get_by_hash`

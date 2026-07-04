@@ -70,6 +70,12 @@
 
 ## Mindmap: timeout TEMP, normalize nguồn lệch, mode bị bỏ qua
 
+> **(Lịch sử — pipeline mô tả dưới đây đã bị THAY THẾ hoàn toàn ngày 2026-07-04 bởi skeleton-first;
+> xem mục "Mindmap: skeleton-first thay pipeline 3-mode/7-strategy" phía trên. `worker.py`
+> mode/strategy/`generation_mode`/`multilevel_fast` không còn tồn tại trong code. Giữ mục này làm
+> lịch sử vì các bài học chung (đừng để giá trị debug lọt vào nhánh chính, JSON repair phải
+> string-aware, conftest mock che gap test) vẫn còn giá trị.)**
+
 - **Timeout "TEMP TESTING":** `worker.py` từng để `LLM_TIMEOUT_BALANCED=30`, `JOB_TIMEOUT_BALANCED=60`
   (comment "was 90/180") → balanced hay timeout → rơi deterministic nghèo. Đã khôi phục 90/180 và cho
   override qua env `MINDMAP_LLM_TIMEOUT_*`/`MINDMAP_JOB_TIMEOUT_*`. **Bài học:** đừng để giá trị debug
@@ -88,6 +94,10 @@
 - **Giới hạn đã biết — Huỷ mindmap (FE):** nút Huỷ chỉ dừng polling FE; job BE vẫn chạy xong và
   `append_mindmap` đã lưu map trong lúc sinh → map có thể hiện ở lần fetch sau. Huỷ thật cần
   cooperative-abort (cờ cancel + worker/TimeoutTracker kiểm) — chưa làm (codex review). Chấp nhận.
+  **[ĐÃ GIẢI QUYẾT 2026-07-04]** `POST /mindmap-cancel/<job_id>` set cờ thật trong `jobs.sqlite`
+  (`request_cancel`); mọi node của graph mới (`_guard()` trong `app/graphs/mindmap_graph.py`) và cả
+  vòng lặp theo batch trong `enrich_branches`/trước lời gọi LLM trong `extract_relations` đều kiểm
+  tra cờ này — huỷ giữa chừng dừng đúng lúc và KHÔNG persist record.
 - **FE `record` sau generate rebuild field-by-field → rớt field v2 (schema_version/relations/generator):**
   `SidebarRight.jsx::handleGenerateMindMap` (nay là `runMindmapGeneration`) dựng lại `record` từ `data`
   (kết quả job) bằng cách liệt kê từng field (`id/title/nodes/diagram/sources/createdAt/strategy/...`)
@@ -101,6 +111,45 @@
   nào của `data`). **Prevention:** khi FE "đóng gói lại" một response BE thành state cục bộ, ưu tiên
   `{ ...response, ...overrides }` thay vì liệt kê thủ công từng field — liệt kê thủ công là nợ kỹ thuật
   âm thầm mỗi khi BE thêm field mới (không lỗi build/test nào bắt được, chỉ lộ qua so sánh dữ liệu thực).
+
+## Mindmap: skeleton-first thay pipeline 3-mode/7-strategy (2026-07-04)
+
+- **Bối cảnh / root cause:** pipeline mindmap cũ ~2113 dòng: 3 mode (fast/balanced/quality) × 7
+  strategy (`single_call_schema`/`mindmap_v2`/`cmgn_light`/`cmgn`/`multilevel_fast`/`iterative`/
+  deterministic) × fallback chain × LLM call budget × một LLM-call riêng để build "visual diagram"
+  (2 artifact trùng nhau: `nodes` + `diagram` cho cùng nội dung). "Cache mechanism §5" trong tài
+  liệu cũ mô tả cache theo content hash + strategy + model NHƯNG code không hề có bước lookup —
+  progress chỉ IN ra "Đang lưu cache" rồi ghi thẳng, không đọc lại (cache ma, chưa từng tồn tại
+  trong code dù tài liệu khẳng định có). Ngoài ra: FE không có đường gửi `mode` xuống nên server
+  luôn chạy nhánh mặc định; `worker.py` tự đọc `index.json`/`chunks.sqlite` trực tiếp xuyên ranh
+  giới service (vi phạm tách monolith/service); nút Huỷ ở FE chỉ dừng polling, job BE vẫn chạy xong
+  và lưu map (huỷ giả — xem known-issues cũ).
+- **Thiết kế đã làm:** thay bằng skeleton-first — cấu trúc mục lục tài liệu (`heading_path`, fallback
+  Memory Tree section, fallback TF-IDF cluster) làm KHUNG XƯƠNG tất định (0 LLM, deterministic,
+  không bao giờ là rác) trước; LLM chỉ được gọi ở 2 chỗ hẹp: Enrich (mỗi nhánh 1 call, song song,
+  `chunk_refs` do LLM trả về bị lọc lại theo tập id hợp lệ để chặn bịa) và Relations (1 call tìm
+  quan hệ chéo, validate lại id/trùng cạnh/tự-trỏ, cap 20). Một LangGraph 5 node
+  (`app/graphs/mindmap_graph.py`: CollectInput → Skeleton → Enrich → Relations → AssemblePersist)
+  thay toàn bộ cây quyết định mode/strategy cũ — không còn rẽ nhánh theo kích thước dữ liệu. Cache
+  THẬT: `content_hash` (sha256 của `PIPELINE_VERSION` + sources + chunk text) lookup trong
+  `memory/mindmaps.sqlite` (`app/domains/mindmap/store.py::get_by_hash`) TRƯỚC khi tạo job — cache
+  hit trả thẳng record, không tốn LLM call nào. LLM lỗi ở nhánh/relations nào → giữ nguyên khung
+  xương phần đó, đánh dấu `generator.degraded=true` + `generator.missing=[...]` thay vì fallback
+  im lặng hoặc bịa dữ liệu. Cancel THẬT: cờ trong `jobs.sqlite`, mọi node (`_guard()`) và cả vòng
+  lặp batch trong enrich/relations đều kiểm tra trước khi tiếp tục — huỷ giữa chừng không persist.
+- **Prevention / regression:**
+  1. Đổi prompt hoặc logic bất kỳ node nào (skeleton/enrich/relations/schema) → PHẢI bump
+     `PIPELINE_VERSION` trong `services/mindmap/pipeline/schema.py` để tự vô hiệu cache cũ (nếu
+     không, kết quả sinh từ logic cũ tiếp tục được trả về do trùng `content_hash`).
+  2. Mọi thay đổi `MindmapState` phải có test dựng graph THẬT (`build_mindmap_graph(...)` với
+     pipeline/callback stub) — đúng bài học "conftest mock che mất lỗi build graph thật" ở mục
+     dưới; không được chỉ test qua mock.
+  3. Đặt timeout mặc định (`MINDMAP_LLM_TIMEOUT_SEC`) dựa trên số đo THẬT trên phần cứng đích, không
+     đoán — xem số đo 2026-07-04 (Ollama CPU local): enrich 3 nhánh ≈ 86s, relations ≈ 14s, tổng
+     ≈ 100s cho 4 chunk có heading; 57 chunk không heading (fallback cluster) ≈ 58s.
+  4. Service (nếu bật `MINDMAP_SERVICE_ADDR`) KHÔNG được tự đọc `index.json`/`chunks.sqlite` — input
+     phải được monolith gom sẵn (`input_collector.py`) rồi truyền qua wire (gRPC per-stage:
+     Skeleton/EnrichBranches-stream/Relations), giữ đúng ranh giới service đã học ở lần trước.
 
 ## Đừng nâng langgraph/langchain lên 1.x trên máy dev này
 

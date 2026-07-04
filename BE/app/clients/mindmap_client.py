@@ -35,7 +35,7 @@ class GrpcMindmapPipeline:
 
     def enrich(self, mm_input, skeleton_nodes, progress_cb=None, cancel_cb=None):
         if cancel_cb is not None and cancel_cb():
-            return list(skeleton_nodes or []), True
+            return list(skeleton_nodes or []), False
         final_event = None
         for event in self._client().EnrichBranches(
             mindmap_pb2.EnrichRequest(
@@ -54,7 +54,7 @@ class GrpcMindmapPipeline:
 
     def relations(self, nodes, cancel_cb=None):
         if cancel_cb is not None and cancel_cb():
-            return [], True
+            return [], False
         reply = self._client().Relations(
             mindmap_pb2.RelationsRequest(
                 nodes_json=json.dumps(nodes, ensure_ascii=False),

@@ -98,14 +98,15 @@ def build_mindmap_graph(*, data_dir: Path, index_meta_path: Path,
 
     @_guard("AssemblePersist")
     def assemble_node(state: dict) -> dict:
-        import os
+        from services.mindmap.pipeline.modelcfg import resolve_mindmap_model
         elapsed = time.time() - (state.get("_t0") or time.time())
+        clean_nodes = mm_schema.sanitize_nodes(state["nodes"])
         record = mm_schema.build_record(
             title=state["mm_input"]["title"], sources=state["mm_input"]["sources"],
-            nodes=mm_schema.sanitize_nodes(state["nodes"]),
-            relations=mm_schema.validate_relations(state.get("relations") or [], state["nodes"]),
+            nodes=clean_nodes,
+            relations=mm_schema.validate_relations(state.get("relations") or [], clean_nodes),
             content_hash_value=state["content_hash"],
-            model=os.getenv("MINDMAP_MODEL", "qwen2.5:14b"),
+            model=resolve_mindmap_model(),
             elapsed_sec=elapsed, degraded_missing=state.get("degraded_missing") or [])
         persist_record(record)
         _set_job(state["job_id"], status="done", progress=100,

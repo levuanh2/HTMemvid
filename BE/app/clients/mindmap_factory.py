@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 
+from services.mindmap.pipeline.modelcfg import resolve_mindmap_model
 from shared.config import get_settings
 
 
 class LocalMindmapPipeline:
     def _model(self) -> str:
-        return os.getenv("MINDMAP_MODEL", "qwen2.5:14b").strip() or "qwen2.5:14b"
+        return resolve_mindmap_model()
 
     def _timeout(self) -> float:
         return float(os.getenv("MINDMAP_LLM_TIMEOUT_SEC", "120"))

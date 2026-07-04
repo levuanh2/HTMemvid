@@ -272,3 +272,50 @@
 - **Regression / testing:**
   - Unit test `test_chunk_text_store.py` (kiểm thử 3 tầng fallback, reset cache, iter_all, put_many).
   - Integration test `test_store_precomputed.py` và `test_late_chunk_ingest.py` (verify index.json không còn text khi có video, sqlite có text, query/BM25 hoạt động tốt).
+
+## Job chạy nền dài (mindmap): KHÔNG đặt hard-timeout FE dựa trên thời lượng trung bình
+
+- **Root cause:** `SidebarRight.jsx::startPolling` (bản round-1) tự đặt `maxElapsedMs =
+  jobTimeout(180s) + 10s` rồi chủ động bắn `onError` khi vượt — một con số ĐOÁN theo thời lượng
+  TRUNG BÌNH của pipeline lúc đo (enrich 3 nhánh ≈86s), không phải giới hạn thật của hệ thống. Tài
+  liệu lớn hơn/nhiều nhánh hơn thì thời gian sinh tăng tuyến tính và vượt mốc đoán đó dễ dàng, dù BE
+  vẫn đang chạy đúng và sẽ xong. Kết quả: FE tự báo lỗi "quá thời gian chờ" giữa chừng, job BE vẫn
+  hoàn tất và lưu record, user phải F5 rồi mở lại từ danh sách mới thấy — tưởng nhầm là lỗi thật.
+  Chi tiết triệu chứng/fix xem `.playbook/known-issues.md` (mục đã resolved 2026-07-04).
+- **Prevention:**
+  1. KHÔNG gắn hard-timeout ở tầng client cho bất kỳ job nào có thời lượng chạy PHỤ THUỘC vào kích
+     thước dữ liệu đầu vào (mindmap, ingest lớn, mọi job tương lai tương tự) — thời lượng "đo được"
+     hôm nay không phải giới hạn trên thật.
+  2. Nếu cần phát hiện "job có vẻ kẹt" để cảnh báo UI, dùng **stall-detection theo fingerprint tiến
+     độ** (progress/current_node/kích thước partial-result không đổi trong N phút) thay vì đếm tổng
+     thời gian trôi qua — cảnh báo là ĐỦ, đừng tự ý huỷ/báo lỗi thay người dùng.
+  3. Mọi job chạy nền đủ dài để user có thể rời trang (F5, đóng tab, chuyển tab) nên lưu định danh
+     job (`job_id` + ngữ cảnh tối thiểu) vào `localStorage` NGAY khi nhận được, để lần mount sau có
+     thể resume polling thay vì bắt user tưởng đã mất tiến trình. Poller không tự guard double-start
+     — caller phải dừng instance cũ trước khi gán instance mới vào ref khi user bấm tạo/tạo lại liên
+     tiếp, nếu không sẽ rò rỉ vòng lặp polling.
+
+## mind-elixir (và mọi editor bên thứ ba khác): đừng tin nó bảo toàn field lạ — giữ provenance ở sidecar
+
+- **Root cause:** Adapter 2 chiều record↔mind-elixir cần giữ field nghiệp vụ (`note`, `chunk_refs`,
+  `kind`) qua các thao tác kéo/xoá/gõ/thêm node của thư viện. `mind-elixir` không có hợp đồng nào
+  cam kết bảo toàn field ngoài shape riêng của nó (`id`, `topic`, `children`, ...) — `getData()` chỉ
+  trả về đúng những gì thư viện tự quản lý. Nếu adapter đọc field nghiệp vụ trực tiếp từ dữ liệu
+  mind-elixir trả về, một vòng edit bất kỳ có thể âm thầm làm rớt `chunk_refs`/`note` của node đó.
+  Một lỗi liên quan đã bị **reviewer bắt trong quá trình implement** (không phải test tự động): node
+  mồ côi (parent trỏ tới id không còn tồn tại) hoặc root thừa (nhiều node cùng tự nhận `kind: "root"`)
+  bị cây `toTree()` bỏ rơi hoàn toàn — một vòng load→save sẽ xoá câm lặng cả nhánh con của node đó.
+- **Prevention:**
+  1. Giữ field nghiệp vụ trong **sidecar map riêng** ở tầng gọi (không phải trong instance của thư
+     viện), key theo `id` node — `FE/src/utils/mindElixirAdapter.js` dùng `Map<id, {note, chunkRefs,
+     kind}>`, sống trong `useRef` ở component, merge lại theo `id` khi save
+     (`mindElixirToRecord(mindData, sidecar, baseRecord)`).
+  2. Khi load dữ liệu vào editor bên thứ ba: RÀ SOÁT và **rescue** mọi node mồ côi/root-thừa trước
+     khi build cây cho nó — gắn lại dưới root (giữ nguyên nhánh con) thay vì loại bỏ. Không giả định
+     dữ liệu đầu vào luôn "sạch" (một cây đúng nghĩa, đúng 1 root).
+  3. Node mới do user tạo trong editor sẽ không có trong sidecar — adapter phải có default hợp lý
+     (`chunk_refs: []`, `kind` suy theo độ sâu trong cây) thay vì crash hoặc để `undefined` rò vào
+     record đã lưu.
+  4. Test round-trip PURE (không import thư viện thật) phải cover: giữ nguyên note/chunk_refs/kind
+     của node sống qua vòng record→adapter→record; node mới → default đúng; node xoá không rò lại;
+     node mồ côi/root-thừa được rescue chứ không mất tích.

@@ -10,6 +10,7 @@
 6. [Degraded & huỷ](#6-degraded--huỷ)
 7. [Cấu hình & triển khai](#7-cấu-hình--triển-khai)
 8. [Thời gian đo thật](#8-thời-gian-đo-thật)
+9. [FE v3: sinh nền + viewer mind-elixir + edit](#9-fe-v3-sinh-nền--viewer-mind-elixir--edit)
 
 ---
 
@@ -208,11 +209,9 @@ KHÔNG đọc `index.json`/`chunks.sqlite` trực tiếp — toàn bộ `mm_inpu
 truyền qua wire dưới dạng JSON, giữ ranh giới service sạch (không phụ thuộc đường dẫn đĩa của
 monolith).
 
-FE (`FE/src/components/mindmap/`): viewer dùng ReactFlow + ELK layout, hiển thị `relations` bằng
-cạnh nét đứt màu son kèm nhãn (có toggle bật/tắt), evidence drawer đọc nội dung chunk qua
-`GET /chunk-text/<id>` (dùng `chunk_refs` của node làm provenance), overlay hiện skeleton preview
-(từ `result.partial`) kèm nút huỷ trong lúc job đang chạy, và banner "degraded" với nút "Tạo lại"
-(gọi lại `force: true`).
+FE (`FE/src/components/mindmap/`, `FE/src/utils/`): xem mục 9 — sinh nền không mở overlay (thay
+overlay-với-skeleton-preview mô tả ở bản trước), viewer `mind-elixir` (thay ReactFlow+ELK), evidence
+drawer vẫn đọc chunk qua `GET /chunk-text/<id>`, chỉnh sửa tay + Lưu qua `PUT /mindmaps/<id>` (mục 9.3).
 
 ---
 
@@ -228,3 +227,120 @@ cạnh nét đứt màu son kèm nhãn (có toggle bật/tắt), evidence drawer
 Cả hai đều nằm trong ngân sách "vài phút" cho một lần sinh mindmap trên CPU. Thời gian phụ thuộc
 chủ yếu vào số nhánh top-level (mỗi nhánh = 1 lời gọi LLM enrich) và tốc độ phần cứng chạy model —
 đo lại trên phần cứng đích trước khi đặt `MINDMAP_LLM_TIMEOUT_SEC` mặc định mới.
+
+---
+
+## 9. FE v3: sinh nền + viewer mind-elixir + edit
+
+Round 2 (2026-07-04, plan `docs/superpowers/specs/2026-07-04-mindmap-ux-v3-design.md`) sửa 3 vấn đề
+UX của round 1 (ReactFlow/ELK + overlay-sớm + hard-timeout poll). **BE pipeline ở mục 1-8 không đổi
+gì** — round này chỉ thêm một endpoint ghi (`PUT /mindmaps/<id>`, mục 9.4) và làm lại toàn bộ tầng FE.
+
+### 9.1 Sinh nền — không còn hard-timeout, không còn overlay sớm
+
+Trước đây bấm "Tạo sơ đồ" mở ngay overlay fullscreen với skeleton preview, và FE tự đặt
+`maxElapsedMs = jobTimeout(180s) + 10s` rồi báo lỗi "quá thời gian chờ" nếu vượt — dù job BE vẫn
+chạy xong bình thường (pipeline thật mất tới vài phút, xem mục 8). Người dùng phải F5 rồi mở lại từ
+danh sách mới thấy map. Đã thay bằng:
+
+- `FE/src/utils/mindmapJob.js::createMindmapPoller` — poll tới khi BE trả status **terminal**
+  (`done`/`error`/`timeout`/`cancelled`), **không có hard-timeout nào**. Interval giãn dần theo thời
+  gian đã trôi qua (`pollIntervalMs`): 2s (< 30s) → 5s (< 2 phút) → 10s (sau đó). `stageLabel(status)`
+  dịch `current_node`/`message` sang tiếng Việt ("Dựng khung xương…", "Làm giàu nhánh…", "Tìm quan hệ
+  chéo…", "Đang lưu sơ đồ…"). Có **stall fingerprint** (không phải hard-timeout): nếu `progress`/
+  `current_node`/độ dài `partial.nodes` đứng yên quá `STALL_MS=5 phút`, `onTick` báo `stalled: true`
+  cho UI cảnh báo — nhưng vẫn tiếp tục poll, không tự huỷ.
+- Bấm "Tạo sơ đồ" (không force) **không mở overlay** — chỉ hiện chip tiến độ nhỏ trong sidebar
+  (`SidebarRight.jsx`, state `mindmapJobUi`: spinner + `label` + `progress`% + nút Huỷ; viền đổi màu
+  cảnh báo khi `stalled`). Xong → toast "Sơ đồ sẵn sàng" + tự mở overlay + `fetchMindMaps()` refresh
+  danh sách. Cache-hit (`content_hash` trùng, không force) đi thẳng nhánh này, bỏ qua polling —
+  `runMindmapGeneration` nhánh theo `startData.status === "done" && startData.result` TRƯỚC khi kiểm
+  `job_id` (known-issue cache-hit-không-job_id trong `.playbook/known-issues.md` đã đóng bằng nhánh
+  này). "Tạo lại" (force=true, từ banner degraded trong viewer) VẪN mở/giữ overlay — có
+  `mindmapGenerating=true` để viewer tự vẽ banner "Đang tạo lại…" + Huỷ ngay trong overlay.
+- **Sống sót qua reload**: `FE/src/utils/activeMindmapJob.js` ghi `{jobId, sources, startedAt}` vào
+  `localStorage` (key `mindmap_active_job`) ngay khi có `job_id`; mount lại của `SidebarRight` đọc
+  key này và tự khởi poller mới (cờ `resumed=true`). Job xong trong lúc vắng mặt → chỉ toast
+  ("...xong trong lúc bạn vắng mặt — mở từ danh sách"), KHÔNG tự mở overlay (tránh giật user vào
+  fullscreen cho job họ có thể không nhớ đã bấm). Mọi nhánh terminal (done/error/cancelled) đều xoá
+  key này.
+- Toast nhẹ: `FE/src/components/ui/Toaster.jsx` (state module-level, portal riêng, `z-[10000]` — cao
+  hơn overlay mindmap `z-[1000]` nên hiện được cả khi overlay đang mở), mount 1 lần trong
+  `MainLayout`. Chỉ dùng cho đường mindmap — **không** refactor `alert()` toàn app.
+
+### 9.2 Viewer: mind-elixir thay ReactFlow + ELK
+
+`FE/src/components/mindmap/MindElixirView.jsx` (mount qua `MindMapModal.jsx`, đã bỏ empty-state
+kiểm tra `data.nodes`/`data.diagram.nodes` trước khi mount viewer):
+
+- `new MindElixir({el, direction: SIDE, editable: true, draggable: true, contextMenu: true, ...})`
+  sống qua `useRef`, re-init khi `data.id` đổi (kể cả lúc "Tạo lại" swap record — xem known-issue mới
+  ở mục dirty-bị-ghi-đè bên dưới).
+- Theme "Phòng đọc": palette nhánh là 6 mã hex archival-ink cố định (nâu xám/lục/vàng đất/đỏ son/xanh
+  chàm/nâu — trước sống ở `constants.js::BRANCH_COLORS`, file đã xoá cùng ReactFlow); nền/chữ dùng
+  cssVar `--bg-base`/`--text-primary`/`--text-secondary` của theme Phòng đọc hiện có, không hardcode
+  hex mới cho nền/chữ.
+- Quan hệ (`relations` → `arrows` mind-elixir) vẽ nét đứt màu son kèm nhãn. Toggle "Quan hệ" ẩn/hiện
+  bằng CSS thuần (`FE/src/components/mindmap/mindmap.css`, class `.me-hide-arrows`): ẩn cả
+  `g[id^="a-"]` (đường arrow SVG) lẫn `.svg-label[data-type="arrow"]` (nhãn arrow) — không gọi API
+  mind-elixir để bật/tắt, chỉ đổi class trên container.
+- Evidence drawer (`EvidenceDrawer.jsx`, giữ nguyên component) nối qua `mind.bus.addListener(
+  "selectNodes", ...)` thay vì event ReactFlow cũ — tra `note`/`chunkRefs` từ **sidecar map** (mục
+  9.3), không phải từ node mind-elixir trực tiếp. Vẫn fetch nội dung chunk qua
+  `GET /chunk-text/<id>` như bản trước.
+- Chỉnh sửa tay: `contextMenu`/`draggable`/gõ trực tiếp của mind-elixir đều bật. Mọi event `operation`
+  set `dirty=true` (chấm "● chưa lưu" trên toolbar). Nút **Lưu** chỉ hiện khi record có `id` thật
+  (khác `"preview"`) và không đang generating — gọi `mindElixirToRecord(mind.getData(), sidecar,
+  baseRecord)` rồi `PUT /mindmaps/<id>`, có guard `saving` (chặn double-click trong lúc request đang
+  bay) độc lập với `disabled` trên nút. Đóng overlay (nút X hoặc Esc) khi đang dirty →
+  `window.confirm` trước khi đóng.
+- Xuất PNG: `@zumer/snapdom` chụp container mind-elixir (`mind.nodes`), nền đặc lấy từ cssVar
+  `--bg-base` (tránh nền trong suốt khi mở file .png ngoài trình duyệt). Tên file
+  `mindmap-<title>-<yyyymmdd>.png`.
+- Giữ nguyên: overlay fullscreen + Esc đóng, banner degraded + nút "Tạo lại" (force=true, ẩn khi đang
+  generating để tránh double-trigger).
+- **Đã xoá** (Task 9, sau khi view mới xanh): `MindmapView.jsx`, `MindmapNodeCard.jsx`,
+  `RelationEdge.jsx`, `useElkLayout.js`, `exportPng.js`, `MindmapToolbar.jsx`, `constants.js`; gỡ dep
+  `reactflow`/`elkjs`/`html-to-image` khỏi `package.json`; thêm `mind-elixir@5.13.0` +
+  `@zumer/snapdom`.
+
+### 9.3 Adapter 2 chiều + sidecar (pure, test được)
+
+`FE/src/utils/mindElixirAdapter.js` — không import `mind-elixir`, chỉ chuyển đổi shape dữ liệu:
+
+- `recordToMindElixir(record) -> {mindData: {nodeData, arrows, direction}, sidecar}`: record v2
+  (nodes phẳng + `parent`) → cây `nodeData` lồng nhau (`title` → `topic`); `relations` → `arrows`
+  (nét đứt, nhãn từ `REL_LABELS` theo `type`). Node mồ côi hoặc root thừa (parent trỏ tới id không
+  tồn tại, hoặc nhiều node tự nhận `kind: "root"`) được **gắn lại dưới root** thay vì bị bỏ rơi — nếu
+  không, một vòng load→save sẽ âm thầm xoá cả nhánh con của node mồ côi đó.
+- **Sidecar `Map<id, {note, chunkRefs, kind}>`** sống ở React layer (`sidecarRef` trong
+  `MindElixirView`) — lý do: **không có gì đảm bảo mind-elixir bảo toàn field lạ** (`note`,
+  `chunk_refs`, `kind`) qua các thao tác kéo/xoá/gõ của thư viện, vì `getData()` của nó chỉ trả về
+  đúng shape riêng của nó (`id`, `topic`, `children`, ...). Field nghiệp vụ được giữ riêng, khớp lại
+  theo `id` khi save (`mindElixirToRecord`).
+- `mindElixirToRecord(mindData, sidecar, baseRecord) -> record v2`: đi lại cây `nodeData`, với mỗi
+  node tra sidecar lấy `note`/`chunk_refs`/`kind` (node mới do user tạo → không có trong sidecar →
+  `chunk_refs: []`, `kind` suy theo độ sâu: gốc=`root`, cấp 1=`section`, còn lại=`idea`). `arrows` →
+  `relations`, giữ nguyên `type` cũ nếu cặp `source→target` đã tồn tại trong `baseRecord.relations`,
+  cặp mới (user tự vẽ) mặc định `type: "relates_to"`.
+- Node bị user xoá khỏi cây mind-elixir thì đơn giản không xuất hiện lại trong `walk()` → không rò
+  vào record đã lưu (không cần dọn sidecar tường minh, vì `mindElixirToRecord` chỉ đi theo cây hiện
+  tại, không lặp qua toàn bộ sidecar).
+
+### 9.4 BE — một endpoint ghi: `PUT /mindmaps/<id>`
+
+`BE/app/main.py::update_mindmap` (cạnh `delete_mindmap`), dùng `mindmap_store.get_record`/
+`save_record` (`BE/app/domains/mindmap/store.py`):
+
+- 404 nếu `id` không có trong `mindmaps.sqlite`.
+- Validate body qua chính pipeline dùng lúc sinh (`services/mindmap/pipeline/schema.py`):
+  `sanitize_nodes(body.nodes)` (dedupe id, kind lạ ép `idea`, node mồ côi gắn lại root, cap
+  `MAX_NODES`) — nodes rỗng sau sanitize → 400. `validate_relations(body.relations, nodes)` lọc quan
+  hệ trỏ tới id không tồn tại.
+- **Bảo vệ** `id`/`content_hash`/`created_at`/`sources`/`schema_version` — luôn lấy từ record gốc
+  trong sqlite, body không ghi đè được các field này dù có gửi lên.
+- Set `updated_at` (ISO Z) + `generator.edited = true`, ghi qua `save_record` (INSERT OR REPLACE).
+- **Cố ý**: record đã sửa tay vẫn giữ nguyên `content_hash` gốc → lần generate sau (không force) với
+  cùng nguồn sẽ cache-hit và trả THẲNG bản đã sửa tay, không sinh lại bằng LLM (bản curated quý hơn
+  bản máy sinh). Chỉ "Tạo lại" (force=true) mới bỏ qua cache và ghi đè bằng bản LLM mới.
+- Không đổi gì ở `generate`/`status`/`cancel`/`delete` — pipeline sinh (mục 1-8) hoàn toàn không đụng.

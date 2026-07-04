@@ -1,6 +1,7 @@
 // Mindmap modal — thin shell.
 // Task 7 swap: viewer is now MindElixirView (mind-elixir), replacing the
-// ReactFlow/ELK view (MindmapView.jsx, kept for now — removed in Task 9).
+// old ReactFlow/ELK view (MindmapView.jsx — removed in Task 9, along with
+// MindmapNodeCard.jsx/RelationEdge.jsx/useElkLayout.js/exportPng.js).
 // This file keeps its historical export surface (default export `MindMapModal`)
 // so SidebarRight.jsx does not need to change how it imports this component.
 import { createPortal } from "react-dom";

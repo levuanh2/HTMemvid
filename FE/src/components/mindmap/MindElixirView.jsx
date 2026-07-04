@@ -10,7 +10,8 @@ import { Icon } from "../ui/Icon";
 import Spinner from "../ui/Spinner";
 import "./mindmap.css";
 
-// Palette nhánh: archival inks (edge hexes từ constants.js::BRANCH_COLORS)
+// Palette nhánh: archival ink hexes (Phòng đọc theme) — trước đây sống ở
+// constants.js::BRANCH_COLORS (file đã xoá cùng ReactFlow view ở Task 9).
 const PALETTE = ["#5C6B7A", "#3E6B57", "#B5821F", "#B23A2E", "#4A5A8A", "#8A7A66"];
 
 const THEME = {

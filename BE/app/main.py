@@ -1787,6 +1787,39 @@ def list_mindmaps():
     return jsonify({"mindmaps": mindmap_store.list_records()})
 
 
+@app.route("/mindmaps/<mindmap_id>", methods=["PUT"])
+def update_mindmap(mindmap_id: str):
+    """Lưu bản chỉnh sửa tay từ viewer. Bảo vệ id/hash/created_at/sources gốc."""
+    base = mindmap_store.get_record(mindmap_id)
+    if not base:
+        return jsonify({"error": "Mind map not found"}), 404
+
+    body = request.get_json(silent=True) or {}
+    from services.mindmap.pipeline.schema import sanitize_nodes, validate_relations
+
+    nodes = sanitize_nodes(body.get("nodes") or [])
+    if not nodes:
+        return jsonify({"error": "nodes trống hoặc không hợp lệ"}), 400
+
+    relations = validate_relations(body.get("relations") or [], nodes)
+    record = {
+        **base,
+        "title": (str(body.get("title") or "").strip() or base.get("title") or ""),
+        "nodes": nodes,
+        "relations": relations,
+    }
+    for key in ("id", "content_hash", "created_at", "sources", "schema_version"):
+        record[key] = base.get(key)
+
+    record["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    generator = dict(base.get("generator") or {})
+    generator["edited"] = True
+    record["generator"] = generator
+
+    mindmap_store.save_record(record)
+    return jsonify(record)
+
+
 @app.delete('/mindmaps/<string:mindmap_id>')
 def delete_mindmap(mindmap_id: str):
     if not mindmap_store.delete_record(mindmap_id):

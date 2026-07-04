@@ -152,6 +152,20 @@ def list_records() -> list[dict]:
             conn.close()
 
 
+def get_record(mindmap_id: str) -> Optional[dict]:
+    init_db()
+    with _lock:
+        conn = get_conn()
+        try:
+            row = conn.execute(
+                "SELECT record_json FROM mindmaps WHERE id = ?",
+                (str(mindmap_id),),
+            ).fetchone()
+        finally:
+            conn.close()
+    return _decode_record(row[0]) if row else None
+
+
 def delete_record(mindmap_id: str) -> bool:
     init_db()
     with _lock:

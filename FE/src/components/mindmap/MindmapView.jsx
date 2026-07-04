@@ -188,12 +188,16 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
   const [relationsVisible, setRelationsVisible] = useState(true);
   const lastInteractionRef = useRef("initial");
   const viewportRef = useRef(null);
+  const exportErrorTimerRef = useRef(null);
 
   // EvidenceDrawer owns its own (capture-phase) Escape listener that stops
   // propagation while open, so this bubble-phase listener only ever fires for
   // "close the whole viewer" when the drawer isn't showing.
   useEffect(() => { const h = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [onClose]);
   useEffect(() => { document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = ""; }; }, []);
+  useEffect(() => () => {
+    if (exportErrorTimerRef.current) clearTimeout(exportErrorTimerRef.current);
+  }, []);
 
   const model = useMemo(() => normalizeMindmapRecord(data), [data]);
   const diagram = useMemo(() => buildDiagramFromModel(model), [model]);
@@ -319,14 +323,17 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
   const handleExportPng = useCallback(async () => {
     if (exportingPng) return;
     setExportError(null);
+    if (exportErrorTimerRef.current) { clearTimeout(exportErrorTimerRef.current); exportErrorTimerRef.current = null; }
     setExportingPng(true);
     try {
       await exportMindmapPng({ getNodes: reactFlowInstance.getNodes, title: exportTitle });
     } catch (err) {
       console.error("Xuất PNG thất bại:", err);
       setExportError("Xuất PNG thất bại — thử lại.");
-      const timerId = setTimeout(() => setExportError(null), 5000);
-      return () => clearTimeout(timerId);
+      exportErrorTimerRef.current = setTimeout(() => {
+        setExportError(null);
+        exportErrorTimerRef.current = null;
+      }, 5000);
     } finally {
       setExportingPng(false);
     }

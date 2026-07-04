@@ -414,6 +414,7 @@ eventSource.onmessage = (event) => {
 ```bash
 # Vector Store
 USE_LC_VECTOR_STORE=true        # Dùng LangChain VectorStore
+WEB_CONCURRENCY=2              # gunicorn workers cho backend; giữ /health sống khi 1 worker bận
 
 # Retrieval
 USE_LC_ENSEMBLE=true           # Dùng LangChain Ensemble Retriever

@@ -14,6 +14,7 @@ services:
     environment:
       DATA_DIR: /app
       PORT: "8080"
+      WEB_CONCURRENCY: "2"
       OLLAMA_HOST: http://host.docker.internal:11434
       SLM_MODEL_CHAT: qwen3.5:9b
       SLM_MODEL: qwen3.5:9b

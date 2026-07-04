@@ -1,5 +1,18 @@
 # Lessons Learned
 
+## Xoá source trên FAISS: LangChain dùng docstore id, legacy raw-FAISS dùng `chunk_id`
+
+- **Root cause:** Hai backend lưu id khác nhau. LangChain FAISS giữ vector theo `docstore_id`
+  nội bộ (uuid trong `docstore._dict`), nên `FAISS.delete(ids=...)` KHÔNG nhận trực tiếp
+  `chunk_id`. Legacy raw-FAISS (`IndexIDMap`) thì id trong index chính là `chunk_id`.
+- **Prevention:**
+  1. Nhánh LangChain phải map `chunk_id -> docstore_id` từ metadata trước khi delete; không
+     được giả định `chunk_id` là key xoá dùng chung cho cả hai backend.
+  2. Mọi lỗi delete-by-id phải rơi về `rebuild_chunk_index(...)` để ưu tiên toàn vẹn
+     index/meta. Sai một bước xoá có thể để meta và vector lệch nhau; rebuild là đường lui an toàn.
+  3. Regression cần có ở cả hai backend: LC chứng minh map đúng sang `docstore_id`, raw-FAISS
+     chứng minh vẫn xoá theo `chunk_id` như cũ.
+
 ## Late Chunking (bge-m3): embed toàn văn → mean-pool theo span (mặc định ON)
 
 - **Bối cảnh / root cause:** naive chunking (cắt chunk rồi embed từng chunk độc lập, pooling

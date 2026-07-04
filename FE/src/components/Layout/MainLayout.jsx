@@ -19,6 +19,17 @@ export default function MainLayout({ selectedSources, setSelectedSources }) {
   const [highlight, setHighlight] = useState(null); // { stem, chunkId } | null
   const onHighlight = useCallback((c) => setHighlight(c), []);
 
+  // Task 16 — "Hỏi về đoạn này" (EvidenceDrawer, inside the mindmap overlay)
+  // prefills + focuses the chat composer with the evidence snippet. `nonce`
+  // forces ChatArea's effect to re-fire even if the same snippet is asked
+  // about twice in a row (object identity, not just text, changes).
+  const [askAboutDraft, setAskAboutDraft] = useState(null); // { text, nonce } | null
+  const onAskAbout = useCallback((snippet) => {
+    const text = String(snippet || "").trim();
+    if (!text) return;
+    setAskAboutDraft({ text: `Về đoạn này: "${text}" — hãy giải thích thêm.`, nonce: Date.now() });
+  }, []);
+
   return (
     <div className="flex flex-col h-screen overflow-hidden font-body transition-theme" style={{ background: "var(--bg-base)", color: "var(--text-primary)" }}>
 
@@ -109,6 +120,7 @@ export default function MainLayout({ selectedSources, setSelectedSources }) {
             onHighlight={onHighlight}
             onOpenLeft={() => setLeftOpen(true)}
             onOpenRight={() => setRightOpen(true)}
+            askAboutDraft={askAboutDraft}
           />
         </main>
 
@@ -127,6 +139,7 @@ export default function MainLayout({ selectedSources, setSelectedSources }) {
             highlight={highlight}
             onHighlight={onHighlight}
             onClose={() => setRightOpen(false)}
+            onAskAbout={onAskAbout}
           />
         </aside>
       </div>

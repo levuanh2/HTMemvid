@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import MindMapModal from "./MindMapModal";
 import SummaryModal from "./SummaryModal";
-import { apiFetch } from "../../utils/api";
+import { apiFetch, generateMindmap, cancelMindmap } from "../../utils/api";
 import { Icon } from "../ui/Icon";
 import Spinner from "../ui/Spinner";
 import { normStem } from "../../utils/evidence";
@@ -51,7 +51,7 @@ const ARTIFACTS = [
 ];
 
 // ── Main component ────────────────────────────────────
-export default function SidebarRight({ selectedSources, evidence, highlight, onHighlight, onClose }) {
+export default function SidebarRight({ selectedSources, evidence, highlight, onHighlight, onClose, onAskAbout }) {
   const [artifactTab, setArtifactTab] = useState("mindmap");
   const [mindMaps, setMindMaps]           = useState([]);
   const [showModalMap, setShowModalMap]   = useState(null);
@@ -61,6 +61,10 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [summaries, setSummaries]         = useState([]);
+  // Task 16 — skeleton preview (renders while the job is still running) + real
+  // cancel notice (BE job actually aborted, not just "FE stopped polling").
+  const [mindmapGenerating, setMindmapGenerating] = useState(false);
+  const [mindmapCancelNotice, setMindmapCancelNotice] = useState(false);
 
   const frameRefs = useRef(new Map());
 
@@ -70,6 +74,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   const pollingTimeoutRef = useRef(null);
   const pollingGenerationRef = useRef(0);
   const cancelMindmapRef = useRef(null);
+  const currentMindmapJobIdRef = useRef(null);
 
   // ── Fetchers (logic unchanged) ────────────────────
   const fetchMindMaps = useCallback(async () => {
@@ -187,23 +192,46 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   const runMindmapGeneration = async (sourceList, { force = false } = {}) => {
     if (!sourceList?.length) { alert("Vui lòng chọn ít nhất một tài liệu để tạo Sơ đồ!"); return; }
     setLoading(true);
+    setMindmapCancelNotice(false);
     setMindmapJobHint({ progress: null, current_node: null });
     try {
-      const res = await apiFetch(`/generate-mindmap`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources: sourceList, q: "tóm tắt tài liệu", force }) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const startData = await res.json();
+      const startData = await generateMindmap(sourceList, { force });
       if (startData.error) throw new Error(startData.error);
-      if (!startData.job_id) throw new Error("Server không trả job_id.");
 
-      const data = await new Promise((resolve, reject) => {
-        cancelMindmapRef.current = () => reject(new Error("__cancelled__"));
-        startPolling(startData.job_id, {
-          jobTimeoutMs: (startData.jobTimeout || 180) * 1000,
-          onTick: (j) => setMindmapJobHint({ progress: j.progress ?? null, current_node: j.current_node ?? null }),
-          onDone: (result) => resolve(result),
-          onError: (err) => reject(err),
+      let data;
+      if (startData.status === "done" && startData.result) {
+        // Cache-hit (content_hash match, force=false): BE returns the record
+        // straight away with no job_id — skip polling entirely instead of
+        // throwing "Server không trả job_id." (known issue, fixed here).
+        data = startData.result;
+      } else {
+        if (!startData.job_id) throw new Error("Server không trả job_id.");
+        currentMindmapJobIdRef.current = startData.job_id;
+        data = await new Promise((resolve, reject) => {
+          cancelMindmapRef.current = () => reject(new Error("__cancelled__"));
+          startPolling(startData.job_id, {
+            jobTimeoutMs: (startData.jobTimeout || 180) * 1000,
+            onTick: (j) => {
+              setMindmapJobHint({ progress: j.progress ?? null, current_node: j.current_node ?? null });
+              // Skeleton preview: as soon as the Skeleton node's partial (title
+              // + nodes, no relations yet) is available, open the viewer with
+              // it right away instead of waiting for enrich/relations to finish.
+              if (j.partial?.nodes?.length) {
+                setMindmapGenerating(true);
+                setShowModalMap({
+                  ...j.partial,
+                  schema_version: 2,
+                  id: "preview",
+                  sources: sourceList,
+                  initialLayoutType: "napkin",
+                });
+              }
+            },
+            onDone: (result) => resolve(result),
+            onError: (err) => reject(err),
+          });
         });
-      });
+      }
       const hasNodes = (Array.isArray(data?.nodes) && data.nodes.length > 0) ||
         (Array.isArray(data?.diagram?.nodes) && data.diagram.nodes.length > 0);
       if (!hasNodes) {
@@ -233,6 +261,8 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     }
     finally {
       cancelMindmapRef.current = null;
+      currentMindmapJobIdRef.current = null;
+      setMindmapGenerating(false);
       setLoading(false);
       setMindmapJobHint({ progress: null, current_node: null });
       stopPolling("done");
@@ -249,10 +279,31 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     return runMindmapGeneration(sources, { force: true });
   };
 
+  // Real cancel (Task 16): stop FE polling immediately (as before) AND tell
+  // the BE to actually abort the job (cooperative-abort flag the worker checks
+  // between graph nodes) — fire-and-forget, we don't block the UI on it.
   const handleCancelMindMap = () => {
+    const jobId = currentMindmapJobIdRef.current;
     stopPolling("cancel");
     if (cancelMindmapRef.current) cancelMindmapRef.current();
+    if (jobId) {
+      cancelMindmap(jobId).catch((err) => console.error("[MindMap] cancel request failed:", err));
+    }
+    // Only dismiss the overlay if it's showing the transient skeleton preview
+    // (fresh "Tạo"). A "Tạo lại" cancel leaves the still-valid previous map
+    // on screen — just drops the generating banner (mindmapGenerating below).
+    setShowModalMap((prev) => (prev?.id === "preview" ? null : prev));
+    setMindmapGenerating(false);
+    setMindmapCancelNotice(true);
   };
+
+  // "Hỏi về đoạn này" (EvidenceDrawer) → close the mindmap overlay so the chat
+  // underneath is visible again, then hand the snippet up to MainLayout to
+  // prefill + focus the composer.
+  const handleAskAbout = useCallback((snippet) => {
+    setShowModalMap(null);
+    onAskAbout?.(snippet);
+  }, [onAskAbout]);
 
   const handleDeleteMap = async (id) => {
     if (!window.confirm("Xóa sơ đồ này?")) return;
@@ -300,6 +351,18 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   const sourceStems = Array.isArray(evidence?.sources) ? evidence.sources : [];
   const isGenerating = artifactTab === "mindmap" ? loading : summaryLoading;
   const onGenerate = artifactTab === "mindmap" ? handleGenerateMindMap : handleGenerateSummary;
+
+  // MindMapModal forwards `data` to MindmapView verbatim, so this is how
+  // generating/progress/cancel/ask-about reach it without widening that
+  // shell's prop list — applies to every open map (fresh, regenerated, or
+  // reopened from the saved list), not just the live-generation preview.
+  const modalMapData = useMemo(() => (showModalMap ? {
+    ...showModalMap,
+    generating: mindmapGenerating,
+    progress: mindmapJobHint.progress,
+    onCancel: handleCancelMindMap,
+    onAskAbout: handleAskAbout,
+  } : null), [showModalMap, mindmapGenerating, mindmapJobHint.progress, handleAskAbout]);
 
   // ── Render ────────────────────────────────────────
   return (
@@ -408,7 +471,10 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
           )}
         </button>
 
-        {/* Mindmap generation progress + cancel */}
+        {/* Mindmap generation progress + cancel. Once the skeleton preview
+            opens (full-screen overlay), this row sits behind it — the same
+            Huỷ action is reachable from the banner MindmapView renders while
+            `generating`, wired to the same handleCancelMindMap. */}
         {artifactTab === "mindmap" && loading && (
           <div className="mt-2 flex items-center gap-2 text-[12px] text-text-secondary">
             <span className="font-mono tabular-nums">{mindmapJobHint.progress != null ? `${mindmapJobHint.progress}%` : "…"}</span>
@@ -416,6 +482,11 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
             <button onClick={handleCancelMindMap} className="ml-auto px-2 py-0.5 rounded-[5px] border border-border text-[11px] text-text-muted hover:text-[var(--err)] hover:border-[var(--err)]/40 transition-colors">
               Huỷ
             </button>
+          </div>
+        )}
+        {artifactTab === "mindmap" && !loading && mindmapCancelNotice && (
+          <div className="mt-2 flex items-center gap-1.5 text-[12px] text-text-muted">
+            <Icon name="Ban" size={12} /> Đã huỷ tạo sơ đồ.
           </div>
         )}
 
@@ -457,7 +528,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
       {/* ── MODALS ── */}
       {showModalMap && (
         <MindMapModal
-          data={showModalMap}
+          data={modalMapData}
           initialLayoutType={showModalMap.initialLayoutType || "napkin"}
           onClose={() => setShowModalMap(null)}
           onRegenerate={handleRegenerateMindMap}

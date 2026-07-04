@@ -19,6 +19,7 @@ import ReactFlow, {
   MiniMap, Controls, Background, useReactFlow, BaseEdge,
 } from "reactflow";
 import { Icon } from "../ui/Icon";
+import Spinner from "../ui/Spinner";
 import { normalizeMindmapRecord } from "../../utils/mindmapNormalize";
 import {
   getAutoLayout, getAutoDisplayMode, getAutoEdgeMode, useIsMobile, relationTypeLabel,
@@ -35,6 +36,7 @@ import {
 import { NapkinNode } from "./MindmapNodeCard";
 import RelationEdge from "./RelationEdge";
 import MindmapToolbar from "./MindmapToolbar";
+import EvidenceDrawer from "./EvidenceDrawer";
 
 // =====================
 // PROFESSIONAL CLEAN CURVE (fixed endpoints) — tree edge renderers
@@ -157,6 +159,16 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
   const reactFlowInstance = useReactFlow();
   const isMobile = useIsMobile();
 
+  // Task 16 — skeleton preview + cancel + evidence drawer. `generating`/`progress`/
+  // `onCancel`/`onAskAbout` ride in on `data` itself (not as separate props): the
+  // shell (MindMapModal.jsx) forwards `data` verbatim already, so this avoids
+  // widening that shell's prop surface just to plumb four extra callbacks through.
+  const generating = Boolean(data?.generating);
+  const genProgress = Number.isFinite(Number(data?.progress)) ? Number(data.progress) : null;
+  const onCancel = typeof data?.onCancel === "function" ? data.onCancel : null;
+  const onAskAbout = typeof data?.onAskAbout === "function" ? data.onAskAbout : null;
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
+
   const totalCount = data?.diagram?.nodes?.length || data?.nodes?.length || 0;
   const resolvedDisplayMode = getAutoDisplayMode(totalCount);
   const resolvedLayout = (() => {
@@ -174,6 +186,9 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
   const lastInteractionRef = useRef("initial");
   const viewportRef = useRef(null);
 
+  // EvidenceDrawer owns its own (capture-phase) Escape listener that stops
+  // propagation while open, so this bubble-phase listener only ever fires for
+  // "close the whole viewer" when the drawer isn't showing.
   useEffect(() => { const h = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [onClose]);
   useEffect(() => { document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = ""; }; }, []);
 
@@ -262,7 +277,15 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
     setFocusedNodeId(node.id);
     setDisplayMode("focus");
     lastInteractionRef.current = "node-focus";
+    setSelectedNodeId(node.id);
   }, []);
+
+  const handlePaneClick = useCallback(() => { setSelectedNodeId(null); }, []);
+
+  const selectedDrawerNode = useMemo(
+    () => (selectedNodeId ? allNodes.find((n) => n.id === selectedNodeId) || null : null),
+    [selectedNodeId, allNodes]
+  );
 
   const handleExpandAll = useCallback(() => { lastInteractionRef.current = "expand-all"; setExpandedNodes(new Set(allNodes.map((n) => n.id))); }, [allNodes]);
   const handleCollapseAll = useCallback(() => { lastInteractionRef.current = "collapse-all"; setExpandedNodes(new Set(rootNode ? [rootNode.id] : [])); }, [rootNode]);
@@ -534,6 +557,14 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
         @media (prefers-reduced-motion: reduce) {
           .mindmap-flow .react-flow__node, .mindmap-flow .react-flow__edge-path { transition: none !important; animation: none !important; }
         }
+        /* Skeleton preview — nodes "breathe" while the map is still generating
+           (Task 16). Scoped to the flow surface's own generating state rather
+           than touching MindmapNodeCard.jsx. */
+        @keyframes mmBreathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .mindmap-flow.mm-generating .react-flow__node { animation: mmBreathe 1.7s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .mindmap-flow.mm-generating .react-flow__node { animation: none !important; }
+        }
       `}</style>
       <MindmapToolbar
         title={model.title || data?.title}
@@ -553,11 +584,32 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
         regenerating={regenerating}
       />
 
-      <div className="flex-1 relative overflow-hidden mindmap-flow min-h-0">
+      {generating && (
+        <div
+          className="flex-shrink-0 border-b border-border px-4 py-2 flex items-center gap-2.5 text-[12px]"
+          style={{ background: "color-mix(in srgb, var(--accent) 6%, transparent)" }}
+        >
+          <Spinner size={13} className="text-brand" />
+          <span className="text-text-secondary">
+            Đang dựng khung sơ đồ{genProgress != null ? ` — ${genProgress}%` : "…"}
+          </span>
+          {onCancel && (
+            <button
+              onClick={onCancel}
+              className="ml-auto px-2.5 py-1 rounded-[6px] border border-border text-[11px] text-text-muted hover:text-[var(--err)] hover:border-[var(--err)]/40 transition-colors"
+            >
+              Huỷ
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className={`flex-1 relative overflow-hidden mindmap-flow min-h-0 ${generating ? "mm-generating" : ""}`}>
         <ReactFlow nodes={innerNodes} edges={combinedEdges} fitView nodesDraggable
           nodeTypes={nodeTypes} edgeTypes={edgeTypes}
           minZoom={0.08} maxZoom={2.5} zoomOnScroll panOnScroll panOnDrag
           onNodeClick={handleNodeClick}
+          onPaneClick={handlePaneClick}
           onNodeDragStop={handleNodeDragStop}
           className="h-full w-full bg-surface-base"
           proOptions={{ hideAttribution: true }}>
@@ -570,6 +622,12 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
             <Icon name="Network" size={28} /><p className="text-sm">Đang tải sơ đồ…</p>
           </div>
         )}
+        <EvidenceDrawer
+          node={selectedDrawerNode}
+          onClose={() => setSelectedNodeId(null)}
+          generating={generating}
+          onAskAbout={onAskAbout}
+        />
       </div>
 
       <div className="bg-surface-sidebar border-t border-border px-3 py-1.5 text-[10px] md:text-[11px] text-text-muted text-center flex-shrink-0 hidden sm:block">

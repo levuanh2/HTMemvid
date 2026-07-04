@@ -102,7 +102,7 @@ function AnswerProse({ content, mdComponents }) {
   );
 }
 
-export default function ChatArea({ selectedSources, sources = [], onEvidence, highlight, onHighlight, onOpenLeft, onOpenRight }) {
+export default function ChatArea({ selectedSources, sources = [], onEvidence, highlight, onHighlight, onOpenLeft, onOpenRight, askAboutDraft }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -261,6 +261,20 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
     ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
   };
   const useSuggestion = (q) => { setInput(q); textareaRef.current?.focus(); };
+
+  // Task 16 — "Hỏi về đoạn này" (mindmap EvidenceDrawer) prefills the composer.
+  // Keyed on the whole draft object (not just `.text`) so asking about the
+  // same snippet twice in a row still re-focuses/re-fills.
+  useEffect(() => {
+    if (!askAboutDraft?.text) return;
+    setInput(askAboutDraft.text);
+    const ta = textareaRef.current;
+    if (ta) {
+      ta.style.height = "44px";
+      ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
+      ta.focus();
+    }
+  }, [askAboutDraft]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading, streamingPreview]);
 

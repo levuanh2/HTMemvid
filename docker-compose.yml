@@ -17,6 +17,7 @@ services:
       OLLAMA_HOST: http://host.docker.internal:11434
       SLM_MODEL_CHAT: qwen3.5:9b
       SLM_MODEL: qwen3.5:9b
+      MINDMAP_MODEL: qwen3.5:9b
       OLLAMA_REASONING: "0"
       LLM_MAX_TOKENS: "8192"
       HYBRID_TOP_K: "6"
@@ -89,14 +90,13 @@ services:
     expose:
       - "50052"
     volumes:
-      - ./data/index:/app/index
-      - ./data/memory:/app/memory
       - hf_cache:/root/.cache/huggingface
     environment:
       DATA_DIR: /app
       OLLAMA_HOST: http://host.docker.internal:11434
       SLM_MODEL_CHAT: qwen3.5:9b
       SLM_MODEL: qwen3.5:9b
+      MINDMAP_MODEL: qwen3.5:9b
       OLLAMA_REASONING: "0"
       LLM_MAX_TOKENS: "8192"
       HYBRID_TOP_K: "6"

@@ -88,6 +88,19 @@
 - **Giới hạn đã biết — Huỷ mindmap (FE):** nút Huỷ chỉ dừng polling FE; job BE vẫn chạy xong và
   `append_mindmap` đã lưu map trong lúc sinh → map có thể hiện ở lần fetch sau. Huỷ thật cần
   cooperative-abort (cờ cancel + worker/TimeoutTracker kiểm) — chưa làm (codex review). Chấp nhận.
+- **FE `record` sau generate rebuild field-by-field → rớt field v2 (schema_version/relations/generator):**
+  `SidebarRight.jsx::handleGenerateMindMap` (nay là `runMindmapGeneration`) dựng lại `record` từ `data`
+  (kết quả job) bằng cách liệt kê từng field (`id/title/nodes/diagram/sources/createdAt/strategy/...`)
+  thay vì giữ nguyên `data` — mọi field KHÔNG có trong danh sách bị rớt âm thầm. V2 record có thêm
+  `schema_version`/`relations`/`generator` (BE `services/mindmap/pipeline/schema.py::build_record`)
+  mà danh sách cũ không liệt kê → sơ đồ vừa tạo xong (chưa reload) không hiện quan hệ/banner degraded,
+  dù `normalizeMindmapRecord` (Task 13) đã hỗ trợ đủ. Chỉ lộ ra khi F5 lại (list `/mindmaps` trả full
+  record đã lưu, không đi qua đường rebuild field-by-field này).
+  **Sửa (Task 14):** `record = { ...data, id: ..., title: ..., ... }` — spread `data` TRƯỚC, các field
+  tường minh sau chỉ để backfill default (key sau đè key trước trong object literal, không mất field
+  nào của `data`). **Prevention:** khi FE "đóng gói lại" một response BE thành state cục bộ, ưu tiên
+  `{ ...response, ...overrides }` thay vì liệt kê thủ công từng field — liệt kê thủ công là nợ kỹ thuật
+  âm thầm mỗi khi BE thêm field mới (không lỗi build/test nào bắt được, chỉ lộ qua so sánh dữ liệu thực).
 
 ## Đừng nâng langgraph/langchain lên 1.x trên máy dev này
 

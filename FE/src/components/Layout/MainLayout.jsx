@@ -4,6 +4,7 @@ import ChatArea from "./ChatArea";
 import SidebarRight from "./SidebarRight";
 import { useTheme } from "../../hooks/useTheme";
 import { Icon } from "../ui/Icon";
+import Toaster from "../ui/Toaster";
 
 export default function MainLayout({ selectedSources, setSelectedSources }) {
   const [sources, setSources] = useState([]);
@@ -143,6 +144,9 @@ export default function MainLayout({ selectedSources, setSelectedSources }) {
           />
         </aside>
       </div>
+
+      {/* ── TOAST STACK ── */}
+      <Toaster />
     </div>
   );
 }

@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
-from typing import Callable, Iterable, Optional
 
 import grpc
 
@@ -10,53 +10,50 @@ from shared.config import get_settings
 from shared.proto.gen import mindmap_pb2, mindmap_pb2_grpc
 
 
-def consume_generate_events(
-    events: Iterable[mindmap_pb2.GenerateEvent],
-    *,
-    progress_cb: Optional[Callable[[int], None]] = None,
-) -> dict:
-    for event in events:
-        kind = event.WhichOneof("event")
-        if kind == "progress":
-            if progress_cb is not None:
-                progress_cb(int(event.progress.percent))
-            continue
-        if kind == "result":
-            return json.loads(event.result.record_json or "{}")
-        if kind == "error":
-            raise RuntimeError((event.error or "").strip() or "mindmap service error")
-    raise RuntimeError("mindmap service stream ended without result")
+class GrpcMindmapPipeline:
+    """# Sẽ thay bằng GrpcMindmapPipeline (per-stage RPC) ở task sau."""
 
+    def __init__(self, addr: str | None = None) -> None:
+        self.addr = (addr or get_settings().mindmap_service_addr or "").strip()
 
-def run_mindmap_generation_via_grpc(
-    index_meta_path: Path,
-    source_names: list[str],
-    strategy_requested: str = "auto",
-    append_mindmap: Callable[[dict], None] | None = None,
-    progress_cb: Optional[Callable[[int], None]] = None,
-    generation_mode: str | None = None,
-) -> dict:
-    addr = get_settings().mindmap_service_addr
-    if not addr:
-        raise RuntimeError("MINDMAP_SERVICE_ADDR is not configured")
+    def _addr(self) -> str:
+        if not self.addr:
+            raise RuntimeError("MINDMAP_SERVICE_ADDR is not configured")
+        return self.addr
 
-    channel = grpc.insecure_channel(addr)
-    stub = mindmap_pb2_grpc.MindmapServiceStub(channel)
-    try:
-        record = consume_generate_events(
-            stub.Generate(
+    def skeleton(self, mm_input: dict) -> tuple[list[dict], str]:
+        record = self._generate(mm_input)
+        return list(record.get("nodes") or []), "grpc-placeholder"
+
+    def enrich(self, mm_input, skeleton_nodes, progress_cb=None, cancel_cb=None):
+        if cancel_cb is not None and cancel_cb():
+            return list(skeleton_nodes or []), True
+        return list(skeleton_nodes or []), True
+
+    def relations(self, nodes, cancel_cb=None):
+        if cancel_cb is not None and cancel_cb():
+            return [], True
+        return [], True
+
+    def _generate(self, mm_input: dict) -> dict:
+        source_names = list(mm_input.get("sources") or [])
+        index_meta_path = str(mm_input.get("index_meta_path") or "")
+        channel = grpc.insecure_channel(self._addr())
+        stub = mindmap_pb2_grpc.MindmapServiceStub(channel)
+        try:
+            for event in stub.Generate(
                 mindmap_pb2.GenerateRequest(
-                    index_meta_path=str(index_meta_path),
-                    source_names=list(source_names or []),
-                    strategy=strategy_requested or "auto",
-                    generation_mode=generation_mode or "",
+                    index_meta_path=index_meta_path,
+                    source_names=source_names,
+                    strategy="auto",
+                    generation_mode="",
                 )
-            ),
-            progress_cb=progress_cb,
-        )
-    finally:
-        channel.close()
-
-    if append_mindmap is not None:
-        append_mindmap(record)
-    return record
+            ):
+                kind = event.WhichOneof("event")
+                if kind == "result":
+                    return json.loads(event.result.record_json or "{}")
+                if kind == "error":
+                    raise RuntimeError((event.error or "").strip() or "mindmap service error")
+        finally:
+            channel.close()
+        raise RuntimeError("mindmap service stream ended without result")

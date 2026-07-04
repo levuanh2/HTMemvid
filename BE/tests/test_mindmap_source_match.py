@@ -1,14 +1,9 @@
-"""Mindmap khớp nguồn theo canonical stem (đồng nhất retrieval) — không cần LLM.
-
-Bắt regression: tên file có space/dấu phải khớp chunk (video_path đã sanitize),
-và ưu tiên field source_stem ingest ghi.
-"""
-
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 
-from services.mindmap.worker import collect_chunks_for_sources, _repair_json_text
+from services.mindmap.worker import collect_chunks_for_sources
+from services.mindmap.jsonrepair import repair_json_text as _repair_json_text
 
 
 def _meta(entries):
@@ -24,7 +19,6 @@ def test_space_filename_matches_sanitized_video():
 
 
 def test_prefers_source_stem_field():
-    # video không liên quan, nhưng source_stem khớp tên chọn → vẫn lấy (ưu tiên source_stem).
     meta = _meta([{"text": "a", "video": "videos/unrelated_20260628_120000.mp4", "source_stem": "my_report_pdf"}])
     assert [c["key"] for c in collect_chunks_for_sources(meta, ["My Report.pdf"])] == ["0"]
 
@@ -56,13 +50,11 @@ def test_multi_source_selects_correctly():
 def test_ignores_meta_entry_and_blank_video():
     meta = {
         "0": {"text": "a", "video": "videos/A_pdf_20260628_120000.mp4"},
-        "1": {"text": "x", "video": ""},          # video rỗng → bỏ
+        "1": {"text": "x", "video": ""},
         "__meta__": {"version": "1.1", "num_chunks": 2},
     }
     assert [c["key"] for c in collect_chunks_for_sources(meta, ["A.pdf"])] == ["0"]
 
-
-# ── _repair_json_text (string-aware) ──────────────────────────────────────────
 
 def test_repair_strips_code_fence_and_extracts_object():
     raw = "```json\n{\"a\": 1}\n``` rác phía sau"
@@ -75,6 +67,5 @@ def test_repair_removes_trailing_commas_outside_strings():
 
 
 def test_repair_keeps_comma_inside_string():
-    # Dấu phẩy + '}'/']' NẰM TRONG chuỗi không được đụng tới.
     raw = '{"a": "x,]", "b": "y,}"}'
     assert json.loads(_repair_json_text(raw)) == {"a": "x,]", "b": "y,}"}

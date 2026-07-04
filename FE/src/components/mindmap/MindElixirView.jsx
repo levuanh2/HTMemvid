@@ -83,7 +83,9 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
   // below), so `data.id` is safe to PUT here.
   const handleSave = async () => {
     const mind = mindRef.current;
-    if (!mind || !dirty) return;
+    // `saving` in the guard: the button's disabled attr alone isn't a guarantee
+    // against double invocation (e.g. a queued second click before re-render).
+    if (!mind || !dirty || saving) return;
     setSaving(true);
     try {
       const record = mindElixirToRecord(mind.getData(), sidecarRef.current, data);
@@ -141,6 +143,11 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
           <Spinner size={12} />
           <span>
             Đang tạo lại sơ đồ…{typeof data?.progress === "number" ? ` (${data.progress}%)` : ""}
+            {/* Honest mitigation: when the regenerate finishes, SidebarRight swaps
+                the record → this viewer re-inits and dirty edits are discarded.
+                Full prevention needs dirty-state plumbing to the parent (tracked
+                as a known issue) — for now, at least say so. */}
+            {dirty ? " — thay đổi chưa lưu sẽ bị thay thế khi bản mới sẵn sàng." : ""}
           </span>
           {typeof data?.onCancel === "function" && (
             <button onClick={data.onCancel} className="underline" style={{ color: "var(--accent)" }}>

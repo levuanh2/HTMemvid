@@ -457,6 +457,68 @@ def similarity_search_lc(query: str, k: int = 5) -> List[str]:
     return [(d.page_content or "").strip() for d in docs if (d.page_content or "").strip()]
 
 
+def remove_chunks_from_lc_index(chunk_ids: list[int]) -> int:
+    if _skip_faiss_in_ci():
+        return 0
+    if not chunk_ids:
+        return 0
+
+    vs = load_vectorstore()
+    if vs is None:
+        return 0
+
+    wanted = {int(cid) for cid in chunk_ids}
+    docstore_ids: list[str] = []
+    doc_dict = getattr(vs.docstore, "_dict", {}) or {}
+    for docstore_id, doc in doc_dict.items():
+        md = getattr(doc, "metadata", {}) or {}
+        try:
+            cid = int(md.get("chunk_id"))
+        except Exception:
+            continue
+        if cid in wanted:
+            docstore_ids.append(str(docstore_id))
+
+    if not docstore_ids:
+        return 0
+
+    ok = vs.delete(ids=docstore_ids)
+    if ok is False:
+        raise RuntimeError("LangChain FAISS.delete returned False")
+
+    keep = int(os.environ.get("FAISS_BACKUP_KEEP", "3"))
+    _backup_dir_before_write(INDEX_DIR, keep=keep)
+    vs.save_local(str(INDEX_DIR))
+    return len(docstore_ids)
+
+
+def remove_chunks_from_raw_index(chunk_ids: list[int]) -> int:
+    if _skip_faiss_in_ci():
+        return 0
+
+    ids = [int(cid) for cid in chunk_ids]
+    if not ids or not os.path.exists(INDEX_PATH):
+        return 0
+
+    idx = faiss.read_index(INDEX_PATH)
+    removed = idx.remove_ids(np.array(ids, dtype="int64"))
+    keep = int(os.environ.get("FAISS_BACKUP_KEEP", "3"))
+    save_index_with_backup(idx, INDEX_DIR, keep=keep)
+    return int(removed)
+
+
+def _save_meta_with_updated_num_chunks(meta: Dict[str, Dict]) -> None:
+    meta_to_save = dict(meta)
+    old_meta = meta.get("__meta__", {}) if isinstance(meta.get("__meta__"), dict) else {}
+    num_chunks = sum(1 for k in meta_to_save.keys() if isinstance(k, str) and k.isdigit())
+    meta_to_save["__meta__"] = {
+        **old_meta,
+        "num_chunks": num_chunks,
+        "created_at": old_meta.get("created_at") or datetime.now().isoformat(),
+    }
+    _save_meta(meta_to_save)
+
+
 # ----- Public API (thay faiss_utils) -----
 def append_to_index(
     chunks: List[str],
@@ -630,9 +692,30 @@ def search_index(query: str, k: int = 5) -> List[str]:
 
 def delete_source_from_index(video_name: str):
     meta = _load_meta()
-    keep_meta = {k: v for k, v in meta.items() if v.get("video") != video_name}
-    _save_meta(keep_meta)
-    rebuild_chunk_index(keep_meta)
+    chunk_ids: List[int] = []
+    keep_meta: Dict[str, Dict] = {}
+
+    for k, v in meta.items():
+        if not isinstance(v, dict):
+            keep_meta[k] = v
+            continue
+        if isinstance(k, str) and k.isdigit() and v.get("video") == video_name:
+            chunk_ids.append(int(k))
+            continue
+        keep_meta[k] = v
+
+    if not chunk_ids:
+        return
+
+    try:
+        if _use_lc_vector_store():
+            remove_chunks_from_lc_index(chunk_ids)
+        else:
+            remove_chunks_from_raw_index(chunk_ids)
+        _save_meta_with_updated_num_chunks(keep_meta)
+    except Exception:
+        _save_meta_with_updated_num_chunks(keep_meta)
+        rebuild_chunk_index(keep_meta)
 
 
 def delete_chunks_by_source(source_id: str) -> int:
@@ -643,17 +726,32 @@ def delete_chunks_by_source(source_id: str) -> int:
     target = _normalize_source_id(source_id)
     keep_meta: Dict[str, Dict] = {}
     deleted = 0
+    chunk_ids: List[int] = []
 
     for k, v in meta.items():
+        if not isinstance(v, dict):
+            keep_meta[k] = v
+            continue
         video_raw = v.get("video", "")
         vid_norm = _normalize_source_id(video_raw)
-        if vid_norm == target:
+        if isinstance(k, str) and k.isdigit() and vid_norm == target:
             deleted += 1
+            chunk_ids.append(int(k))
             continue
         keep_meta[k] = v
 
-    _save_meta(keep_meta)
-    rebuild_chunk_index(keep_meta)
+    if deleted == 0:
+        return 0
+
+    try:
+        if _use_lc_vector_store():
+            remove_chunks_from_lc_index(chunk_ids)
+        else:
+            remove_chunks_from_raw_index(chunk_ids)
+        _save_meta_with_updated_num_chunks(keep_meta)
+    except Exception:
+        _save_meta_with_updated_num_chunks(keep_meta)
+        rebuild_chunk_index(keep_meta)
 
     return deleted
 

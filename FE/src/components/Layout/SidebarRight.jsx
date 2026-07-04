@@ -303,6 +303,16 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     onAskAbout?.(snippet);
   }, [onAskAbout]);
 
+  // Task 8: after MindElixirView's explicit Save (PUT /mindmaps/<id>) succeeds,
+  // sync both the saved-list card and the still-open modal with the returned
+  // record — spread `saved` first so v2 fields (schema_version/relations/
+  // generator) survive, mirroring the same rebuild-drops-fields lesson as
+  // handleMindmapDone above.
+  const handleMindmapSaved = useCallback((saved) => {
+    setMindMaps((prev) => prev.map((m) => (m.id === saved.id ? saved : m)));
+    setShowModalMap((prev) => (prev ? { ...prev, ...saved } : prev));
+  }, []);
+
   const handleDeleteMap = async (id) => {
     if (!window.confirm("Xóa sơ đồ này?")) return;
     try {
@@ -364,7 +374,8 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     progress: mindmapJobUi.progress,
     onCancel: handleCancelMindMap,
     onAskAbout: handleAskAbout,
-  } : null), [showModalMap, mindmapGenerating, mindmapJobUi.progress, handleAskAbout]);
+    onSaved: handleMindmapSaved,
+  } : null), [showModalMap, mindmapGenerating, mindmapJobUi.progress, handleCancelMindMap, handleAskAbout, handleMindmapSaved]);
 
   // ── Render ────────────────────────────────────────
   return (

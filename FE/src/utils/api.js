@@ -40,6 +40,24 @@ export const cancelMindmap = async (jobId) => {
   return res.json();
 };
 
+// `updateMindmap` — Task 8 explicit Save: PUT the edited record back to BE
+// (validates, protects id/hash/created_at/sources, sets generator.edited +
+// updated_at, returns the saved record). 404 for unknown id — including the
+// transient "preview" id, which callers must never PUT (see MindElixirView's
+// Save-button visibility guard).
+export const updateMindmap = async (id, record) => {
+  const res = await apiFetch(`/mindmaps/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(record),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+};
+
 // `fetchChunkText` — evidence lookup for the mindmap drawer. Returns the raw
 // chunk text, or null when the chunk id has no text (BE 404s that case).
 export const fetchChunkText = async (chunkId) => {

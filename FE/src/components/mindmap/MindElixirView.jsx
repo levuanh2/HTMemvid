@@ -1,7 +1,9 @@
 // Viewer mind-elixir — thay ReactFlow/ELK. Overlay fullscreen giữ từ v2.
 import { useEffect, useRef, useState, useCallback } from "react";
 import MindElixir from "mind-elixir";
-import { recordToMindElixir } from "../../utils/mindElixirAdapter";
+import { recordToMindElixir, mindElixirToRecord } from "../../utils/mindElixirAdapter";
+import { updateMindmap } from "../../utils/api";
+import { toast } from "../ui/Toaster";
 import EvidenceDrawer from "./EvidenceDrawer";
 import { Icon } from "../ui/Icon";
 import Spinner from "../ui/Spinner";
@@ -28,6 +30,7 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
   const [selected, setSelected] = useState(null);   // node cho EvidenceDrawer
   const [showRelations, setShowRelations] = useState(true);
   const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const degraded = Boolean(data?.generator?.degraded);
   const missing = data?.generator?.missing || [];
@@ -75,6 +78,26 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
     };
   }, [data?.id]);
 
+  // Task 8: explicit Save → PUT /mindmaps/<id>. Only reachable when the button
+  // is rendered (data.id real + not "preview" + not generating — see JSX
+  // below), so `data.id` is safe to PUT here.
+  const handleSave = async () => {
+    const mind = mindRef.current;
+    if (!mind || !dirty) return;
+    setSaving(true);
+    try {
+      const record = mindElixirToRecord(mind.getData(), sidecarRef.current, data);
+      const saved = await updateMindmap(data.id, record);
+      setDirty(false);
+      toast("Đã lưu sơ đồ", { type: "success" });
+      data.onSaved?.(saved); // SidebarRight bơm callback để cập nhật list + showModalMap
+    } catch (err) {
+      toast(`Không lưu được: ${err.message}`, { type: "error" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Esc đóng (confirm khi dirty — Task 8 nối)
   const requestClose = useCallback(() => {
     if (dirty && !window.confirm("Có thay đổi chưa lưu. Đóng và bỏ thay đổi?")) return;
@@ -98,7 +121,15 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
           <input type="checkbox" checked={showRelations} onChange={(e) => setShowRelations(e.target.checked)} />
           Quan hệ
         </label>
-        {/* Nút Lưu (Task 8), Export PNG (Task 9) gắn thêm tại đây */}
+        {/* Nút Lưu — chỉ hiện khi record đã có id thật trong sqlite (không phải
+            "preview" transient) và không đang generating, tránh PUT 404. Export
+            PNG (Task 9) gắn thêm tại đây. */}
+        {data?.id && data.id !== "preview" && !data.generating && (
+          <button onClick={handleSave} disabled={!dirty || saving}
+            className="btn-primary text-[12px] disabled:opacity-40">
+            {saving ? "Đang lưu…" : "Lưu"}
+          </button>
+        )}
         <button onClick={requestClose} aria-label="Đóng" className="p-1.5 rounded hover:bg-[var(--bg-hover)]">
           <Icon name="X" size={16} />
         </button>

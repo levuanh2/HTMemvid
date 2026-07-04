@@ -1,6 +1,7 @@
 // Viewer mind-elixir — thay ReactFlow/ELK. Overlay fullscreen giữ từ v2.
 import { useEffect, useRef, useState, useCallback } from "react";
 import MindElixir from "mind-elixir";
+import { snapdom } from "@zumer/snapdom";
 import { recordToMindElixir, mindElixirToRecord } from "../../utils/mindElixirAdapter";
 import { updateMindmap } from "../../utils/api";
 import { toast } from "../ui/Toaster";
@@ -100,6 +101,24 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
     }
   };
 
+  const handleExportPng = async () => {
+    const mind = mindRef.current;
+    const target = mind?.nodes;
+    if (!target) return;
+
+    try {
+      const backgroundColor =
+        getComputedStyle(document.documentElement).getPropertyValue("--bg-base").trim() || "#ECE7DB";
+      const result = await snapdom(target, { backgroundColor });
+      const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const safeTitle = String(data?.title || "mindmap").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 60);
+      await result.download({ format: "png", filename: `mindmap-${safeTitle}-${date}` });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast(`Không xuất được PNG: ${message}`, { type: "error" });
+    }
+  };
+
   // Esc đóng (confirm khi dirty — Task 8 nối)
   const requestClose = useCallback(() => {
     if (dirty && !window.confirm("Có thay đổi chưa lưu. Đóng và bỏ thay đổi?")) return;
@@ -132,6 +151,9 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
             {saving ? "Đang lưu…" : "Lưu"}
           </button>
         )}
+        <button onClick={handleExportPng} className="text-[12px] underline text-text-secondary">
+          Xuất PNG
+        </button>
         <button onClick={requestClose} aria-label="Đóng" className="p-1.5 rounded hover:bg-[var(--bg-hover)]">
           <Icon name="X" size={16} />
         </button>

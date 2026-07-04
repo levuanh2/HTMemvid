@@ -176,14 +176,13 @@
   python -m app.scripts.rebuild_sqlite_from_videos
   ```
 
-## (Chưa sửa) `/generate-mindmap` cache-hit không có `job_id` → FE ném lỗi "Server không trả job_id"
+## (ĐÃ SỬA 2026-07-04) `/generate-mindmap` cache-hit không có `job_id` → FE ném lỗi "Server không trả job_id"
 
-> **Rà lại 2026-07-04 (sau rewrite skeleton-first):** vấn đề VẪN CÒN nguyên trong pipeline mới.
-> Cache giờ là thật (`mindmap_store.get_by_hash(content_hash)` trong
-> `app/domains/mindmap/store.py`, xem `docs/MINDMAP_WORKFLOW.md`), nhưng nhánh trả về khi cache hit
-> ở `BE/app/main.py::generate_mindmap` không đổi: vẫn trả thẳng
-> `{"status":"done","result":cached,"cached":true}` KHÔNG có `job_id`. Chưa sửa — vẫn ngoài phạm vi
-> các task đã làm tới nay.
+> **Resolved 2026-07-04 (Task 16, commit aec6017):** FE `SidebarRight.jsx::runMindmapGeneration`
+> giờ nhánh theo `startData.status === "done" && startData.result` TRƯỚC khi kiểm `job_id`
+> (SidebarRight.jsx ~dòng 222-226) — cache-hit dùng thẳng `result`, bỏ polling. Phía BE trả
+> `{"status":"done","result",...}` không có job_id là THIẾT KẾ của cache thật, không phải bug.
+> Giữ mục này làm lịch sử; phần dưới mô tả trạng thái TRƯỚC khi sửa.
 
 - **Triệu chứng:** Bấm "Tạo sơ đồ" (KHÔNG force) cho nguồn đã có mindmap cache theo `content_hash`
   → thay vì hiện lại map cũ ngay, FE alert lỗi "Không tạo được sơ đồ: Server không trả job_id."

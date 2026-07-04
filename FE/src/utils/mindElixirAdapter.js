@@ -17,12 +17,23 @@ export function recordToMindElixir(record) {
   const norm = normalizeMindmapRecord(record);
   const sidecar = new Map();
   const byParent = new Map();
+  const ids = new Set(norm.nodes.map((n) => n.id));
   let root = null;
+  const orphans = []; // extra parentless nodes + dangling parent refs — rescued under root
   for (const n of norm.nodes) {
     sidecar.set(n.id, { note: n.note || "", chunkRefs: n.chunkRefs || [], kind: n.kind });
-    if (n.kind === "root" || n.parent == null) { root = root || n; continue; }
+    if (!root && (n.kind === "root" || n.parent == null)) { root = n; continue; }
+    if (n.parent == null || !ids.has(n.parent)) { orphans.push(n); continue; }
     if (!byParent.has(n.parent)) byParent.set(n.parent, []);
     byParent.get(n.parent).push(n);
+  }
+  // Reparent orphans under root, AFTER its existing children — otherwise the tree
+  // walk drops them and a load+save round-trip silently deletes those subtrees.
+  if (root && orphans.length) {
+    if (!byParent.has(root.id)) byParent.set(root.id, []);
+    const kids = byParent.get(root.id);
+    let next = kids.reduce((m, c) => Math.max(m, c.order ?? 0), -1) + 1;
+    for (const n of orphans) kids.push({ ...n, order: next++ });
   }
   const toTree = (n) => ({
     id: n.id, topic: n.title,

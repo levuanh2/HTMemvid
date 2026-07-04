@@ -36,6 +36,37 @@ describe("recordToMindElixir", () => {
     expect(a.delta1).toBeTruthy(); // arrows inject qua data cần delta
   });
 
+  it("multi-root: node parent null thứ hai được đưa về dưới root + round-trip giữ lại", () => {
+    const rec = {
+      ...REC,
+      nodes: [
+        ...REC.nodes,
+        { id: "n9", parent: null, kind: "section", title: "Gốc thừa", note: "", chunk_refs: [], order: 0 },
+      ],
+    };
+    const { mindData, sidecar } = recordToMindElixir(rec);
+    // đứng SAU các con sẵn có của root, không bị drop
+    expect(mindData.nodeData.children.map((c) => c.id)).toEqual(["n1", "n2", "n9"]);
+    const out = mindElixirToRecord(mindData, sidecar, rec);
+    expect(out.nodes.find((n) => n.id === "n9")).toMatchObject({ parent: "n0", kind: "section" });
+  });
+
+  it("dangling parent: node trỏ GHOST vẫn hiện dưới root, round-trip giữ note/chunk_refs", () => {
+    const rec = {
+      ...REC,
+      nodes: [
+        ...REC.nodes,
+        { id: "n8", parent: "GHOST", kind: "idea", title: "Mồ côi", note: "ghi chú mồ côi", chunk_refs: ["7"], order: 0 },
+      ],
+    };
+    const { mindData, sidecar } = recordToMindElixir(rec);
+    expect(mindData.nodeData.children.map((c) => c.id)).toContain("n8");
+    const out = mindElixirToRecord(mindData, sidecar, rec);
+    expect(out.nodes.find((n) => n.id === "n8")).toMatchObject({
+      parent: "n0", kind: "idea", note: "ghi chú mồ côi", chunk_refs: ["7"],
+    });
+  });
+
   it("v1 legacy đi qua normalize không vỡ", () => {
     const legacy = { title: "L", nodes: [{ id: "root", parent: null, title: "L" }] };
     const { mindData } = recordToMindElixir(legacy);

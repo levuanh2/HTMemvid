@@ -52,7 +52,8 @@ export async function exportMindmapPng({ getNodes, title }) {
   const nodesBounds = getRectOfNodes(nodes);
   const width = Math.max(MIN_CANVAS, Math.min(MAX_CANVAS, Math.round(nodesBounds.width + EXPORT_PADDING * 2)));
   const height = Math.max(MIN_CANVAS * 0.6, Math.min(MAX_CANVAS, Math.round(nodesBounds.height + EXPORT_PADDING * 2)));
-  const transform = getTransformForBounds(nodesBounds, width, height, 0.2, 2, EXPORT_PADDING);
+  // padding là FRACTION (0-1) theo getViewportForBounds — KHÔNG truyền pixel
+  const transform = getTransformForBounds(nodesBounds, width, height, 0.2, 2, 0);
 
   const dataUrl = await toPng(viewportEl, {
     backgroundColor: readThemeBackground(),

@@ -314,14 +314,19 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
   }, [reactFlowInstance, isMobile]);
 
   const [exportingPng, setExportingPng] = useState(false);
+  const [exportError, setExportError] = useState(null);
   const exportTitle = model.title || data?.title;
   const handleExportPng = useCallback(async () => {
     if (exportingPng) return;
+    setExportError(null);
     setExportingPng(true);
     try {
       await exportMindmapPng({ getNodes: reactFlowInstance.getNodes, title: exportTitle });
     } catch (err) {
       console.error("Xuất PNG thất bại:", err);
+      setExportError("Xuất PNG thất bại — thử lại.");
+      const timerId = setTimeout(() => setExportError(null), 5000);
+      return () => clearTimeout(timerId);
     } finally {
       setExportingPng(false);
     }
@@ -607,6 +612,7 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
         regenerating={regenerating}
         onExportPng={handleExportPng}
         exportingPng={exportingPng}
+        exportError={exportError}
       />
 
       {generating && (

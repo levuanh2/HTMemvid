@@ -15,6 +15,7 @@ export default function MindmapToolbar({
   showLargeWarning, showFullHint, showOverviewHint,
   hasRelations, relationsVisible, onToggleRelations,
   degraded, missing, onRegenerate, regenerating,
+  onExportPng, exportingPng,
 }) {
   return (
     <>
@@ -73,6 +74,16 @@ export default function MindmapToolbar({
           <button onClick={onCenterView} className="btn-secondary px-2 py-1.5 text-[11px] gap-1" title="Căn giữa sơ đồ"><Icon name="Maximize2" size={13} /></button>
           <button onClick={onExpandAll} className="btn-secondary px-2 py-1.5 text-[11px] gap-1"><Icon name="Plus" size={13} /><span className="hidden sm:inline">Mở hết</span></button>
           <button onClick={onCollapseAll} className="btn-secondary px-2 py-1.5 text-[11px] gap-1"><Icon name="Minus" size={13} /><span className="hidden sm:inline">Thu hết</span></button>
+          {onExportPng && (
+            <button
+              onClick={onExportPng}
+              disabled={exportingPng}
+              className="btn-secondary px-2 py-1.5 text-[11px] gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Xuất sơ đồ ra ảnh PNG"
+            >
+              <Icon name="Download" size={13} /><span className="hidden sm:inline">{exportingPng ? "Đang xuất…" : "Xuất PNG"}</span>
+            </button>
+          )}
           <button onClick={onClose} className="btn-secondary px-2 py-1.5 text-[11px] gap-1"><Icon name="X" size={13} /><span className="hidden sm:inline">Đóng</span></button>
         </div>
       </div>

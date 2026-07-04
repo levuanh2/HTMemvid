@@ -37,6 +37,7 @@ import { NapkinNode } from "./MindmapNodeCard";
 import RelationEdge from "./RelationEdge";
 import MindmapToolbar from "./MindmapToolbar";
 import EvidenceDrawer from "./EvidenceDrawer";
+import { exportMindmapPng } from "./exportPng";
 
 // =====================
 // PROFESSIONAL CLEAN CURVE (fixed endpoints) — tree edge renderers
@@ -311,6 +312,20 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
     lastInteractionRef.current = "manual-fit";
     reactFlowInstance.fitView({ padding: isMobile ? 0.12 : 0.22, duration: 300 });
   }, [reactFlowInstance, isMobile]);
+
+  const [exportingPng, setExportingPng] = useState(false);
+  const exportTitle = model.title || data?.title;
+  const handleExportPng = useCallback(async () => {
+    if (exportingPng) return;
+    setExportingPng(true);
+    try {
+      await exportMindmapPng({ getNodes: reactFlowInstance.getNodes, title: exportTitle });
+    } catch (err) {
+      console.error("Xuất PNG thất bại:", err);
+    } finally {
+      setExportingPng(false);
+    }
+  }, [reactFlowInstance, exportTitle, exportingPng]);
 
   const handleNodeDragStop = useCallback((event, node) => {
     setInnerNodes((prev) => {
@@ -590,6 +605,8 @@ export default function MindmapView({ data, onClose, initialLayoutType, onRegene
         missing={formatMissing(model.missing)}
         onRegenerate={onRegenerate}
         regenerating={regenerating}
+        onExportPng={handleExportPng}
+        exportingPng={exportingPng}
       />
 
       {generating && (

@@ -35,7 +35,6 @@ export const EDGE_MODES = [
   { value: "clean",    label: "Gọn" },
   { value: "minimal",  label: "Tối giản" },
   { value: "full",    label: "Đầy đủ dây" },
-  { value: "semantic", label: "Phụ" },
 ];
 
 // =====================

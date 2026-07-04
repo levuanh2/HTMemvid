@@ -73,9 +73,9 @@ const normalizeV1 = (record) => {
         const id = String(n.id);
         const extra = diagramMap.get(id) || {};
         const parent = n.parent == null ? null : String(n.parent);
-        const kind = extra.type === "root" || n.type === "root"
+        const kind = extra.type === "root" || (!extra.type && parent == null)
           ? KIND_ROOT
-          : (extra.type || n.kind || (parent == null ? KIND_ROOT : KIND_DEFAULT));
+          : (extra.type || KIND_DEFAULT);
         return {
           id,
           parent,
@@ -91,7 +91,9 @@ const normalizeV1 = (record) => {
       .filter((n) => n && n.id != null)
       .map((n, index) => {
         const parent = n.parent == null ? null : String(n.parent);
-        const kind = n.type === "root" || parent == null || index === 0 ? KIND_ROOT : (n.type || KIND_DEFAULT);
+        const kind = n.type === "root"
+          ? KIND_ROOT
+          : (n.type ? n.type : (index === 0 ? KIND_ROOT : KIND_DEFAULT));
         return {
           id: String(n.id),
           parent,
@@ -127,7 +129,8 @@ const normalizeV1 = (record) => {
     });
 
   return {
-    title: record.title || record?.diagram?.title || "",
+    // diagram title first for v1 legacy; empty string contract for garbage inputs
+    title: record?.diagram?.title || record.title || "",
     nodes,
     relations,
     degraded: false,

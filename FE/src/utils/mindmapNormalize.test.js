@@ -30,4 +30,26 @@ describe("normalizeMindmapRecord", () => {
   it("returns empty model for garbage", () => {
     expect(normalizeMindmapRecord(null).nodes).toEqual([]);
   });
+
+  it("v1: diagram extra.type wins over flat node fields for kind", () => {
+    const rec = {
+      title: "flat",
+      nodes: [
+        { id: "a", parent: null, title: "A", type: "root", kind: "section" },
+        { id: "b", parent: "a", title: "B" },
+      ],
+      diagram: { title: "diagram-title", nodes: [{ id: "b", type: "process" }], edges: [] },
+    };
+    const out = normalizeMindmapRecord(rec);
+    expect(out.title).toBe("diagram-title");                    // diagram title first (v1)
+    expect(out.nodes.find(n => n.id === "a").kind).toBe("root"); // parentless, no extra.type
+    expect(out.nodes.find(n => n.id === "b").kind).toBe("process"); // extra.type wins
+  });
+
+  it("v1 diagram-only: only index 0 becomes root when type absent", () => {
+    const rec = { diagram: { nodes: [{ id: "x" }, { id: "y" }], edges: [] } };
+    const out = normalizeMindmapRecord(rec);
+    expect(out.nodes[0].kind).toBe("root");
+    expect(out.nodes[1].kind).not.toBe("root");
+  });
 });

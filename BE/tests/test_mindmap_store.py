@@ -50,3 +50,19 @@ def test_migrate_from_json_idempotent(tmp_path, monkeypatch):
     assert store.migrate_from_json(p) == 0  # idempotent
     rec = store.list_records()[0]
     assert rec["schema_version"] == 1 and rec["id"] == "old1"
+
+
+def test_migrate_renames_json_to_prevent_resurrection(tmp_path, monkeypatch):
+    """Bug 2026-07-04: record đã xoá bị 'hồi sinh' vì mỗi restart migrate re-import
+    từ mindmaps.json backup. Fix: migrate xong rename file → .migrated."""
+    _use_tmp_db(tmp_path, monkeypatch)
+    legacy = [{"id": "old2", "title": "L", "nodes": [], "sources": ["s"], "createdAt": "2025-04-29T00:00:00"}]
+    p = tmp_path / "mindmaps.json"
+    p.write_text(json.dumps(legacy), encoding="utf-8")
+    assert store.migrate_from_json(p) == 1
+    assert not p.exists()                                  # file gốc đã rename
+    assert (tmp_path / "mindmaps.json.migrated").exists()  # backup còn nguyên
+    # Mô phỏng: user xoá record → restart (migrate chạy lại) → KHÔNG hồi sinh
+    assert store.delete_record("old2") is True
+    assert store.migrate_from_json(p) == 0                 # file không còn → no-op
+    assert store.list_records() == []

@@ -249,6 +249,13 @@ def migrate_from_json(json_path: Path) -> int:
                 )
                 inserted += max(cur.rowcount, 0)
             conn.commit()
-            return inserted
         finally:
             conn.close()
+
+    # Chặn "hồi sinh": record đã xoá khỏi sqlite sẽ bị re-import ở lần restart sau
+    # nếu json backup còn nguyên tên. Migrate xong → rename thành .migrated (giữ backup).
+    try:
+        p.replace(p.with_name(p.name + ".migrated"))
+    except Exception:
+        pass  # rename fail → hành vi cũ (benign), lần sau thử lại
+    return inserted

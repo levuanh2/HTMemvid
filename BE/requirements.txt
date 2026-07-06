@@ -39,6 +39,7 @@ pytest>=8.0.0
 pydantic>=2.7.4,<2.11      # 2.11+ kéo typing_inspection → ForbiddenQualifier('not_required') khi StateGraph(QueryState) build từ TypedDict có NotRequired (langgraph 0.2.x). Xem .playbook
 python-docx
 python-dotenv
+redis>=5,<6   # cache semantic/retrieval (fail-open khi REDIS_URL rỗng) — pure-python, không chạm langgraph. Xem docs/SEMANTIC_CACHE_SPEC.md
 qrcode[pil]
 requests
 scikit-learn

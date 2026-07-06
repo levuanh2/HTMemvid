@@ -27,6 +27,12 @@ def history_to_lc_messages(history: Optional[List[Dict[str, Any]]]) -> list:
 
 
 def _qa_messages(question: str, context_text: str, *, history: Optional[List[Dict[str, Any]]]) -> list:
+    # Tier 1 (prompt/prefix cache): thứ tự message CỐ ĐỊNH static-first —
+    # System(instruction + RAG context) → history → câu hỏi hiện tại.
+    # Phần đầu ổn định giữa các request cùng context giúp provider tái dùng
+    # KV/prefix cache (Ollama KV reuse, Gemini implicit caching) → giảm TTFT.
+    # ĐỔI system prompt này → bump llm_cache.PROMPT_VERSION
+    # (app/domains/cache/llm_cache.py) để vô hiệu semantic cache cũ.
     sys_txt = (
         "Bạn là trợ lý nghiên cứu. Chỉ dùng thông tin trong phần Context; "
         "nếu không đủ, nói rõ — không bịa.\n\n"

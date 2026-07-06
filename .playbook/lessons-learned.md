@@ -1,5 +1,34 @@
 # Lessons Learned
 
+## Cache 3 tầng (Redis): bucket-key encode mọi điều kiện match = chống poisoning theo cấu trúc
+
+- **Bối cảnh (2026-07-06):** thêm semantic response cache + retrieval cache (Redis, fail-open)
+  cho pipeline query — spec đầy đủ `docs/SEMANTIC_CACHE_SPEC.md`, module
+  `app/domains/cache/llm_cache.py` + `app/clients/redis_client.py`. Điểm cắm: L2 trong
+  `main._get_cached_query`/`_set_cached_query` (graph không đổi cho Tier 2, thừa hưởng guard
+  history/processing/empty-answer sẵn có) + wrap `_do_hybrid_retrieve` cho Tier 3.
+- **Bài học thiết kế:**
+  1. Semantic cache KHÔNG so cosine tự do — bucket key sha256(namespace|env|PROMPT_VERSION|
+     embedding model|LATE_CHUNKING|index_version|sources|language|category|use_memory_tree);
+     chỉ so cosine TRONG bucket. Khác điều kiện = khác bucket = không thể false-hit chéo.
+     Đây là dạng tổng quát của bài học "cache key phải hash MỌI input ảnh hưởng output"
+     (mindmap content_hash).
+  2. index_version = `os.stat(index.json).st_mtime_ns-size` — KHÔNG import store (kéo
+     faiss/langchain), KHÔNG đọc nội dung file (nặng). `_save_meta` atomic-replace đảm bảo
+     mtime đổi mỗi ingest/delete → mọi cache liên quan tài liệu tự vô hiệu, không cần event bus.
+  3. Fail-open phải có "cửa sổ unavailable" (60s) — không thì Redis chết = mỗi request ăn
+     0.5s timeout. `mark_unavailable()` khi op lỗi giữa chừng, không chỉ lúc connect.
+  4. Risk-classifier deny-regex (personal/realtime) chạy TRƯỚC khi ghi cache. Regex bảo thủ
+     có false-positive chấp nhận được (deny nhầm = chỉ mất 1 cơ hội cache) — test semantic
+     phải dùng câu hỏi trung tính, đừng dùng câu chứa "password"/"giá"/"hôm nay".
+  5. Threshold có sàn cứng 0.80 (clamp + warning; override phải bật cờ riêng) — hạ threshold
+     để tăng hit-rate là công thức cache poisoning.
+- **Regression:** `tests/test_llm_cache.py` (14 case: exact/semantic hit, bucket miss,
+  index_version miss, expired+SREM, fail-open window, floor clamp, risk deny, retrieval
+  round-trip, real-graph history bypass). Đổi system prompt qa_chain → bump
+  `llm_cache.PROMPT_VERSION`; đổi format `_make_query_cache_key` → sửa
+  `llm_cache._parse_cache_key` (lệch = miss im lặng, hướng fail-safe).
+
 ## Xoá source trên FAISS: LangChain dùng docstore id, legacy raw-FAISS dùng `chunk_id`
 
 - **Root cause:** Hai backend lưu id khác nhau. LangChain FAISS giữ vector theo `docstore_id`

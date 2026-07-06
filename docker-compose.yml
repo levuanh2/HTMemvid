@@ -35,12 +35,16 @@ services:
       HF_HOME: /root/.cache/huggingface
       LLM_GATEWAY_ADDR: llm-gateway:50051
       MINDMAP_SERVICE_ADDR: mindmap-service:50052
+      # Cache Redis (semantic + retrieval) — fail-open: redis chết thì backend vẫn chạy.
+      REDIS_URL: redis://redis:6379/0
+      CACHE_ENV: prod
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       - llm-gateway
       - mindmap-service
+      - redis
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
       interval: 10s
@@ -119,6 +123,19 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - llm-gateway
+
+  redis:
+    image: redis:7-alpine
+    # Cache thuần (không persistence): maxmemory nhỏ + allkeys-lru, TTL tự dọn.
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "no", "--save", ""]
+    expose:
+      - "6379"
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
 
   frontend:
     build:

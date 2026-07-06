@@ -41,6 +41,7 @@ from app.domains.vectorstore.store import (
     MODEL_NAME,
 )
 from app.clients.llm_factory import ask_ai, summarize_whole_document, summarize_results
+from app.domains.cache import llm_cache
 # Chỉ dùng cho local Ollama (Gemini sẽ bỏ qua model).
 SLM_MODEL = os.environ.get("SLM_MODEL_CHAT", os.environ.get("SLM_MODEL", "qwen3.6:35b-a3b"))
 SLM_MODEL_SUMMARY = os.environ.get("SLM_MODEL_SUMMARY", "gemma2:2b")
@@ -199,6 +200,9 @@ def _cleanup_old_query_jobs() -> None:
 
 def _make_query_cache_key(q: str, selected_sources: list, use_memory_tree: bool, filters: dict | None = None) -> str:
     # Normalize list để key ổn định theo thứ tự chọn
+    # LƯU Ý: llm_cache.semantic_lookup/store PARSE JSON này (keys: q/sources/
+    # use_memory_tree/category/language) — đổi format ở đây phải xem lại
+    # app/domains/cache/llm_cache.py::_parse_cache_key (lệch = miss im lặng).
     sources_norm = selected_sources or []
     sources_norm = [str(s) for s in sources_norm if s is not None]
     sources_norm = sorted(sources_norm)
@@ -219,13 +223,14 @@ def _get_cached_query(cache_key: str) -> Optional[dict]:
     now = time.time()
     with _query_cache_lock:
         entry = _query_cache.get(cache_key)
-        if not entry:
-            return None
-        if now - entry["ts"] > QUERY_CACHE_TTL_SEC:
-            _query_cache.pop(cache_key, None)
-            return None
-        _query_cache.move_to_end(cache_key)
-        return entry["value"]
+        if entry:
+            if now - entry["ts"] > QUERY_CACHE_TTL_SEC:
+                _query_cache.pop(cache_key, None)
+            else:
+                _query_cache.move_to_end(cache_key)
+                return entry["value"]
+    # L2: semantic cache Redis (cross-worker, exact + cosine) — fail-open, None nếu miss/Redis chết.
+    return llm_cache.semantic_lookup(cache_key)
 
 def _set_cached_query(cache_key: str, value: dict) -> None:
     with _query_cache_lock:
@@ -234,6 +239,8 @@ def _set_cached_query(cache_key: str, value: dict) -> None:
         _query_cache[cache_key] = {"ts": time.time(), "value": value}
         while len(_query_cache) > QUERY_CACHE_MAX_SIZE:
             _query_cache.popitem(last=False)
+    # L2: ghi semantic cache (chỉ khi classify_risk cho phép) — fire-and-forget, fail-open.
+    llm_cache.semantic_store(cache_key, value)
 
 
 @app.get('/')
@@ -291,6 +298,8 @@ def stats():
         "num_documents": num_documents,
         "num_chunks": num_chunks,
         "num_videos": num_videos,
+        # Counter per-worker (gunicorn); aggregate thật xem redis-cli INFO stats.
+        "cache": llm_cache.stats(),
     }), 200
 
 
@@ -1635,6 +1644,13 @@ def delete_source():
                 delete_source_from_index(stored)
             except Exception as e:
                 print("delete_source_from_index failed:", stored, e)
+
+        # Cache Redis: index_version (mtime index.json) đã đổi nên entry cũ tự orphan;
+        # xoá chủ động thêm cho chắc (best-effort, fail-open).
+        try:
+            llm_cache.invalidate_all()
+        except Exception as e:
+            print("cache invalidate failed:", e)
 
         # Xóa file video vật lý CHÍNH XÁC theo path đã lưu (KHÔNG glob).
         for stored in stored_names:

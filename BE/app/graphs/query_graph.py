@@ -15,6 +15,7 @@ from langgraph.graph import END, StateGraph
 from app.graphs.logger import _Timer, log_node_event
 from app.graphs.sqlite_checkpointer import sqlite_saver_from_path
 from app.graphs.state import QueryState
+from app.domains.cache import llm_cache
 from app.domains.retrieval import grading, nli, query_rewrite, rerank
 from app.domains.retrieval.ensemble_retriever import hybrid_retrieve_with_ensemble
 from app.domains.retrieval.hybrid import HybridRetriever
@@ -143,6 +144,7 @@ def build_query_graph(
                 return {**state, "cache_key": None, "progress": 5, "current_node": "CacheLookup", "error": None}
             # Multi-turn: không cache vì phụ thuộc history
             if state.get("conversation_history"):
+                llm_cache.METRICS["bypass_history"] += 1
                 return {**state, "cache_key": None, "progress": 5, "current_node": "CacheLookup", "error": None}
 
             cache_key = make_cache_key(
@@ -210,8 +212,15 @@ def build_query_graph(
             f_language = state.get("language") or None
 
             def _do_hybrid_retrieve():
+                # Tier 3: retrieval cache (Redis, fail-open) — key theo state["q"] tại
+                # thời điểm gọi nên đúng cả khi CRAG rewrite câu hỏi. Xem docs/SEMANTIC_CACHE_SPEC.md.
+                cached = llm_cache.retrieval_get(
+                    state["q"], selected_sources, RETRIEVE_TOP_K, f_category, f_language
+                )
+                if cached is not None:
+                    return cached
                 if USE_LC_ENSEMBLE:
-                    return hybrid_retrieve_with_ensemble(
+                    out = hybrid_retrieve_with_ensemble(
                         retriever,
                         state["q"],
                         selected_sources=selected_sources,
@@ -219,13 +228,18 @@ def build_query_graph(
                         category=f_category,
                         language=f_language,
                     )
-                return retriever.retrieve(
-                    state["q"],
-                    selected_sources=selected_sources,
-                    top_k=RETRIEVE_TOP_K,
-                    category=f_category,
-                    language=f_language,
+                else:
+                    out = retriever.retrieve(
+                        state["q"],
+                        selected_sources=selected_sources,
+                        top_k=RETRIEVE_TOP_K,
+                        category=f_category,
+                        language=f_language,
+                    )
+                llm_cache.retrieval_put(
+                    state["q"], selected_sources, RETRIEVE_TOP_K, f_category, f_language, out
                 )
+                return out
 
             hist_patch: dict = {}
             retrieved = None

@@ -150,6 +150,28 @@ redis:
 ```
 Backend thêm: `REDIS_URL: redis://redis:6379/0`, `CACHE_ENV: prod`, `depends_on: redis`.
 
+## Số đo calibration thực (2026-07-06, bge-m3 mean-pool late-chunk, câu hỏi tiếng Việt)
+
+Đo cosine trên máy dev (smoke Docker + script encode thật):
+
+| Cặp | sim | Loại |
+|---|---|---|
+| "Các hình thức tấn công SE phổ biến?" ~ "Những kiểu tấn công SE thường gặp?" | 0.699 | positive |
+| "Cách phòng chống SE?" ~ "Làm thế nào để phòng tránh SE?" | 0.798 | positive |
+| "Social Engineering là gì?" ~ "Định nghĩa Social Engineering" | 0.547 | positive |
+| "Phishing là gì?" ~ "Whaling là gì?" | **0.727** | **negative** |
+| "Hình thức tấn công SE?" ~ "Tác hại của SE?" | **0.788** | **negative** |
+
+**Kết luận:** phân bố positive (0.55–0.80) và negative (0.46–0.79) CHỒNG LẤN — encoder
+mean-pool bge-m3 (tối ưu document embedding) không phân tách intent câu hỏi ngắn. Bất kỳ
+threshold nào <0.85 sẽ false-hit kiểu "hỏi Phishing trả answer Whaling". Do đó:
+- **Giữ threshold 0.85**: semantic tier thực chất = exact + near-duplicate cache (an toàn
+  tuyệt đối); exact hit đo thật 1.0s vs 31.6s cold — giá trị chính nằm ở đây.
+- KHÔNG hạ threshold để tăng hit rate với encoder hiện tại.
+- Upgrade path nếu muốn semantic hit thật: encoder sentence-similarity riêng cho cache
+  (vd bge-m3 CLS + query instruction, hoặc model sentence-sim), thêm env
+  `SEMANTIC_CACHE_EMBED_MODEL` — đổi encoder tự đổi bucket (emb_model nằm trong bucket key).
+
 ## Tuning TTL & threshold
 
 - **TTL 48h** (mặc định) cho answer từ tài liệu đã ingest — tĩnh trong đời index. Muốn ngắn hơn
@@ -204,7 +226,12 @@ RetrievedChunk; 13. retrieval invalidation theo index_version; 14. metrics + `/s
       (đã ignore 5 file graph-test drift theo playbook); `.playbook/lessons-learned.md` đã có
       mục "Cache 3 tầng (Redis)"
 
-### Còn lại (smoke thủ công, cần Docker/Redis thật)
-- [ ] `docker compose up redis backend` → hỏi 1 câu 2 lần (lần 2 tức thì), câu paraphrase
-      (semantic hit), `GET /stats` xem counters
-- [ ] Dev không Redis: xác nhận app chạy bình thường, không log lỗi lặp
+### Smoke Docker (2026-07-06 — ĐÃ CHẠY)
+- [x] Full stack up (5 service, redis healthy). Hỏi 1 câu 2 lần: cold **31.6s** → repeat
+      **1.0s** (hits_exact, saved_llm_calls tăng đúng). Entry Redis đầy đủ answer+vec+metadata,
+      key đúng schema `memvid:prod:sc:{bucket}:e:{eid}` + `ret:*`.
+- [x] Paraphrase KHÔNG hit — đúng thiết kế với threshold 0.85 (xem bảng calibration trên:
+      sim positive thực chỉ 0.55–0.80, chồng lấn negative).
+- [x] Dev không Redis: 14 test fail-open + suite 215 pass với REDIS_URL rỗng.
+- Lưu ý build Docker: mạng máy dev flaky → pip trong build fail 2 lần transient
+  (`RemoteDisconnected`); retry là xong, không phải lỗi requirements.

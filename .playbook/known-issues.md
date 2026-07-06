@@ -1,5 +1,54 @@
 # Known Issues
 
+## (ĐÃ SỬA 2026-07-06) Cache hit trả "Không có phản hồi." — race job done-trước-result + 4 lỗ contract
+
+- **Triệu chứng:** Câu hỏi bị cache HIT (nhanh <1s) → FE hiện "Không có phản hồi." dù Redis
+  có answer đầy đủ; câu MISS (chậm 30s+) trả lời bình thường. User thấy: "noi dung la gi"
+  OK nhưng "nội dung là gì"/"nọi dung là gì" rỗng. Reproduce 3/3 bằng smoke script.
+- **Root cause (đo trực tiếp, không đoán):** `finalize_node` set `status="done"` vào jobs_store
+  NGAY TRONG graph; `result` được `_finalize_query_job` (main.py) gắn SAU khi `graph.invoke`
+  trả về — giữa 2 bước còn `_detect_query_interrupt` đọc checkpoint sqlite (chậm, state to).
+  Job nhanh → FE poll trúng cửa sổ `status=done, result=None` → answer rỗng. Job chậm không
+  bao giờ trúng → asymmetry đánh lừa chẩn đoán về phía diacritics/cache-logic.
+- **Fix:** finalize_node KHÔNG set status nữa (chỉ progress); "done" đi CÙNG result trong một
+  update duy nhất ở `_finalize_query_job`. + Bịt 4 lỗ contract (codex audit xác nhận):
+  1. cache_lookup_node: hit phải có answer non-empty mới `done=True`; lookup exception →
+     đi tiếp pipeline (trước đây → ErrorHandler, chặn đường trả lời).
+  2. Mọi hit path trong llm_cache (`_answer_ok`): entry answer rỗng = không tồn tại.
+  3. Mọi write path (semantic_store, _set_cached_query L1, finalize): answer rỗng/whitespace
+     không được ghi (`cache_write_skipped_empty_answer`).
+  4. `gen_fallback` flag: message chẩn đoán "Không nhận được phản hồi từ model..." KHÔNG
+     được cache (trước đây cache như answer thật → poisoning mọi câu tương đương).
+- **Regression:** `test_llm_cache.py` — empty_cached_answer_treated_as_miss_all_paths,
+  store_skips_empty_answer, vn_variant_flow_same_document, graph_cache_hit_empty_answer_falls_through,
+  graph_cache_lookup_exception_falls_back_to_llm, graph_finalize_skips_store_when_answer_empty
+  (31 test). Smoke: `python BE/scripts/smoke_semantic_cache.py` — 6/6 PASS.
+- **Prevention:** (1) Trạng thái terminal của job PHẢI được ghi atomically cùng payload kết quả
+  — không bao giờ set "done" ở một tầng rồi gắn result ở tầng khác. (2) Bug "lúc có lúc không"
+  tương quan với TỐC ĐỘ response = nghĩ ngay đến race polling, đừng chỉ soi logic nghiệp vụ.
+  (3) Cache lookup exception không bao giờ được route sang error-terminal — cache là tối ưu.
+
+## (2026-07-06) bge-m3: câu Việt CÓ dấu vs KHÔNG dấu embed rất khác nhau (cosine 0.558) — đừng gác diacritics bằng cosine
+
+- **Triệu chứng:** Nâng cấp semantic cache, thiết kế đầu: alias không-dấu hit phải verify
+  cosine ≥ threshold (chống đồng tự "bán"/"bàn"). Smoke Docker thật: "noi dung chinh cua
+  tai lieu la gi" KHÔNG hit entry "Nội dung chính của tài liệu là gì?" — đo trực tiếp
+  trong container: cosine 2 form = **0.558** (threshold 0.85).
+- **Nguyên nhân:** bge-m3 mean-pool tokenize 2 form khác hẳn nhau → cặp CÙNG nghĩa
+  có/không dấu sim thấp; ngược lại cặp homograph KHÁC nghĩa (lệch 1 ký tự) sim rất cao
+  → cosine verify gác NGƯỢC chiều đe doạ: chặn true-positive, cho qua false-positive.
+- **Cách xử lý (đã làm):** bỏ cosine verify ở alias path; gác bằng **LLM judge** (so intent
+  2 câu dạng chữ — judge thấy dấu, phân biệt được nghĩa). Judge tắt → alias hit thẳng
+  (toàn câu normalized trùng modulo dấu = tín hiệu mạnh, đánh đổi ghi rõ trong DR-2).
+  Regression: `test_nodia_variant_hits_via_alias`, `test_nodia_reverse_direction_hits`,
+  `test_nodia_alias_homograph_judge_denies`. Smoke live: hit `kind=exact_nodia` 5.1s vs cold 39.7s.
+- **Prevention:** guard dựa trên embedding phải CALIBRATE bằng số đo thật trên đúng encoder
+  + đúng loại text trước khi tin — trực giác "cùng nghĩa thì sim cao" sai với cross-form
+  (có dấu/không dấu, viết tắt, ngôn ngữ trộn). Unit test vector giả không thay được số đo thật.
+- **Quan sát phụ (chưa sửa, ghi nhận):** finalize re-store answer vào cache MỖI lần hit
+  (3 dòng cache_write cho 3 hit trong smoke) — idempotent, chỉ tốn 1 SETEX + refresh TTL,
+  hành vi có từ v1. Muốn tối ưu: skip set_cached khi payload lấy từ cache.
+
 ## (ĐÃ SỬA 2026-07-06) 'LateChunkEmbeddings' object is not callable — LC FAISS path chết mỗi query
 
 - **Triệu chứng:** Mỗi query log 2 dòng: langchain warning "`embedding_function` is expected

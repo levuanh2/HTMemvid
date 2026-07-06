@@ -233,6 +233,11 @@ def _get_cached_query(cache_key: str) -> Optional[dict]:
     return llm_cache.semantic_lookup(cache_key)
 
 def _set_cached_query(cache_key: str, value: dict) -> None:
+    # INVARIANT: answer rỗng không được vào L1 lẫn L2 — hit sau sẽ trả "Không có phản hồi."
+    _p = value.get("payload") if isinstance(value, dict) else None
+    if not (isinstance(_p, dict) and str(_p.get("answer") or "").strip()):
+        llm_cache.METRICS["write_skipped_empty"] += 1
+        return
     with _query_cache_lock:
         if cache_key in _query_cache:
             _query_cache.move_to_end(cache_key)
@@ -1696,7 +1701,8 @@ def delete_source():
 def _mindmap_input_and_hash(source_names: list[str]) -> tuple[dict, str]:
     mm = collect_mindmap_input(INDEX_META_JSON_PATH, source_names)
     h = mindmap_schema.content_hash(mm.get("sources") or [],
-                                    [c["text"] for c in mm.get("chunks") or []])
+                                    [c["text"] for c in mm.get("chunks") or []],
+                                    [c.get("heading_path", "") for c in mm.get("chunks") or []])
     return mm, h
 
 
@@ -1719,7 +1725,7 @@ def run_mindmap_job(job_id: str, source_names: list[str], mm_input: dict, conten
         }, thread_id=job_id)
     except Exception as e:
         from app.domains.jobs.jobs_store import update_job
-        update_job(job_id, status="error", error_text=str(e))
+        update_job(job_id, status="error", error_text=_job_error_text(e))
 
 
 # -------------------------
@@ -1773,6 +1779,9 @@ def mindmap_status(job_id: str):
     payload: Dict[str, Any] = {
         "status": j.get("status"),
         "progress": j.get("progress", 0),
+        # current_node để FE hiện đúng giai đoạn + stall-fingerprint bắt được
+        # chuyển node dù progress % đứng yên (codex #6).
+        "current_node": j.get("current_node") or "",
         "result": result,
         "error": j.get("error"),
     }

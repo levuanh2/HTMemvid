@@ -158,17 +158,25 @@ def build_query_graph(
                 {"category": state.get("category"), "language": state.get("language")},
             )
             cached = get_cached(cache_key)
-            if cached and isinstance(cached, dict) and cached.get("payload"):
-                payload = cached["payload"]
+            payload = cached.get("payload") if isinstance(cached, dict) else None
+            if isinstance(payload, dict) and str(payload.get("answer") or "").strip():
                 status = int(cached.get("status", 200))
                 log_node_event(state["job_id"], "CacheLookup", "ok", t.ms(), {"hit": True})
                 return {**state, "payload": payload, "status_code": status, "cache_key": cache_key, "done": True, "progress": 5, "current_node": "CacheLookup"}
+            if payload is not None:
+                # Hit nhưng answer rỗng (entry độc/di sản) → coi là MISS, đi tiếp pipeline.
+                llm_cache.METRICS["empty_cached_answer"] += 1
+                llm_cache.logger.info("[cache] event=cache_miss_empty_cached_answer q=%r", str(state["q"])[:80])
 
             log_node_event(state["job_id"], "CacheLookup", "ok", t.ms(), {"hit": False})
             return {**state, "cache_key": cache_key, "progress": 5, "current_node": "CacheLookup", "error": None}
         except Exception as e:
+            # INVARIANT: cache là tối ưu — lỗi lookup KHÔNG được chặn đường trả lời.
+            # Không set state["error"] (router sẽ đẩy vào ErrorHandler); đi tiếp như miss.
             log_node_event(state["job_id"], "CacheLookup", "error", t.ms(), {"error": str(e)})
-            return {**state, "error": str(e), "current_node": "CacheLookup"}
+            llm_cache.METRICS["errors"] += 1
+            llm_cache.logger.info("[cache] event=cache_error_fallback_to_llm err=%s", e)
+            return {**state, "cache_key": None, "progress": 5, "current_node": "CacheLookup", "error": None}
 
     def retrieve_memory_node(state: dict) -> dict:
         t = _Timer()
@@ -574,7 +582,11 @@ def build_query_graph(
                 except TimeoutError:
                     raise RuntimeError(f"AI timeout sau {AI_TIMEOUT}s")
 
+            gen_fallback = False
             if not (answer or "").strip():
+                # Message chẩn đoán — KHÔNG phải answer thật → gen_fallback chặn cache ở Finalize
+                # (đã từng bị cache → mọi câu hỏi tương đương sau đó trả message lỗi/rỗng).
+                gen_fallback = True
                 answer = (
                     "Không nhận được phản hồi từ model (nội dung rỗng). "
                     "Thử: `ollama pull` đúng tag SLM_MODEL_CHAT; đặt OLLAMA_REASONING=0 trong .env nếu dùng Qwen think; "
@@ -586,7 +598,7 @@ def build_query_graph(
                 payload["processing_message"] = state["processing_message"]
 
             log_node_event(state["job_id"], "GenerateAnswer", "ok", t.ms())
-            return {**state, "payload": payload, "status_code": 200, "answer": answer, "progress": 75, "current_node": "GenerateAnswer", "error": None}
+            return {**state, "payload": payload, "status_code": 200, "answer": answer, "gen_fallback": gen_fallback, "progress": 75, "current_node": "GenerateAnswer", "error": None}
         except Exception as e:
             log_node_event(state["job_id"], "GenerateAnswer", "error", t.ms(), {"error": str(e)})
             return {**state, "error": str(e), "current_node": "GenerateAnswer"}
@@ -628,16 +640,29 @@ def build_query_graph(
             return {**state, "error": str(e), "current_node": "FeedbackLoop"}
 
     def finalize_node(state: dict) -> dict:
-        _set_job(state["job_id"], status="done", progress=100, current_node="Finalize")
+        # KHÔNG set status="done" ở đây: result được _finalize_query_job (main.py) gắn SAU
+        # khi graph.invoke trả về. Set done sớm → cửa sổ race "done nhưng result=None" —
+        # job nhanh (cache hit <1s) bị FE poll trúng → hiện "Không có phản hồi." dù answer có.
+        # "done" phải đi CÙNG result trong một lần update (_finalize_query_job lo).
+        _set_job(state["job_id"], progress=100, current_node="Finalize")
         cache_key = state.get("cache_key")
         payload = state.get("payload")
         status_code = int(state.get("status_code") or 200)
         # Không cache câu trả lời fallback "không tìm thấy" — re-index sau có thể truy hồi được.
-        if cache_key and not state.get("crag_fallback") and isinstance(payload, dict) and payload.get("answer"):
-            try:
-                set_cached(cache_key, {"payload": payload, "status": status_code})
-            except Exception:
-                pass
+        # Answer rỗng/whitespace KHÔNG BAO GIỜ được ghi (poisoning → hit sau trả rỗng).
+        _ans = str(payload.get("answer") or "").strip() if isinstance(payload, dict) else ""
+        if state.get("gen_fallback"):
+            _ans = ""  # message chẩn đoán không được cache — coi như rỗng ở tầng ghi
+        if cache_key and not state.get("crag_fallback"):
+            if _ans:
+                try:
+                    set_cached(cache_key, {"payload": payload, "status": status_code})
+                except Exception:
+                    llm_cache.METRICS["write_failed"] += 1
+                    llm_cache.logger.info("[cache] event=cache_write_failed stage=finalize")
+            elif isinstance(payload, dict):
+                llm_cache.METRICS["write_skipped_empty"] += 1
+                llm_cache.logger.info("[cache] event=cache_write_skipped_empty_answer q=%r", str(state.get("q", ""))[:80])
         log_node_event(state["job_id"], "Finalize", "ok", 0.0)
         return {**state, "progress": 100, "current_node": "Finalize"}
 

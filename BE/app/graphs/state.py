@@ -64,6 +64,7 @@ class QueryState(TypedDict):
     doc_grade: NotRequired[Optional[str]]
     rewrite_count: NotRequired[int]
     crag_fallback: NotRequired[bool]
+    gen_fallback: NotRequired[bool]  # answer là message chẩn đoán (model trả rỗng) — không cache
     awaiting_review: NotRequired[bool]
     review_decision: NotRequired[Optional[dict]]
 

@@ -339,6 +339,46 @@ def test_history_bypass_returns_cache_key_none(monkeypatch):
     assert not out.get("done", False)
 
 
+def test_is_standalone_question_heuristic():
+    from app.domains.cache import llm_cache
+
+    # standalone: tự đứng được, không marker ngữ cảnh
+    assert llm_cache.is_standalone_question("phishing là gì trong an ninh mạng")
+    assert llm_cache.is_standalone_question("trình bày các bước tấn công SQL injection")
+    # follow-up: câu cụt / anaphora / mở đầu nối tiếp
+    assert not llm_cache.is_standalone_question("tại sao?")
+    assert not llm_cache.is_standalone_question("giải thích rõ hơn về nó giúp mình")
+    assert not llm_cache.is_standalone_question("còn phần 2 thì sao bạn")
+    assert not llm_cache.is_standalone_question("nói kỹ hơn về phần này đi bạn")
+    assert not llm_cache.is_standalone_question("can you explain that in more detail")
+
+
+def test_standalone_question_with_history_uses_cache(monkeypatch):
+    """Câu standalone trong multi-turn: vẫn có cache_key, generate KHÔNG nhét history
+    vào prompt, và lần hỏi lặp lại hit cache (không generate lần 2)."""
+    base_env(monkeypatch)
+    seen_qs: list[str] = []
+
+    def _summarize(q, chunks, **kwargs):
+        seen_qs.append(q)
+        return "generated answer"
+
+    graph, cache = build(summarize=_summarize)
+    hist = [{"role": "user", "content": "cau truoc do"}, {"role": "assistant", "content": "tra loi truoc do"}]
+    q = "phishing là gì trong an ninh mạng"
+
+    out1 = run(graph, init_state(q, conversation_history=list(hist)), thread_id="standalone-1")
+    assert out1["cache_key"] == f"ck::{q}"
+    assert len(seen_qs) == 1
+    assert "Lịch sử trò chuyện" not in seen_qs[0]  # history bị bỏ khỏi prompt
+    assert cache  # Finalize đã ghi cache
+
+    out2 = run(graph, init_state(q, conversation_history=list(hist)), thread_id="standalone-2")
+    assert out2.get("done") is True
+    assert len(seen_qs) == 1  # không generate lần 2 — trả từ cache
+    assert out2["payload"] == out1["payload"]
+
+
 def test_sensitive_question_is_not_cached(monkeypatch):
     redis_client, llm_cache = _load_cache_modules(monkeypatch)
     fake = FakeRedis()

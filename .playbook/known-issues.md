@@ -1,5 +1,107 @@
 # Known Issues
 
+## (ĐÃ SỬA 2026-07-06) 'LateChunkEmbeddings' object is not callable — LC FAISS path chết mỗi query
+
+- **Triệu chứng:** Mỗi query log 2 dòng: langchain warning "`embedding_function` is expected
+  to be an Embeddings object, support for passing in a function will soon be removed" +
+  `HybridRetriever.retrieve_faiss_only: LC path failed: 'LateChunkEmbeddings' object is not
+  callable`. Retrieval VẪN ra kết quả (rơi về legacy FAISS im lặng) nên dễ bỏ qua.
+- **Nguyên nhân:** `llm_factory.py::LateChunkEmbeddings` là plain class, KHÔNG kế thừa
+  `langchain_core.embeddings.Embeddings`. LangChain FAISS check
+  `isinstance(embedding_function, Embeddings)` — fail → coi nó là callable (đường deprecated),
+  gọi `obj(text)` → TypeError not callable → LC path fail mọi `similarity_search_with_score`.
+  Cả 2 dòng log cùng MỘT gốc. Duck-typing (có đủ embed_query/embed_documents) KHÔNG đủ —
+  langchain phân nhánh bằng isinstance.
+- **Cách xử lý (đã làm):** 1 dòng — `class LateChunkEmbeddings(_LCEmbeddings)` (import
+  `Embeddings` module-level). 2 method abstract đã có sẵn.
+- **Regression:** `test_embedding_late_chunk.py::test_late_chunk_embeddings_is_langchain_embeddings`
+  (assert isinstance). Đã chạy kèm `test_store_precomputed.py` + `test_llm_cache.py` — xanh.
+- **Prevention:** Viết adapter cho interface langchain → PHẢI subclass base class thật
+  (`Embeddings`, `BaseRetriever`…), đừng duck-type; langchain rẽ nhánh isinstance ở nhiều chỗ.
+  Test wiring assert `isinstance(..., Embeddings)` chứ không chỉ `hasattr`.
+- **Lưu ý liên quan (ĐÃ XỬ LÝ cùng ngày):** hiện tượng "hỏi lại y hệt vẫn soạn mới" trong CÙNG
+  phiên chat không phải bug này — trước đây `cache_lookup_node` bypass MỌI câu khi có
+  `conversation_history`. Đã đổi: chỉ bypass câu FOLLOW-UP; câu STANDALONE
+  (`llm_cache.is_standalone_question` — heuristic conservative: câu <4 từ, anaphora
+  nó/này/đó/that/it..., mở đầu còn/thế/vậy/what about... → follow-up) vẫn cache.
+  Điều kiện an toàn: `generate_answer_node` BỎ history khỏi prompt khi `cache_key` được set
+  → answer context-free → store không poisoning (lookup/store nhất quán). Metric mới
+  `standalone_with_history`. Regression: `test_llm_cache.py::test_is_standalone_question_heuristic`
+  + `test_standalone_question_with_history_uses_cache`. Heuristic nghiêng về bypass —
+  sai hướng đó chỉ mất cache, sai hướng ngược lại mới sinh answer thiếu ngữ cảnh.
+
+## (ĐÃ SỬA 2026-07-05) Mindmap viewer + PNG export vỡ hoàn toàn — thiếu import MindElixir.css
+
+- **Triệu chứng:** Mở sơ đồ tư duy: toàn bộ text node dồn thành MỘT dòng góc trên-trái
+  ("Tổng quan tài liệuPhát hiện xâm phạm…"), root lơ lửng, 2 đường bezier bay lạc, canvas
+  trống khổng lồ. PNG export y hệt (snapdom chụp trung thực DOM đang vỡ).
+- **Nguyên nhân (3 lớp):**
+  1. `mind-elixir/style` (dist/MindElixir.css) KHÔNG được import ở đâu cả — mind-elixir v5
+     layout HOÀN TOÀN bằng CSS (`me-nodes` flex, `me-tpc` block...). Thiếu nó, custom elements
+     rơi về `display:inline` → sụp toàn bộ. Bundle build cũng không có (verified grep dist).
+  2. THEME custom chỉ set 4/22 cssVar; MindElixir.css dùng `var(--map-padding)`,
+     `--main-gap-x/y`, `--node-gap-x/y`, `--root-radius`… KHÔNG có fallback → declaration
+     invalid, spacing sụp dù đã import CSS.
+  3. Export chụp `mind.nodes` (element `me-nodes`) TÁCH khỏi `.map-canvas` — rule then chốt
+     là descendant selector `.map-canvas me-nodes{display:flex}` không match trong clone
+     snapdom → PNG vỡ kể cả khi viewer đúng. Không có `scale` → ảnh mờ.
+- **Cách xử lý (đã làm):** import `"mind-elixir/style"` trong `MindElixirView.jsx`; THEME
+  PhongDoc set đủ 22 var (guard bằng `theme.test.js` — thiếu var nào test đỏ); export chụp
+  `mind.map` (`.map-canvas`) + `scale: 2`.
+- **Prevention:** dùng thư viện render bằng CSS-file riêng → kiểm tra CSS có vào bundle
+  (`grep <rule đặc trưng> dist/assets/*.css`). Chụp DOM bằng snapdom/html2canvas → target
+  phải CHỨA đủ tổ tiên mà CSS selector cần. Theme override một thư viện → set đủ TOÀN BỘ
+  bộ var nó tiêu thụ, đừng set một phần.
+
+## (ĐÃ SỬA 2026-07-05) Mindmap docx nông: heading_path rỗng → skeleton filler "Tổng quan tài liệu"
+
+- **Triệu chứng:** Tạo sơ đồ cho docx → cây chỉ có root → 1 section "Tổng quan tài liệu"
+  → vài idea; không sâu hơn, relations luôn rỗng (skip khi <2 section).
+- **Nguyên nhân (chuỗi 4 khâu):**
+  1. mammoth chỉ sinh `#`/`##`/`###` cho Word Heading styles thật — docx sinh viên dùng
+     bold/đánh số tay → markdown 0 heading → mọi chunk `heading_path=""`.
+  2. Chỉ `_from_headings` tạo được chiều sâu; tree_sections/clusters đều FLAT. Fallback
+     tree_sections với ≤18 chunk trả đúng 1 section size-based tên "Tổng quan tài liệu".
+  3. Kể cả khi có heading: `embed_index_node` cũ yêu cầu `len(headings)==len(entries)` —
+     QR sub-split 1 chunk là lệch → rớt TOÀN BỘ heading_path của doc.
+  4. `content_hash` không hash heading metadata → re-ingest phục hồi heading (text không đổi)
+     vẫn trúng cache cũ, trả mãi map nông.
+- **Cách xử lý (đã làm, PIPELINE_VERSION → skeleton_v2):**
+  - `clean.py::promote_headings`: promote heuristic (dòng bold đứng một mình ≤90 ký tự không
+    kết thúc ".", `Chương/Phần/Bài/Mục`, `1.`→##, `1.1`→###, La Mã→#) — CHỈ khi doc chưa có
+    heading nào; item list sát nhau không bị promote (yêu cầu blank 2 phía).
+  - `ingest_graph.py`: map heading qua `entry["chunk_index"]` (đã có sẵn cho late chunking)
+    thay vì alignment 1:1 — sub-split không rớt heading nữa.
+  - `skeleton.py::_from_tree_sections` yêu cầu ≥2 section (1 section = filler, bỏ).
+  - MỚI `outline.py::build_outline`: skeleton "single" → 1 LLM call sinh mục lục 2 tầng
+    (chunk_keys validate theo id thật); thành công → method "llm_outline", lỗi → root-only
+    + degraded_missing "skeleton".
+  - `content_hash(..., chunk_headings)` hash cả heading (prefix `\x02`); `generator.skeleton_method`
+    được persist để chẩn đoán record đã lưu.
+  - SKIP_MODEL_LOAD giờ khai `degraded=True` ở enrich/relations (trước im lặng trả skeleton
+    như bản hoàn chỉnh).
+- **Regression:** `test_promote_headings.py`, `test_mindmap_outline.py`, `test_mindmap_skeleton.py::
+  test_single_tree_section_is_rejected_as_filler`, `test_late_chunk_ingest.py::test_heading_path_
+  survives_subsplit`, `test_mindmap_schema_v2.py` (hash headings + skeleton_method).
+- **Lưu ý:** dữ liệu đã index TRƯỚC fix vẫn heading_path rỗng — muốn map sâu phải re-upload
+  (re-ingest) tài liệu; hash mới sẽ tự bypass cache cũ.
+- **Regression cùng ngày (đã vá, skeleton_v3):** bản đầu của `promote_headings` chỉ match
+  `**bold**` — mammoth THẬT sinh `__bold__` VÀ escape punctuation (`1\.` chứ không phải `1.`)
+  → doc Q&A re-upload vẫn trượt promote. Vá: `_BOLD_LINE_RE` nhận cả `__`/`**` (backreference
+  `(\*\*|__)...\1`), thêm `unescape_mammoth` (bỏ `\` trước bộ punctuation AN TOÀN `. ( ) ! ? , : ; … " '`
+  — KHÔNG đụng `# * - [ ]` tránh tạo markdown giả) chạy TRƯỚC promote trong `clean_markdown`.
+  Bài học: viết heuristic parse markdown phải kiểm bằng OUTPUT THẬT của converter (đọc chunk
+  từ sqlite), đừng viết theo markdown "chuẩn" trong đầu. Test: `test_promote_headings.py`
+  (case mammoth dialect), FE mirror `evidence.js::unescapeMd` cho data cũ.
+- **Regression vòng 2 cùng ngày (đo qua smoke Docker thật, đã vá):**
+  1. Cap heading 90 ký tự chặn câu hỏi Q&A tiếng Việt bold (đo thật: 203 ký tự) → tách cap:
+     bold đứng một mình (tín hiệu mạnh) = 250, dòng đánh số trần = 90.
+  2. `MINDMAP_LLM_TIMEOUT_SEC` mặc định 120s không đủ cho enrich prompt nested-detail trên
+     qwen3.5:9b CPU (3/4 nhánh degraded) → compose set 240s (cả backend + mindmap-service;
+     lưu ý pipeline chạy trong mindmap-service khi `MINDMAP_SERVICE_ADDR` bật — set env đúng container).
+  3. qwen thi thoảng trả JSON hỏng delimiter (~1/4 nhánh) → `enrich._ask_json` retry đúng 1 lần
+     trước khi degraded. Regression: `test_enrich_retries_once_on_malformed_json`.
+
 ## Late chunking + EMBEDDING_MODEL_NAME chưa set → tách không gian embedding (MiniLM vs bge-m3)
 
 - **Triệu chứng:** Bật late chunking nhưng query/memory/một số path lại embed bằng

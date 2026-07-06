@@ -142,10 +142,14 @@ def build_query_graph(
             _set_job(state["job_id"], progress=5, current_node="CacheLookup")
             if state.get("processing_message"):
                 return {**state, "cache_key": None, "progress": 5, "current_node": "CacheLookup", "error": None}
-            # Multi-turn: không cache vì phụ thuộc history
+            # Multi-turn: chỉ bypass câu FOLLOW-UP (phụ thuộc history). Câu standalone
+            # vẫn cache — generate_answer_node sẽ bỏ history khỏi prompt cho các câu
+            # có cache_key để answer context-free (lookup/store nhất quán).
             if state.get("conversation_history"):
-                llm_cache.METRICS["bypass_history"] += 1
-                return {**state, "cache_key": None, "progress": 5, "current_node": "CacheLookup", "error": None}
+                if not llm_cache.is_standalone_question(state["q"]):
+                    llm_cache.METRICS["bypass_history"] += 1
+                    return {**state, "cache_key": None, "progress": 5, "current_node": "CacheLookup", "error": None}
+                llm_cache.METRICS["standalone_with_history"] += 1
 
             cache_key = make_cache_key(
                 state["q"],
@@ -488,6 +492,11 @@ def build_query_graph(
             q = state["q"]
             chunks = state.get("retrieved_chunks") or []
             hist = state.get("conversation_history") or []
+            # cache_key được set = câu standalone (hoặc phiên chưa có history):
+            # bỏ history khỏi prompt để answer context-free — điều kiện để Finalize
+            # được phép ghi answer này vào semantic cache mà không poisoning.
+            if hist and state.get("cache_key"):
+                hist = []
 
             q_effective = q
             if not USE_LC_QA_CHAIN and isinstance(hist, list) and hist:

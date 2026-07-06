@@ -103,6 +103,36 @@ def classify_risk(question: str) -> tuple:
     return (True, "low")
 
 
+# --- Standalone vs follow-up ------------------------------------------------
+# Câu standalone (tự đứng, không phụ thuộc ngữ cảnh hội thoại) vẫn được cache
+# dù đang multi-turn — generate sẽ BỎ history khỏi prompt cho các câu này để
+# answer context-free (lookup/store nhất quán). Heuristic CONSERVATIVE:
+# nghi ngờ → follow-up (chỉ mất cache); nhận nhầm follow-up thành standalone
+# mới nguy hiểm (answer thiếu ngữ cảnh + poisoning cache).
+# ponytail: regex heuristic, nâng lên LLM-classify nếu đo thấy hit-rate quá thấp.
+
+_FOLLOWUP_START_RE = re.compile(
+    r"^\s*(còn|thế|vậy|tiếp|rồi|nữa|và|what about|how about|and|so|then|also)\b",
+    re.IGNORECASE,
+)
+_FOLLOWUP_BODY_RE = re.compile(
+    r"\b(nó|này|đó|kia|lúc nãy|ban nãy|khi nãy|vừa rồi|vừa nói|đã nói|"
+    r"it|its|this|that|these|those|above|previous|previously|earlier|again|aforementioned)\b"
+    r"|ở trên|như trên|bên trên|nói trên|phía trên|as mentioned",
+    re.IGNORECASE,
+)
+
+
+def is_standalone_question(question: str) -> bool:
+    """True nếu câu hỏi tự đứng được (cache an toàn trong multi-turn)."""
+    q = (question or "").strip()
+    if len(q.split()) < 4:  # câu cụt ("tại sao?", "nói rõ hơn") = follow-up
+        return False
+    if _FOLLOWUP_START_RE.search(q) or _FOLLOWUP_BODY_RE.search(q):
+        return False
+    return True
+
+
 # --- index_version ---------------------------------------------------------
 # Mirror đường dẫn META_PATH của app/domains/vectorstore/store.py (INDEX_DIR/index.json)
 # — KHÔNG import store (kéo faiss+langchain nặng). _save_meta bên đó ghi atomic

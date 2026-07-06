@@ -13,6 +13,7 @@ from collections import OrderedDict
 from typing import Any, Iterator, Optional
 
 import numpy as np
+from langchain_core.embeddings import Embeddings as _LCEmbeddings
 
 try:
     from shared.env_loader import load_project_env
@@ -273,9 +274,10 @@ def _late_chunking_enabled() -> bool:
     return (os.getenv("LATE_CHUNKING", "1") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-class LateChunkEmbeddings:
+class LateChunkEmbeddings(_LCEmbeddings):
     """langchain Embeddings dùng encoder mean-pool (late chunking) cho query-time.
-    PHẢI cùng pooling với vector chunk đã index → cosine query↔chunk có nghĩa."""
+    PHẢI cùng pooling với vector chunk đã index → cosine query↔chunk có nghĩa.
+    PHẢI subclass Embeddings: LC FAISS isinstance-check, không thì bị coi là callable."""
 
     def __init__(self, encoder: Any) -> None:
         self._enc = encoder

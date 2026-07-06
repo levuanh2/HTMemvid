@@ -45,3 +45,13 @@ def test_get_embeddings_is_late_chunk_wrapper(monkeypatch):
     assert emb.__class__.__name__ == "LateChunkEmbeddings"
     # langchain Embeddings interface
     assert hasattr(emb, "embed_query") and hasattr(emb, "embed_documents")
+
+
+def test_late_chunk_embeddings_is_langchain_embeddings(monkeypatch):
+    """LC FAISS check isinstance(embedding_function, Embeddings) — không phải subclass
+    thì bị coi là callable → 'LateChunkEmbeddings' object is not callable, LC path chết
+    mỗi query (rơi về legacy FAISS im lặng)."""
+    from langchain_core.embeddings import Embeddings
+
+    lf = _fresh(monkeypatch, LATE_CHUNKING="1")
+    assert isinstance(lf.get_embeddings(), Embeddings)

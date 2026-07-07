@@ -11,8 +11,8 @@ import os
 import threading
 from datetime import datetime, timezone
 
-# Step 1: only the ingest queue is active. summary/mindmap come later.
-QUEUE_NAMES = ("ingest",)
+# Active queues. Step 1: ingest. Step 2: + summary. (mindmap later.)
+QUEUE_NAMES = ("ingest", "summary")
 
 
 def queue_enabled() -> bool:
@@ -71,34 +71,45 @@ def enqueue_job(func, args=(), queue: str = "ingest", job_id: str | None = None)
 
 
 def queue_stats() -> dict:
-    """Queue depth view for /stats and /ready. Fail-open (Redis down -> zeros + error)."""
-    stats = {
+    """Queue depth view for /stats and /ready. Per-queue breakdown + aggregate totals.
+    Fail-open (Redis down -> zeros + error). Aggregate keys (queued_count/started_count/
+    failed_count/worker_count) are kept for /ready and backward compatibility."""
+    stats: dict = {
         "enabled": queue_enabled(), "queued_count": 0, "started_count": 0,
         "failed_count": 0, "worker_count": 0, "oldest_queued_age_sec": None,
     }
+    for name in QUEUE_NAMES:
+        stats[name] = {"queued": 0, "started": 0, "failed": 0}
     if not queue_enabled():
         return stats
     try:
         from rq import Queue, Worker
         from rq.registry import StartedJobRegistry, FailedJobRegistry
         conn = _conn()
-        q = Queue("ingest", connection=conn)
-        stats["queued_count"] = int(q.count)
-        stats["started_count"] = int(StartedJobRegistry("ingest", connection=conn).count)
-        stats["failed_count"] = int(FailedJobRegistry("ingest", connection=conn).count)
+        oldest = None
+        for name in QUEUE_NAMES:
+            q = Queue(name, connection=conn)
+            qn = int(q.count)
+            sn = int(StartedJobRegistry(name, connection=conn).count)
+            fn = int(FailedJobRegistry(name, connection=conn).count)
+            stats[name] = {"queued": qn, "started": sn, "failed": fn}
+            stats["queued_count"] += qn
+            stats["started_count"] += sn
+            stats["failed_count"] += fn
+            ids = q.job_ids
+            if ids:
+                j = q.fetch_job(ids[0])
+                if j is not None and getattr(j, "enqueued_at", None):
+                    enq = j.enqueued_at
+                    if enq.tzinfo is None:
+                        enq = enq.replace(tzinfo=timezone.utc)
+                    age = round((datetime.now(timezone.utc) - enq).total_seconds(), 1)
+                    oldest = age if oldest is None else max(oldest, age)
+        stats["oldest_queued_age_sec"] = oldest
         try:
             stats["worker_count"] = int(Worker.count(connection=conn))
         except Exception:
             pass
-        ids = q.job_ids
-        if ids:
-            j = q.fetch_job(ids[0])
-            if j is not None and getattr(j, "enqueued_at", None):
-                enq = j.enqueued_at
-                if enq.tzinfo is None:
-                    enq = enq.replace(tzinfo=timezone.utc)
-                stats["oldest_queued_age_sec"] = round(
-                    (datetime.now(timezone.utc) - enq).total_seconds(), 1)
     except Exception as exc:  # noqa: BLE001
         stats["error"] = str(exc)[:80]
     return stats

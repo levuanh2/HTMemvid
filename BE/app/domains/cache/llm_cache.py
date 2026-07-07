@@ -245,6 +245,34 @@ def _eid(q_norm: str) -> str:
     return hashlib.sha256(q_norm.encode("utf-8")).hexdigest()[:16]
 
 
+def single_flight_key(
+    question: str,
+    sources: List[str],
+    language: Optional[str] = None,
+    category: Optional[str] = None,
+    use_memory_tree: bool = True,
+) -> Optional[str]:
+    """Redis lock key for request coalescing (Phase 3 single-flight).
+
+    Scope = the SAME bucket the semantic cache uses (`_bucket_id`): it hashes
+    sources + language + category + memory-tree + index_version, so two DIFFERENT
+    documents/contexts get DIFFERENT keys — a generic question like "nội dung là gì"
+    can never coalesce across documents. The query part uses the NO-DIACRITICS
+    normalized form so Vietnamese variants ("noi dung la gi" / "nội dung là gì" /
+    "nọi dung là gì") share ONE leader; followers still read the answer back through
+    the exact→alias→cosine→judge cache path, which is where homograph safety lives.
+
+    Returns None for unsafe/non-cacheable questions (never coalesce private/payment/
+    realtime queries) — the caller must then run the normal path.
+    """
+    cacheable, _risk = classify_risk(question)
+    if not cacheable:
+        return None
+    bucket = _bucket_id(list(sources or []), language, category, use_memory_tree)
+    eid_nd = _eid(strip_diacritics(_norm_q(question)))
+    return f"{_NS}:{_ENV}:sf:{bucket}:{eid_nd}"
+
+
 def _vec_to_b64(vec: np.ndarray) -> str:
     return base64.b64encode(np.asarray(vec, dtype=np.float32).tobytes()).decode("ascii")
 

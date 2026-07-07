@@ -248,6 +248,378 @@ def _set_cached_query(cache_key: str, value: dict) -> None:
     llm_cache.semantic_store(cache_key, value)
 
 
+# ============================================================================
+# Phase 3 — Single-flight / request coalescing (DR-3 D3)
+# ----------------------------------------------------------------------------
+# A storm of identical/equivalent questions with a COLD cache would each spawn a
+# full RAG/LLM job (Phase 2 caps concurrency but does NOT coalesce). Single-flight
+# elects ONE leader per (bucket + no-diacritics query) via a Redis SETNX lock;
+# followers wait briefly and return the leader's cached answer. OPTIMIZATION ONLY:
+# any Redis/lock miss/timeout/empty result → fail open to the normal path. It can
+# never block or empty an answer. Runs in the BACKEND process, at job submit.
+# ============================================================================
+from app.clients import redis_client as _redis_client  # noqa: E402
+
+_SF_RELEASE_LUA = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+    "return redis.call('del', KEYS[1]) else return 0 end"
+)
+
+_SF_METRICS: Dict[str, int] = {
+    "leader": 0, "follower": 0, "follower_hit": 0, "timeout": 0,
+    "fail_open": 0, "bypass_unsafe": 0, "bypass_followup": 0, "bypass_disabled": 0,
+    "redis_error_fail_open": 0, "dup_avoided": 0, "release_ok": 0, "release_fail": 0,
+}
+
+
+def _sf_enabled() -> bool:
+    return (os.getenv("SINGLE_FLIGHT_ENABLED", "true") or "").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
+
+
+def _sf_num(name: str, default: float) -> float:
+    try:
+        return float((os.getenv(name) or "").strip() or default)
+    except ValueError:
+        return default
+
+
+def _sf_log(event: str, **kv: object) -> None:
+    parts = " ".join(f"{k}={v}" for k, v in kv.items())
+    print(f"singleflight {event} {parts}".rstrip(), flush=True)
+
+
+def _sf_nonempty(cached: Optional[dict]) -> bool:
+    if not isinstance(cached, dict):
+        return False
+    p = cached.get("payload")
+    return isinstance(p, dict) and bool(str(p.get("answer") or "").strip())
+
+
+def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict) -> None:
+    """Mark a follower job done using the leader's cached result. Atomic done+result
+    (mirrors _finalize_query_job) — never sets done without the payload."""
+    payload = cached.get("payload") if isinstance(cached, dict) else None
+    payload = dict(payload) if isinstance(payload, dict) else {}
+    status = int(cached.get("status") or 200) if isinstance(cached, dict) else 200
+    result_obj = {"payload": payload, "status": status}
+    with query_jobs_lock:
+        if jid in query_jobs:
+            query_jobs[jid]["status"] = "done"
+            query_jobs[jid]["result"] = result_obj
+    if _jobs_update_job:
+        try:
+            _jobs_update_job(jid, status="done", progress=100,
+                             current_node="SingleFlightFollower", result=result_obj)
+        except Exception:
+            pass
+    try:
+        if payload.get("answer"):
+            from app.domains.jobs.sessions_store import append_messages as _ss_append
+            _ss_append(session_id, [
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": str(payload.get("answer"))},
+            ])
+    except Exception:
+        pass
+
+
+def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
+                       category: Optional[str], language: Optional[str],
+                       session_id: str) -> dict:
+    """Decide leader/follower/bypass for one query job. Returns:
+      {"served": True}                    -> follower finalized from cache (skip graph)
+      {"served": False, "lock": (k, tok)} -> leader (run graph, release lock after)
+      {"served": False, "lock": None}     -> bypass or fail-open (run graph, no lock)
+    Fail-open on ANY Redis/lock issue — never raises into the answer path.
+    """
+    if not _sf_enabled():
+        _SF_METRICS["bypass_disabled"] += 1
+        _sf_log("singleflight_disabled")
+        return {"served": False, "lock": None}
+
+    # Unsafe/private → never coalesce (respect cache risk policy).
+    cacheable, risk = llm_cache.classify_risk(question)
+    if not cacheable:
+        _SF_METRICS["bypass_unsafe"] += 1
+        _sf_log("singleflight_bypass_unsafe", risk=risk)
+        return {"served": False, "lock": None}
+
+    # Follow-up (context-specific) → don't coalesce (mirror cache_lookup behaviour).
+    try:
+        history = _get_session_history_safe(session_id, 8)
+    except Exception:
+        history = []
+    if history and not llm_cache.is_standalone_question(question):
+        _SF_METRICS["bypass_followup"] += 1
+        return {"served": False, "lock": None}
+
+    r = _redis_client.get_redis()
+    if r is None:
+        _SF_METRICS["redis_error_fail_open"] += 1
+        _sf_log("singleflight_redis_error_fail_open", reason="unavailable")
+        return {"served": False, "lock": None}
+
+    sf_key = llm_cache.single_flight_key(question, sources, language, category, use_mem)
+    if not sf_key:
+        _SF_METRICS["bypass_unsafe"] += 1
+        return {"served": False, "lock": None}
+    cache_key = _make_query_cache_key(question, sources, use_mem,
+                                      {"category": category, "language": language})
+
+    # Warm cache already? Serve immediately, no lock needed.
+    cached = _get_cached_query(cache_key)
+    if _sf_nonempty(cached):
+        _SF_METRICS["follower_hit"] += 1
+        _SF_METRICS["dup_avoided"] += 1
+        _sf_log("singleflight_follower_cache_hit", kind="warm")
+        _finalize_from_cache(jid, session_id, question, cached)
+        return {"served": True}
+
+    token = uuid.uuid4().hex
+    try:
+        got = bool(r.set(sf_key, token, nx=True, ex=int(_sf_num("SINGLE_FLIGHT_LOCK_TTL_SECONDS", 180))))
+    except Exception as exc:
+        _redis_client.mark_unavailable()
+        _SF_METRICS["redis_error_fail_open"] += 1
+        _sf_log("singleflight_redis_error_fail_open", err=str(exc)[:80])
+        return {"served": False, "lock": None}
+
+    if got:
+        _SF_METRICS["leader"] += 1
+        _sf_log("singleflight_leader_acquired", key=sf_key[-24:])
+        return {"served": False, "lock": (sf_key, token)}
+
+    # Follower: poll for the leader's cached answer.
+    _SF_METRICS["follower"] += 1
+    _sf_log("singleflight_follower_waiting", key=sf_key[-24:])
+    poll = max(0.05, _sf_num("SINGLE_FLIGHT_POLL_INTERVAL_SECONDS", 0.5))
+    deadline = time.time() + _sf_num("SINGLE_FLIGHT_WAIT_SECONDS", 120)
+    while time.time() < deadline:
+        time.sleep(poll)
+        cached = _get_cached_query(cache_key)
+        if _sf_nonempty(cached):
+            _SF_METRICS["follower_hit"] += 1
+            _SF_METRICS["dup_avoided"] += 1
+            _sf_log("singleflight_follower_cache_hit", kind="leader")
+            _finalize_from_cache(jid, session_id, question, cached)
+            return {"served": True}
+        # Leader vanished (errored/released) without a cached answer → fail open early,
+        # but re-check cache once to close the write-then-release race.
+        try:
+            still_locked = bool(r.exists(sf_key))
+        except Exception:
+            _redis_client.mark_unavailable()
+            break
+        if not still_locked:
+            cached = _get_cached_query(cache_key)
+            if _sf_nonempty(cached):
+                _SF_METRICS["follower_hit"] += 1
+                _SF_METRICS["dup_avoided"] += 1
+                _sf_log("singleflight_follower_cache_hit", kind="leader_race")
+                _finalize_from_cache(jid, session_id, question, cached)
+                return {"served": True}
+            break
+
+    _SF_METRICS["timeout"] += 1
+    _SF_METRICS["fail_open"] += 1
+    _sf_log("singleflight_follower_timeout_fail_open", key=sf_key[-24:])
+    return {"served": False, "lock": None}
+
+
+def _single_flight_release(key: str, token: str) -> None:
+    """Release the leader lock (token compare-delete). Fail-open, never raises."""
+    r = _redis_client.get_redis()
+    if r is None:
+        return
+    try:
+        r.eval(_SF_RELEASE_LUA, 1, key, token)
+        _SF_METRICS["release_ok"] += 1
+        _sf_log("singleflight_lock_release_success", key=key[-24:])
+    except Exception as exc:
+        _SF_METRICS["release_fail"] += 1
+        _sf_log("singleflight_lock_release_failed", err=str(exc)[:80])
+
+
+# ============================================================================
+# Phase 4 — Ingress overload protection (DR-3: rate limit + readiness + shed)
+# ----------------------------------------------------------------------------
+# Redis token-bucket rate limit on /query, a /ready endpoint (503 when a load
+# balancer should back off), and structured admission-full responses. All
+# OPTIONAL and fail-open: rate limit is OFF by default and Redis errors never
+# block traffic in dev. Never touches the answer path or single-flight/gateway.
+# ============================================================================
+
+# Token bucket: refill `rate` tokens/sec up to `cap`; spend 1 per request.
+# KEYS[1]=bucket, ARGV=rate, cap, now, ttl. Returns {allowed(0/1), retry_after_s}.
+_RL_LUA = """
+local rate=tonumber(ARGV[1]); local cap=tonumber(ARGV[2])
+local now=tonumber(ARGV[3]); local ttl=tonumber(ARGV[4])
+local d=redis.call('HMGET',KEYS[1],'tokens','ts')
+local tokens=tonumber(d[1]); local ts=tonumber(d[2])
+if tokens==nil then tokens=cap; ts=now end
+tokens=math.min(cap, tokens + math.max(0, now-ts)*rate)
+local allowed=0; local retry=0
+if tokens>=1 then tokens=tokens-1; allowed=1
+else retry=math.ceil((1-tokens)/rate) end
+redis.call('HMSET',KEYS[1],'tokens',tokens,'ts',now)
+redis.call('EXPIRE',KEYS[1],ttl)
+return {allowed, retry}
+"""
+
+_OVERLOAD_METRICS: Dict[str, int] = {
+    "rate_limit_allowed": 0, "rate_limit_rejected": 0, "rate_limit_redis_error": 0,
+    "admission_rejected": 0,
+}
+
+
+def _ovl_log(event: str, **kv: object) -> None:
+    parts = " ".join(f"{k}={v}" for k, v in kv.items())
+    print(f"overload {event} {parts}".rstrip(), flush=True)
+
+
+def _ovl_bool(name: str, default: bool) -> bool:
+    v = (os.getenv(name) or "").strip().lower()
+    if not v:
+        return default
+    return v not in ("0", "false", "no", "off")
+
+
+def _ovl_num(name: str, default: float) -> float:
+    try:
+        return float((os.getenv(name) or "").strip() or default)
+    except ValueError:
+        return default
+
+
+def _client_ip() -> str:
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def _rl_scope_id(session_id: str) -> str:
+    scope = (os.getenv("RATE_LIMIT_SCOPE", "ip") or "ip").strip().lower()
+    if scope in ("session", "user") and session_id:
+        return f"sess:{session_id}"
+    return f"ip:{_client_ip()}"
+
+
+def _rate_limit_check(scope_id: str) -> tuple[bool, int]:
+    """(allowed, retry_after_seconds). Fail-open unless RATE_LIMIT_REQUIRE_REDIS."""
+    if not _ovl_bool("RATE_LIMIT_ENABLED", False):
+        return True, 0
+    require_redis = _ovl_bool("RATE_LIMIT_REQUIRE_REDIS", False)
+    r = _redis_client.get_redis()
+    if r is None:
+        _OVERLOAD_METRICS["rate_limit_redis_error"] += 1
+        if require_redis:
+            return False, int(_ovl_num("RATE_LIMIT_WINDOW_SECONDS", 60))
+        _ovl_log("rate_limit_redis_error_fail_open", reason="unavailable")
+        return True, 0
+    rate = _ovl_num("RATE_LIMIT_RPS", 1)
+    cap = _ovl_num("RATE_LIMIT_BURST", 5)
+    ttl = int(_ovl_num("RATE_LIMIT_WINDOW_SECONDS", 60))
+    key = f"rl:{llm_cache._ENV}:{scope_id}"
+    try:
+        allowed, retry = r.eval(_RL_LUA, 1, key, rate, cap, time.time(), ttl)
+    except Exception as exc:
+        _redis_client.mark_unavailable()
+        _OVERLOAD_METRICS["rate_limit_redis_error"] += 1
+        if require_redis:
+            return False, ttl
+        _ovl_log("rate_limit_redis_error_fail_open", err=str(exc)[:60])
+        return True, 0
+    if int(allowed) == 1:
+        _OVERLOAD_METRICS["rate_limit_allowed"] += 1
+        _ovl_log("rate_limit_allowed", scope=scope_id[:48])
+        return True, 0
+    _OVERLOAD_METRICS["rate_limit_rejected"] += 1
+    _ovl_log("rate_limit_rejected", scope=scope_id[:48], retry=int(retry))
+    return False, int(retry)
+
+
+def _rate_limited_response(retry_after: int):
+    _ovl_log("overload_response_sent", kind="rate_limit", retry=retry_after)
+    resp = jsonify({
+        "error": "rate_limited",
+        "message": "Too many requests. Please retry later.",
+        "retry_after_seconds": int(retry_after),
+    })
+    resp.status_code = 429
+    resp.headers["Retry-After"] = str(int(retry_after))
+    return resp
+
+
+def _admission_rejected_response():
+    _OVERLOAD_METRICS["admission_rejected"] += 1
+    retry = int(_ovl_num("ADMISSION_RETRY_AFTER_SECONDS", 5))
+    _ovl_log("admission_rejected")
+    _ovl_log("overload_response_sent", kind="admission", retry=retry)
+    resp = jsonify({
+        "error": "admission_rejected",
+        "message": "Server is at capacity, please retry shortly.",
+        "retry_after_seconds": retry,
+    })
+    resp.status_code = 429
+    resp.headers["Retry-After"] = str(retry)
+    return resp
+
+
+def _admission_available() -> Optional[int]:
+    """Best-effort free permits on this worker's admission semaphore (private attr)."""
+    try:
+        return int(getattr(_query_semaphore, "_value"))
+    except Exception:
+        return None
+
+
+def _readiness() -> tuple[bool, dict]:
+    """Is this worker ready to accept meaningful traffic? Distinct from liveness."""
+    redis_url = (os.getenv("REDIS_URL") or "").strip()
+    r = _redis_client.get_redis()
+    if r is None:
+        redis_state = "down" if redis_url else "disabled"
+    else:
+        try:
+            r.ping()
+            redis_state = "ok"
+        except Exception:
+            _redis_client.mark_unavailable()
+            redis_state = "down"
+    avail = _admission_available()
+    reasons = []
+    if QUERY_GRAPH is None:
+        reasons.append("graph_not_ready")
+    if isinstance(avail, int) and avail <= 0:
+        reasons.append("admission_saturated")
+    if redis_state == "down" and _ovl_bool("RATE_LIMIT_REQUIRE_REDIS", False):
+        reasons.append("redis_required_down")
+    ready = not reasons
+    detail = {
+        "status": "ready" if ready else "not_ready",
+        "redis": redis_state,
+        "llm_gateway": "unknown",  # future work: cheap gRPC health probe
+        "query_graph_ready": QUERY_GRAPH is not None,
+        "admission_available": avail if avail is not None else "unknown",
+    }
+    if reasons:
+        detail["reason"] = ",".join(reasons)
+    return ready, detail
+
+
+@app.get('/ready')
+def ready():
+    ok, detail = _readiness()
+    if ok:
+        _ovl_log("readiness_check_ok")
+        return jsonify(detail), 200
+    _ovl_log("readiness_check_failed", reason=detail.get("reason"))
+    return jsonify(detail), 503
+
+
 @app.get('/')
 def home():
     return 'MemvidX API is running.'
@@ -305,6 +677,15 @@ def stats():
         "num_videos": num_videos,
         # Counter per-worker (gunicorn); aggregate thật xem redis-cli INFO stats.
         "cache": llm_cache.stats(),
+        # Phase 3 single-flight counters (per-worker). duplicate_llm_calls_avoided ~= dup_avoided.
+        "single_flight": {**_SF_METRICS, "enabled": _sf_enabled()},
+        # Phase 4 overload/circuit view (per-worker). LLM busy/timeout lives in gateway logs (future).
+        "overload": {
+            **_OVERLOAD_METRICS,
+            "rate_limit_enabled": _ovl_bool("RATE_LIMIT_ENABLED", False),
+            "admission_available": _admission_available(),
+            "admission_capacity": QUERY_MAX_CONCURRENT,
+        },
     }), 200
 
 
@@ -1159,10 +1540,15 @@ def query():
     if not (q or "").strip():
         return jsonify({'error': 'Missing query'}), 400
 
-    # Limit concurrent query threads
+    # Phase 4: ingress rate limit (off by default; fail-open). Structured 429.
+    allowed, retry_after = _rate_limit_check(_rl_scope_id(session_id))
+    if not allowed:
+        return _rate_limited_response(retry_after)
+
+    # Limit concurrent query threads (per-worker admission). Structured 429 + Retry-After.
     acquired = _query_semaphore.acquire(blocking=False)
     if not acquired:
-        return jsonify({"error": "Too many concurrent queries, please retry."}), 429
+        return _admission_rejected_response()
 
     job_id = str(uuid.uuid4())
     if not session_id:
@@ -1182,6 +1568,7 @@ def query():
 
     def process_query_job(jid: str, question: str, sources: list, use_mem: bool, category: str | None = None, language: str | None = None) -> None:
         start_ts = time.time()
+        sf_lock = None  # (key, token) if we became the single-flight leader
         try:
             with query_jobs_lock:
                 if jid in query_jobs:
@@ -1189,6 +1576,16 @@ def query():
 
             if QUERY_GRAPH is None:
                 raise RuntimeError("QUERY_GRAPH chưa khởi tạo — kiểm tra logs khởi động.")
+
+            # Phase 3 single-flight: coalesce duplicate/equivalent concurrent queries.
+            # Fail-open — leader runs the graph below; follower served from cache returns here.
+            try:
+                _sf = _single_flight_try(jid, question, sources, use_mem, category, language, session_id)
+            except Exception:
+                _sf = {"served": False, "lock": None}  # single-flight must never break the answer path
+            if _sf.get("served"):
+                return  # follower finalized from the leader's cached answer
+            sf_lock = _sf.get("lock")
 
             try:
                 from app.domains.jobs.jobs_store import clear_token_buffer as _js_tb_clear
@@ -1245,6 +1642,13 @@ def query():
                     pass
             logging.exception("[QUERY_JOB] job_id=%s failed: %s", jid, err_txt)
         finally:
+            # Release the single-flight lock AFTER finalize (cache already written) so
+            # followers read the leader's answer rather than racing an empty cache.
+            if sf_lock:
+                try:
+                    _single_flight_release(sf_lock[0], sf_lock[1])
+                except Exception:
+                    pass
             elapsed = time.time() - start_ts
             if elapsed > QUERY_JOB_TIMEOUT_SEC:
                 print(f"[QUERY_JOB] job_id={jid} exceeded timeout={QUERY_JOB_TIMEOUT_SEC}s (elapsed={elapsed:.1f}s)")
@@ -1318,7 +1722,7 @@ def query_resume(job_id: str):
         with query_jobs_lock:
             if job_id in query_jobs:
                 query_jobs[job_id]["status"] = "interrupted"
-        return jsonify({"error": "Too many concurrent queries, please retry."}), 429
+        return _admission_rejected_response()
 
     def resume_job() -> None:
         try:

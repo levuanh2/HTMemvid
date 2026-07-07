@@ -38,6 +38,19 @@ services:
       # Cache Redis (semantic + retrieval) — fail-open: redis chết thì backend vẫn chạy.
       REDIS_URL: redis://redis:6379/0
       CACHE_ENV: prod
+      # Phase 3 single-flight (DR-3 D3) — coalesce duplicate query storms. Host-overridable.
+      SINGLE_FLIGHT_ENABLED: "${SINGLE_FLIGHT_ENABLED:-true}"
+      SINGLE_FLIGHT_LOCK_TTL_SECONDS: "${SINGLE_FLIGHT_LOCK_TTL_SECONDS:-180}"
+      SINGLE_FLIGHT_WAIT_SECONDS: "${SINGLE_FLIGHT_WAIT_SECONDS:-120}"
+      SINGLE_FLIGHT_POLL_INTERVAL_SECONDS: "${SINGLE_FLIGHT_POLL_INTERVAL_SECONDS:-0.5}"
+      # Phase 4 ingress overload protection — rate limit OFF by default (opt-in for prod).
+      RATE_LIMIT_ENABLED: "${RATE_LIMIT_ENABLED:-false}"
+      RATE_LIMIT_RPS: "${RATE_LIMIT_RPS:-1}"
+      RATE_LIMIT_BURST: "${RATE_LIMIT_BURST:-5}"
+      RATE_LIMIT_WINDOW_SECONDS: "${RATE_LIMIT_WINDOW_SECONDS:-60}"
+      RATE_LIMIT_SCOPE: "${RATE_LIMIT_SCOPE:-ip}"
+      RATE_LIMIT_REQUIRE_REDIS: "${RATE_LIMIT_REQUIRE_REDIS:-false}"
+      ADMISSION_RETRY_AFTER_SECONDS: "${ADMISSION_RETRY_AFTER_SECONDS:-5}"
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -83,6 +96,10 @@ services:
       LATE_CHUNKING: "1"
       HF_HOME: /root/.cache/huggingface
       LLM_GATEWAY_PORT: "50051"
+      # Phase 2: global LLM concurrency cap (DR-3 D2). Host env overrides for tuning:
+      #   MAX_CONCURRENT_LLM_CALLS=1 docker compose up -d llm-gateway
+      MAX_CONCURRENT_LLM_CALLS: "${MAX_CONCURRENT_LLM_CALLS:-2}"
+      LLM_QUEUE_WAIT_TIMEOUT_SECONDS: "${LLM_QUEUE_WAIT_TIMEOUT_SECONDS:-30}"
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"

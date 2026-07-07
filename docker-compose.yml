@@ -54,6 +54,12 @@ services:
       RATE_LIMIT_SCOPE: "${RATE_LIMIT_SCOPE:-ip}"
       RATE_LIMIT_REQUIRE_REDIS: "${RATE_LIMIT_REQUIRE_REDIS:-false}"
       ADMISSION_RETRY_AFTER_SECONDS: "${ADMISSION_RETRY_AFTER_SECONDS:-5}"
+      # Phase 5 RQ queue (default OFF; shared job DB on the memory volume so a worker can share it).
+      QUEUE_ENABLED: "${QUEUE_ENABLED:-false}"
+      QUEUE_DEPTH_MAX: "${QUEUE_DEPTH_MAX:-20}"
+      RQ_JOB_TIMEOUT_SEC: "${RQ_JOB_TIMEOUT_SEC:-1800}"
+      JOBS_DB_PATH: "${JOBS_DB_PATH:-/app/memory/jobs.sqlite}"
+      LOG_DB_PATH: "${LOG_DB_PATH:-/app/memory/logs.sqlite}"
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -146,6 +152,54 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - llm-gateway
+
+  # Phase 5 RQ worker for heavy background jobs (Step 1: ingest). OPTIONAL: gated behind
+  # the `worker` profile so a plain `docker compose up` does NOT start it and the backend
+  # never depends on it. Enable with:  QUEUE_ENABLED=true docker compose --profile worker up -d
+  rq-worker:
+    profiles: ["worker"]
+    build:
+      context: ./BE
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.jobs.worker"]
+    volumes:
+      - ./data/videos:/app/videos
+      - ./data/index:/app/index
+      - ./data/memory:/app/memory
+      - ./data/input_docs:/app/input_docs
+      - hf_cache:/root/.cache/huggingface
+    environment:
+      DATA_DIR: /app
+      OLLAMA_HOST: http://host.docker.internal:11434
+      SLM_MODEL_CHAT: qwen3.5:9b
+      SLM_MODEL: qwen3.5:9b
+      OLLAMA_REASONING: "0"
+      LLM_MAX_TOKENS: "8192"
+      HYBRID_TOP_K: "6"
+      USE_LC_VECTOR_STORE: "1"
+      USE_LC_QA_CHAIN: "1"
+      USE_LC_ENSEMBLE: "1"
+      USE_LC_INGEST: "1"
+      EMBEDDING_MODEL_NAME: BAAI/bge-m3
+      LATE_CHUNKING: "1"
+      HF_HOME: /root/.cache/huggingface
+      LLM_GATEWAY_ADDR: llm-gateway:50051
+      MINDMAP_SERVICE_ADDR: mindmap-service:50052
+      REDIS_URL: redis://redis:6379/0
+      CACHE_ENV: prod
+      # MUST match the backend so both share ONE job/log DB on the memory volume.
+      QUEUE_ENABLED: "${QUEUE_ENABLED:-true}"
+      WORKER_CONCURRENCY: "${WORKER_CONCURRENCY:-1}"
+      RQ_JOB_TIMEOUT_SEC: "${RQ_JOB_TIMEOUT_SEC:-1800}"
+      JOBS_DB_PATH: "${JOBS_DB_PATH:-/app/memory/jobs.sqlite}"
+      LOG_DB_PATH: "${LOG_DB_PATH:-/app/memory/logs.sqlite}"
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+      - llm-gateway
+      - mindmap-service
 
   redis:
     image: redis:7-alpine

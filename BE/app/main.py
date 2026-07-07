@@ -129,11 +129,26 @@ except Exception:
     pass
 
 
-def _handle_sigterm(*_args):
-    # best-effort: mark running jobs interrupted để tránh trạng thái mồ côi
+def _reconcile_jobs_safe():
+    """Phase 5: queue-aware orphan reconciliation. QUEUE_ENABLED=false -> mark all
+    active interrupted (today's behaviour); true -> only mark jobs absent from RQ
+    registries (never kills a live worker job); RQ down -> touch nothing."""
     try:
-        if _jobs_mark_interrupted is not None:
-            _jobs_mark_interrupted()
+        from app.jobs.queue import reconcile_interrupted
+        reconcile_interrupted()
+    except Exception:
+        # fall back to the legacy single-process behaviour if the queue module fails
+        try:
+            if _jobs_mark_interrupted is not None:
+                _jobs_mark_interrupted()
+        except Exception:
+            pass
+
+
+def _handle_sigterm(*_args):
+    # best-effort: mark orphaned jobs interrupted (queue-aware) để tránh trạng thái mồ côi
+    try:
+        _reconcile_jobs_safe()
     finally:
         sys.exit(0)
 
@@ -577,6 +592,22 @@ def _admission_available() -> Optional[int]:
         return None
 
 
+def _queue_stats_safe() -> dict:
+    """Phase 5: RQ queue depth for /stats and /ready. Never raises."""
+    try:
+        from app.jobs.queue import queue_stats
+        return queue_stats()
+    except Exception as exc:  # noqa: BLE001
+        return {"enabled": False, "error": str(exc)[:80]}
+
+
+def _queue_depth_max() -> int:
+    try:
+        return int(os.getenv("QUEUE_DEPTH_MAX", "20"))
+    except ValueError:
+        return 20
+
+
 def _readiness() -> tuple[bool, dict]:
     """Is this worker ready to accept meaningful traffic? Distinct from liveness."""
     redis_url = (os.getenv("REDIS_URL") or "").strip()
@@ -598,6 +629,12 @@ def _readiness() -> tuple[bool, dict]:
         reasons.append("admission_saturated")
     if redis_state == "down" and _ovl_bool("RATE_LIMIT_REQUIRE_REDIS", False):
         reasons.append("redis_required_down")
+    # Phase 5: shed when the RQ queue is backed up (only when queue mode is on).
+    # Does NOT gate /query — the interactive path stays available regardless of backlog.
+    qs = _queue_stats_safe()
+    queue_depth = qs.get("queued_count")
+    if qs.get("enabled") and isinstance(queue_depth, int) and queue_depth > _queue_depth_max():
+        reasons.append("queue_full")
     ready = not reasons
     detail = {
         "status": "ready" if ready else "not_ready",
@@ -605,6 +642,8 @@ def _readiness() -> tuple[bool, dict]:
         "llm_gateway": "unknown",  # future work: cheap gRPC health probe
         "query_graph_ready": QUERY_GRAPH is not None,
         "admission_available": avail if avail is not None else "unknown",
+        "queue_enabled": bool(qs.get("enabled")),
+        "queue_depth": queue_depth,
     }
     if reasons:
         detail["reason"] = ",".join(reasons)
@@ -687,6 +726,8 @@ def stats():
             "admission_available": _admission_available(),
             "admission_capacity": QUERY_MAX_CONCURRENT,
         },
+        # Phase 5 RQ queue depth (fail-open; zeros when QUEUE_ENABLED=false or Redis down).
+        "queue": _queue_stats_safe(),
     }), 200
 
 
@@ -1022,6 +1063,9 @@ QUERY_GRAPH_BUILD_ERROR = _graphs.query_build_error
 MINDMAP_GRAPH = _graphs.mindmap
 SUMMARY_GRAPH = _graphs.summary
 
+# Phase 5: reconcile orphaned jobs at startup (queue-aware; never kills live worker jobs).
+_reconcile_jobs_safe()
+
 
 def _langgraph_invoke(graph: Any, state: dict, *, thread_id: str, command: Any = None) -> dict:
     """Graph compile với SqliteSaver yêu cầu configurable.thread_id.
@@ -1199,9 +1243,41 @@ def _trigger_memory_tree_build(source_stems: List[str]):
     print(f"🚀 [Background] Đã trigger build Memory Tree cho: {source_stems}")
 
 
+def _run_ingest_job(source_id: str, file_path: str, filename: str) -> None:
+    """Ingest execution body. Runs EITHER in a daemon thread (QUEUE_ENABLED=false)
+    OR in an RQ worker process (QUEUE_ENABLED=true) — identical behaviour. Enqueued
+    by dotted path `app.main._run_ingest_job`, so the worker builds/reuses INGEST_GRAPH
+    on import. Status/result land in the shared jobs.sqlite; the graph nodes own the
+    done/error writes (atomic-with-result invariant preserved)."""
+    job_id = source_id
+    try:
+        if _jobs_update_job:
+            _jobs_update_job(job_id, status="running", current_node="Ingest")
+    except Exception:
+        pass
+    try:
+        init_state = {
+            "job_id": job_id,
+            "source_id": source_id,
+            "file_path": file_path,
+            "filename": filename,
+            "progress": 0,
+            "current_node": "Queued",
+            "artifacts": {},
+            "error": None,
+        }
+        _langgraph_invoke(INGEST_GRAPH, init_state, thread_id=job_id)
+    except Exception as exc:
+        try:
+            _update_source_status(source_id, "error", progress=0.0, error=_job_error_text(exc))
+        except Exception:
+            pass
+
+
 def _trigger_background_ingest(source_id: str, file_path: str, filename: str):
     """
-    Trigger ingest qua LangGraph (Phase 5 — không còn pipeline thread legacy).
+    Trigger ingest qua LangGraph. Phase 5: qua enqueue_job — daemon thread khi
+    QUEUE_ENABLED=false (mặc định), RQ worker khi bật. FE polling không đổi.
     """
     if INGEST_GRAPH is None or _jobs_create_job is None:
         print("[INGEST] INGEST_GRAPH hoặc jobs_store không khả dụng — không thể xử lý upload.")
@@ -1217,28 +1293,10 @@ def _trigger_background_ingest(source_id: str, file_path: str, filename: str):
     except Exception:
         pass
 
-    def run_graph():
-        try:
-            init_state = {
-                "job_id": job_id,
-                "source_id": source_id,
-                "file_path": file_path,
-                "filename": filename,
-                "progress": 0,
-                "current_node": "Queued",
-                "artifacts": {},
-                "error": None,
-            }
-            _langgraph_invoke(INGEST_GRAPH, init_state, thread_id=job_id)
-        except Exception as exc:
-            try:
-                _update_source_status(source_id, "error", progress=0.0, error=_job_error_text(exc))
-            except Exception:
-                pass
-
-    thread = threading.Thread(target=run_graph, daemon=True)
-    thread.start()
-    print(f"🚀 [Background] (LangGraph) Đã trigger ingest cho source: {source_id}")
+    from app.jobs.queue import enqueue_job
+    res = enqueue_job(_run_ingest_job, args=(source_id, file_path, filename),
+                      queue="ingest", job_id=job_id)
+    print(f"🚀 [Background] ingest source={source_id} mode={res.get('mode')}")
 
 
 # -------------------------

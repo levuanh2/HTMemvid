@@ -20,15 +20,22 @@ def _data_dir() -> Path:
 
 
 def db_path() -> Path:
+    # Phase 5: JOBS_DB_PATH lets web + RQ worker share ONE jobs.sqlite on a mounted
+    # volume (e.g. /app/memory/jobs.sqlite). Unset -> legacy DATA_DIR path (dev/tests).
+    override = (os.environ.get("JOBS_DB_PATH") or "").strip()
+    if override:
+        return Path(override)
     return _data_dir() / "jobs.sqlite"
 
 
 def get_conn() -> sqlite3.Connection:
     p = db_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(p), check_same_thread=False)
+    conn = sqlite3.connect(str(p), check_same_thread=False, timeout=5.0)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    # busy_timeout: tolerate cross-process/-container writers on the shared DB.
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -234,6 +241,8 @@ def append_token(job_id: str, token: str) -> None:
 def mark_interrupted_jobs() -> None:
     """
     Khi process bị kill, mark các job đang running/pending sang interrupted.
+    (Single-process behaviour. Trong queue mode dùng reconcile_interrupted() ở
+    app/jobs/queue.py để KHÔNG mark nhầm job worker còn sống.)
     """
     init_db()
     with _lock:
@@ -248,6 +257,20 @@ def mark_interrupted_jobs() -> None:
                 (_now(),),
             )
             conn.commit()
+        finally:
+            conn.close()
+
+
+def list_active_jobs() -> list[tuple[str, str]]:
+    """(job_id, job_type) cho các job chưa terminal — dùng cho reconcile queue-aware."""
+    init_db()
+    with _lock:
+        conn = get_conn()
+        try:
+            cur = conn.execute(
+                "SELECT job_id, job_type FROM jobs WHERE status IN ('pending','running','processing')"
+            )
+            return [(row[0], row[1]) for row in cur.fetchall()]
         finally:
             conn.close()
 

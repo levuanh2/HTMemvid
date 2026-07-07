@@ -19,6 +19,10 @@ def _data_dir() -> Path:
 
 
 def log_db_path() -> Path:
+    # Phase 5: LOG_DB_PATH lets web + RQ worker share node_logs on a mounted volume.
+    override = (os.environ.get("LOG_DB_PATH") or "").strip()
+    if override:
+        return Path(override)
     return _data_dir() / "logs.sqlite"
 
 
@@ -37,7 +41,9 @@ def log_node_event(
     with _lock:
         p = log_db_path()
         p.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(p))
+        conn = sqlite3.connect(str(p), timeout=5.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         try:
             conn.execute(
                 """

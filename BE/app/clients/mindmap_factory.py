@@ -15,7 +15,15 @@ class LocalMindmapPipeline:
 
     def skeleton(self, mm_input):
         from services.mindmap.pipeline.skeleton import build_skeleton
-        return build_skeleton(mm_input)
+        nodes, method = build_skeleton(mm_input)
+        if method == "single":
+            # Deterministic bó tay → 1 LLM call dựng mục lục; lỗi thì giữ single
+            # (graph đánh dấu degraded "skeleton").
+            from services.mindmap.pipeline.outline import build_outline
+            outlined = build_outline(mm_input, model=self._model(), timeout_sec=self._timeout())
+            if outlined:
+                return outlined, "llm_outline"
+        return nodes, method
 
     def enrich(self, mm_input, skeleton_nodes, progress_cb=None, cancel_cb=None):
         from services.mindmap.pipeline.enrich import enrich_branches

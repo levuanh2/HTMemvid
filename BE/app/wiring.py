@@ -18,6 +18,7 @@ class Graphs:
     ingest: Any | None = None
     query: Any | None = None
     mindmap: Any | None = None
+    summary: Any | None = None
     query_build_error: Optional[str] = None
 
 
@@ -47,6 +48,9 @@ def build_graphs(
     collect_mindmap_input: Callable[..., dict],
     mindmap_pipeline: Any,
     persist_mindmap: Callable[[dict], None],
+    # summary deps (reuse collect_mindmap_input làm collect_input)
+    summary_pipeline: Any | None = None,
+    persist_summary: Callable[[dict], None] | None = None,
     retriever: Any | None = None,
 ) -> Graphs:
     """Dựng 3 graph; lỗi từng graph được nuốt (trả None) để app vẫn chạy phần còn lại."""
@@ -100,5 +104,19 @@ def build_graphs(
         )
     except Exception as exc:
         print(f"[WARN] MINDMAP_GRAPH không khởi tạo được: {exc}")
+
+    if summary_pipeline is not None and persist_summary is not None:
+        try:
+            from app.graphs.summary_graph import build_summary_graph
+            g.summary = build_summary_graph(
+                data_dir=data_dir,
+                index_meta_path=index_meta_path,
+                jobs_update=jobs_update,
+                collect_input=collect_mindmap_input,
+                pipeline=summary_pipeline,
+                persist_record=persist_summary,
+            )
+        except Exception as exc:
+            print(f"[WARN] SUMMARY_GRAPH không khởi tạo được: {exc}")
 
     return g

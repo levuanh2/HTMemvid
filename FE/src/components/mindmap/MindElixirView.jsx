@@ -1,6 +1,9 @@
 // Viewer mind-elixir — thay ReactFlow/ELK. Overlay fullscreen giữ từ v2.
 import { useEffect, useRef, useState, useCallback } from "react";
 import MindElixir from "mind-elixir";
+// BẮT BUỘC: toàn bộ layout của mind-elixir (me-nodes flex, me-tpc block, gaps)
+// nằm trong CSS này — thiếu nó mọi node rơi về display:inline và sơ đồ vỡ hoàn toàn.
+import "mind-elixir/style";
 import { snapdom } from "@zumer/snapdom";
 import { recordToMindElixir, mindElixirToRecord } from "../../utils/mindElixirAdapter";
 import { updateMindmap } from "../../utils/api";
@@ -14,14 +17,41 @@ import "./mindmap.css";
 // constants.js::BRANCH_COLORS (file đã xoá cùng ReactFlow view ở Task 9).
 const PALETTE = ["#5C6B7A", "#3E6B57", "#B5821F", "#B23A2E", "#4A5A8A", "#8A7A66"];
 
-const THEME = {
+// MindElixir.css tiêu thụ đủ bộ var dưới đây KHÔNG có fallback — thiếu var nào
+// là declaration đó invalid và spacing/màu sụp đổ. Phải set đủ (guard bằng test
+// THEME_REQUIRED_VARS). Màu để dạng var(--token) → tự flip light/dark theo html.dark.
+export const THEME = {
   name: "PhongDoc",
   palette: PALETTE,
   cssVar: {
+    // hình học — nhịp lề giấy Phòng đọc, card chứ không pill
+    "--map-padding": "60px 100px",
+    "--main-gap-x": "72px",
+    "--main-gap-y": "36px",
+    "--node-gap-x": "32px",
+    "--node-gap-y": "8px",
+    "--root-radius": "8px",
+    "--main-radius": "6px",
+    "--topic-padding": "4px",
+    // root = khối mực (ink), chữ màu giấy
+    "--root-color": "var(--bg-base)",
+    "--root-bgcolor": "var(--text-primary)",
+    "--root-border-color": "transparent",
+    // section = thẻ giấy nổi, viền đậm
     "--main-color": "var(--text-primary)",
-    "--main-bgcolor": "var(--bg-base)",
+    "--main-bgcolor": "var(--bg-card)",
+    "--main-border": "1px solid var(--border-strong)",
+    "--main-bgcolor-transparent": "transparent",
+    // idea/detail = chữ trần trên nền
     "--color": "var(--text-secondary)",
-    "--bgcolor": "var(--bg-base)",
+    "--bgcolor": "transparent",
+    // selection/active — seal đỏ hợp lệ (active state, không decorative)
+    "--selected": "var(--accent)",
+    "--accent-color": "var(--accent)",
+    // context-menu panel
+    "--panel-color": "var(--text-primary)",
+    "--panel-bgcolor": "var(--bg-card)",
+    "--panel-border-color": "var(--border-color)",
   },
 };
 
@@ -44,17 +74,24 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
   // (re)init khi đổi record
   useEffect(() => {
     if (!containerRef.current || !data) return;
+    // Record mới (vd tạo lại xong) → xoá sạch state phiên cũ, nếu không badge
+    // "chưa lưu" và EvidenceDrawer trỏ node cũ sống sót qua re-init (codex #8).
+    setDirty(false);
+    setSaving(false);
+    setSelected(null);
     const { mindData, sidecar } = recordToMindElixir(data);
     sidecarRef.current = sidecar;
     const mind = new MindElixir({
       el: containerRef.current,
       direction: MindElixir.SIDE,
-      editable: true,
-      draggable: true,
+      editable: true,       // gate kéo node (re-parent/đổi thứ tự) — `draggable` đã deprecated
       contextMenu: true,
       toolBar: false,       // toolbar riêng của mình
       keypress: true,
       allowUndo: true,
+      // 2 = chuột PHẢI box-select → kéo-TRÁI trên nền = pan canvas (trực quan hơn
+      // mặc định bắt Space+kéo).
+      mouseSelectionButton: 2,
       theme: THEME,
     });
     mind.init(mindData);
@@ -102,15 +139,25 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
     }
   };
 
+  const zoomBy = (delta) => {
+    const mind = mindRef.current;
+    if (!mind) return;
+    const next = Math.min(2, Math.max(0.4, (mind.scaleVal || 1) + delta));
+    mind.scale(next);
+  };
+
   const handleExportPng = async () => {
     const mind = mindRef.current;
-    const target = mind?.nodes;
+    // Chụp mind.map (.map-canvas) chứ KHÔNG phải mind.nodes: rule layout then chốt
+    // là descendant selector `.map-canvas me-nodes{display:flex}` — clone me-nodes
+    // tách khỏi .map-canvas sẽ không match và PNG vỡ (text dồn 1 dòng).
+    const target = mind?.map;
     if (!target) return;
 
     try {
       const backgroundColor =
         getComputedStyle(document.documentElement).getPropertyValue("--bg-base").trim() || "#ECE7DB";
-      const result = await snapdom(target, { backgroundColor });
+      const result = await snapdom(target, { backgroundColor, scale: 2 });
       const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
       const safeTitle = String(data?.title || "mindmap").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 60);
       await result.download({ format: "png", filename: `mindmap-${safeTitle}-${date}` });
@@ -133,28 +180,49 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
 
   return (
     <div className="fixed inset-0 z-[1000] flex flex-col" style={{ background: "var(--bg-base)" }}>
-      {/* Toolbar mỏng */}
+      {/* Toolbar — chrome Phòng đọc: kicker mono + tiêu đề Spectral, control là icon-btn */}
       <div className="flex items-center gap-2 px-3 py-2 border-b flex-shrink-0"
         style={{ borderColor: "var(--border-color)", background: "var(--bg-sidebar)" }}>
-        <span className="font-display text-[14px] font-semibold truncate text-text-primary">{data?.title || "Sơ đồ tư duy"}</span>
+        <div className="min-w-0">
+          <div className="font-mono text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--text-secondary)" }}>
+            Sơ đồ tư duy
+          </div>
+          <div className="font-display text-[14px] font-semibold truncate text-text-primary">
+            {data?.title || "Sơ đồ tư duy"}
+          </div>
+        </div>
         {dirty && <span className="text-[11px] px-1.5 rounded" style={{ color: "var(--warn)" }}>● chưa lưu</span>}
         <div className="flex-1" />
-        <label className="flex items-center gap-1 text-[12px] text-text-secondary cursor-pointer">
-          <input type="checkbox" checked={showRelations} onChange={(e) => setShowRelations(e.target.checked)} />
-          Quan hệ
-        </label>
+        <button onClick={() => zoomBy(-0.2)} aria-label="Thu nhỏ" title="Thu nhỏ"
+          className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-text-secondary">
+          <Icon name="ZoomOut" size={16} />
+        </button>
+        <button onClick={() => zoomBy(+0.2)} aria-label="Phóng to" title="Phóng to"
+          className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-text-secondary">
+          <Icon name="ZoomIn" size={16} />
+        </button>
+        <button onClick={() => mindRef.current?.toCenter()} aria-label="Căn giữa" title="Căn giữa"
+          className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-text-secondary">
+          <Icon name="Maximize" size={16} />
+        </button>
+        <button onClick={() => setShowRelations((v) => !v)} aria-pressed={showRelations}
+          aria-label="Bật/tắt quan hệ" title="Quan hệ"
+          className="p-1.5 rounded hover:bg-[var(--bg-hover)]"
+          style={{ color: showRelations ? "var(--text-primary)" : "var(--text-secondary)", opacity: showRelations ? 1 : 0.5 }}>
+          <Icon name="Spline" size={16} />
+        </button>
+        <button onClick={handleExportPng} title="Xuất PNG"
+          className="flex items-center gap-1 px-2 py-1.5 rounded hover:bg-[var(--bg-hover)] text-[12px] text-text-secondary">
+          <Icon name="Download" size={14} /> Xuất PNG
+        </button>
         {/* Nút Lưu — chỉ hiện khi record đã có id thật trong sqlite (không phải
-            "preview" transient) và không đang generating, tránh PUT 404. Export
-            PNG (Task 9) gắn thêm tại đây. */}
+            "preview" transient) và không đang generating, tránh PUT 404. */}
         {data?.id && data.id !== "preview" && !data.generating && (
           <button onClick={handleSave} disabled={!dirty || saving}
             className="btn-primary text-[12px] disabled:opacity-40">
             {saving ? "Đang lưu…" : "Lưu"}
           </button>
         )}
-        <button onClick={handleExportPng} className="text-[12px] underline text-text-secondary">
-          Xuất PNG
-        </button>
         <button onClick={requestClose} aria-label="Đóng" className="p-1.5 rounded hover:bg-[var(--bg-hover)]">
           <Icon name="X" size={16} />
         </button>
@@ -191,8 +259,18 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
           )}
         </div>
       )}
-      {/* Map */}
-      <div ref={containerRef} className={`flex-1 min-h-0 me-container${showRelations ? "" : " me-hide-arrows"}`} />
+      {/* Map + legend (legend là sibling — cleanup xoá innerHTML của container
+          nên không được đặt con React bên trong div ref) */}
+      <div className="relative flex-1 min-h-0">
+        <div ref={containerRef} className={`absolute inset-0 me-container${showRelations ? "" : " me-hide-arrows"}`} />
+        <div className="mm-legend" aria-hidden="true">
+          <span><span className="swatch" style={{ background: "var(--text-primary)" }} />chủ đề</span>
+          <span><span className="swatch" style={{ background: "var(--bg-card)", border: "1px solid var(--border-strong)" }} />mục</span>
+          <span><span className="font-mono" style={{ color: "var(--accent)" }}>※</span> có trích đoạn</span>
+          <span><span className="dash" />quan hệ</span>
+          <span className="mm-legend-hint">kéo node → chuyển nhánh · kéo nền → di chuyển</span>
+        </div>
+      </div>
       {/* Evidence drawer giữ nguyên component */}
       {selected && (
         <EvidenceDrawer node={selected} onClose={() => setSelected(null)}

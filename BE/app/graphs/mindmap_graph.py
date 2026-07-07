@@ -55,7 +55,8 @@ def build_mindmap_graph(*, data_dir: Path, index_meta_path: Path,
         _set_job(state["job_id"], status="running", progress=5, current_node="CollectInput")
         mm = state.get("mm_input") or collect_input(index_meta_path, state.get("source_names") or [])
         ch = state.get("content_hash") or mm_schema.content_hash(
-            mm.get("sources") or [], [c["text"] for c in mm.get("chunks") or []])
+            mm.get("sources") or [], [c["text"] for c in mm.get("chunks") or []],
+            [c.get("heading_path", "") for c in mm.get("chunks") or []])
         if not mm.get("chunks"):
             raise ValueError("Không có chunk nào cho các nguồn đã chọn.")
         return {**state, "mm_input": mm, "content_hash": ch, "progress": 10,
@@ -65,11 +66,16 @@ def build_mindmap_graph(*, data_dir: Path, index_meta_path: Path,
     def skeleton_node(state: dict) -> dict:
         _set_job(state["job_id"], progress=15, current_node="Skeleton")
         nodes, method = pipeline.skeleton(state["mm_input"])
+        missing = list(state.get("degraded_missing") or [])
+        if method == "single":
+            # Cả deterministic lẫn LLM outline đều không dựng được khung —
+            # record chỉ có root, phải báo degraded thay vì im lặng.
+            missing.append("skeleton")
         # preview cho FE render ngay (spec §4.2.2)
         _set_job(state["job_id"], progress=20,
                  result={"partial": {"title": state["mm_input"]["title"], "nodes": nodes}})
         return {**state, "skeleton": nodes, "skeleton_method": method,
-                "progress": 20, "current_node": "Skeleton"}
+                "degraded_missing": missing, "progress": 20, "current_node": "Skeleton"}
 
     @_guard("Enrich")
     def enrich_node(state: dict) -> dict:
@@ -107,7 +113,8 @@ def build_mindmap_graph(*, data_dir: Path, index_meta_path: Path,
             relations=mm_schema.validate_relations(state.get("relations") or [], clean_nodes),
             content_hash_value=state["content_hash"],
             model=resolve_mindmap_model(),
-            elapsed_sec=elapsed, degraded_missing=state.get("degraded_missing") or [])
+            elapsed_sec=elapsed, degraded_missing=state.get("degraded_missing") or [],
+            skeleton_method=state.get("skeleton_method") or "")
         persist_record(record)
         _set_job(state["job_id"], status="done", progress=100,
                  current_node="AssemblePersist", result=record)

@@ -104,3 +104,36 @@ describe("mindElixirToRecord", () => {
     expect(out.relations).toContainEqual({ source: "n3", target: "n2", type: "relates_to", label: "ghi chú" });
   });
 });
+
+describe("redesign Phòng đọc (tags + relation color + type từ label)", () => {
+  it("node có chunkRefs được gắn tag ※N; node không có thì không", () => {
+    const { mindData } = recordToMindElixir(REC);
+    const sec1 = mindData.nodeData.children[0];
+    expect(sec1.tags).toEqual(["※ 1"]);
+    expect(mindData.nodeData.tags).toBeUndefined(); // root không có refs
+  });
+
+  it("arrow dùng --mm-relation (seal đỏ chỉ dành cho provenance)", () => {
+    const { mindData } = recordToMindElixir(REC);
+    expect(mindData.arrows[0].style.stroke).toBe("var(--mm-relation)");
+    expect(mindData.arrows[0].style.labelColor).toBe("var(--mm-relation)");
+  });
+
+  it("arrow mới suy type từ nhãn tiếng Việt thay vì rớt về relates_to", () => {
+    const { mindData, sidecar } = recordToMindElixir(REC);
+    // user vẽ arrow mới n2→n3 với label "gây ra" (không có trong baseRecord)
+    mindData.arrows.push({ id: "new", from: "n2", to: "n3", label: "gây ra" });
+    const rec = mindElixirToRecord(mindData, sidecar, REC);
+    const created = rec.relations.find((r) => r.source === "n2" && r.target === "n3");
+    expect(created.type).toBe("causes");
+    // arrow gốc vẫn giữ type theo (source,target)
+    const kept = rec.relations.find((r) => r.source === "n1" && r.target === "n2");
+    expect(kept.type).toBe("leads_to");
+  });
+
+  it("tags không rò vào record khi save (round-trip sạch)", () => {
+    const { mindData, sidecar } = recordToMindElixir(REC);
+    const rec = mindElixirToRecord(mindData, sidecar, REC);
+    for (const n of rec.nodes) expect(n.tags).toBeUndefined();
+  });
+});

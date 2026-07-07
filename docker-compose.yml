@@ -35,6 +35,9 @@ services:
       HF_HOME: /root/.cache/huggingface
       LLM_GATEWAY_ADDR: llm-gateway:50051
       MINDMAP_SERVICE_ADDR: mindmap-service:50052
+      MINDMAP_LLM_TIMEOUT_SEC: "240"   # mirror mindmap-service (dùng khi chạy Local pipeline)
+      SUMMARY_LLM_TIMEOUT_SEC: "240"   # summary v2 chạy trong backend (monolith) — cùng lý do CPU chậm
+      SUMMARY_PARALLEL: "2"
       # Cache Redis (semantic + retrieval) — fail-open: redis chết thì backend vẫn chạy.
       REDIS_URL: redis://redis:6379/0
       CACHE_ENV: prod
@@ -133,6 +136,9 @@ services:
       LATE_CHUNKING: "1"
       HF_HOME: /root/.cache/huggingface
       MINDMAP_SERVICE_PORT: "50052"
+      # Đo thật 2026-07-05 (qwen3.5:9b, Ollama CPU host): enrich 1 nhánh với prompt
+      # nested-detail ~120-160s → default 120s làm 3/4 nhánh degraded. 240s có đệm.
+      MINDMAP_LLM_TIMEOUT_SEC: "240"
       # mindmap-service cũng là client của llm-gateway (dùng chung 1 model embedding + policy provider)
       LLM_GATEWAY_ADDR: llm-gateway:50051
     restart: always

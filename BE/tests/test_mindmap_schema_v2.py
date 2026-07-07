@@ -55,3 +55,25 @@ def test_build_record_shape():
     assert rec["generator"]["missing"] == ["relations"]
     assert rec["content_hash"] == "x" * 64
     assert rec["id"] and rec["created_at"].endswith("Z")
+
+
+def test_content_hash_sensitive_to_headings():
+    # Re-ingest phục hồi heading_path (text không đổi) phải ra hash MỚI,
+    # nếu không cache trả mãi bản mindmap nông cũ.
+    base = s.content_hash(["a"], ["t1"], [""])
+    with_heading = s.content_hash(["a"], ["t1"], ["1. Giới thiệu"])
+    assert base != with_heading
+    # backward-compat: không truyền headings == truyền toàn rỗng? KHÔNG — arg
+    # None bỏ qua khối \x02, phải bằng chính nó và ổn định
+    assert s.content_hash(["a"], ["t1"]) == s.content_hash(["a"], ["t1"])
+
+
+def test_build_record_carries_skeleton_method():
+    rec = s.build_record(title="T", sources=["a"], nodes=[], relations=[],
+                         content_hash_value="h", model="m", elapsed_sec=1.0,
+                         degraded_missing=[], skeleton_method="llm_outline")
+    assert rec["generator"]["skeleton_method"] == "llm_outline"
+    rec2 = s.build_record(title="T", sources=["a"], nodes=[], relations=[],
+                          content_hash_value="h", model="m", elapsed_sec=1.0,
+                          degraded_missing=[])
+    assert rec2["generator"]["skeleton_method"] == ""

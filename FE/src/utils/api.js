@@ -58,6 +58,24 @@ export const updateMindmap = async (id, record) => {
   return res.json();
 };
 
+// ── Summary v2: generate / cancel (mirror mindmap; poll qua /summary-status) ──
+// Caller branch theo `status` ("done" cache-hit — KHÔNG có job_id — vs "started").
+export const generateSummary = async (sources, { lengthMode = "medium", force = false } = {}) => {
+  const res = await apiFetch(`/generate-summary`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sources, length_mode: lengthMode, force: Boolean(force) }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+};
+
+export const cancelSummary = async (jobId) => {
+  const res = await apiFetch(`/summary-cancel/${encodeURIComponent(jobId)}`, { method: "POST" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+};
+
 // `fetchChunkText` — evidence lookup for the mindmap drawer. Returns the raw
 // chunk text, or null when the chunk id has no text (BE 404s that case).
 export const fetchChunkText = async (chunkId) => {

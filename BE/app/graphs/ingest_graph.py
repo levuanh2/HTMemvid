@@ -224,8 +224,16 @@ def build_ingest_graph(
             all_chunks = [entry["text"] for entry in entries]
             doc_meta = state.get("doc_meta") or {}
             headings = state.get("chunk_headings") or []
-            # heading_path khớp 1:1 khi không bị sub-split (chunk ≤ SAFE_CHUNK_CHARS).
-            aligned = len(headings) == len(entries)
+            # Map heading qua entry["chunk_index"] (index chunk CHA — chunk_processor gắn
+            # cho mọi entry kể cả sub-split, cùng cơ chế late_embeddings dùng). Cách cũ
+            # `len(headings)==len(entries)` vỡ khi QR sub-split → rớt TOÀN BỘ heading.
+            aligned = len(headings) == len(entries)  # fallback cho entry thiếu chunk_index
+
+            def _heading_for(i: int, entry: dict) -> str:
+                ci = entry.get("chunk_index")
+                if headings and ci is not None and 0 <= ci < len(headings):
+                    return headings[ci]
+                return headings[i] if aligned else ""
             # Định danh canonical ghi thẳng vào metadata để retrieval khớp CHÍNH XÁC
             # (không phải tái dựng từ video_path đã sanitize).
             src_stem = canonical_source_stem(state["filename"])
@@ -243,8 +251,9 @@ def build_ingest_graph(
                 }
                 if doc_meta:
                     md.update(doc_meta)  # source/category/date/language (doc-level)
-                if aligned and headings[i]:
-                    md["heading_path"] = headings[i]
+                hp = _heading_for(i, entry)
+                if hp:
+                    md["heading_path"] = hp
                 all_metadata.append(md)
 
             # LATE CHUNKING: lấy lại vector của CHUNK gốc cho mỗi entry (entry có thể bị

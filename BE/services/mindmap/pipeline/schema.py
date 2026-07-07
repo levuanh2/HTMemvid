@@ -8,7 +8,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-PIPELINE_VERSION = "skeleton_v1"
+PIPELINE_VERSION = "skeleton_v3"
 MAX_NODES = 120
 MAX_RELATIONS = 20
 KINDS = ("root", "section", "idea", "detail")
@@ -33,14 +33,21 @@ class RelationV2(BaseModel):
     label: str = ""
 
 
-def content_hash(source_stems: list[str], chunk_texts: list[str]) -> str:
-    """Cache key: đổi PIPELINE_VERSION là tự vô hiệu cache cũ."""
+def content_hash(source_stems: list[str], chunk_texts: list[str],
+                 chunk_headings: list[str] | None = None) -> str:
+    """Cache key: đổi PIPELINE_VERSION là tự vô hiệu cache cũ.
+
+    Hash CẢ heading_path: re-ingest phục hồi heading nhưng text không đổi phải
+    ra hash MỚI, nếu không cache trả mãi bản mindmap nông cũ (không cần force).
+    """
     h = hashlib.sha256()
     h.update(PIPELINE_VERSION.encode("utf-8"))
     for s in sorted(source_stems or []):
         h.update(b"\x00" + s.encode("utf-8"))
     for t in chunk_texts or []:
         h.update(b"\x01" + (t or "").encode("utf-8"))
+    for hp in chunk_headings or []:
+        h.update(b"\x02" + (hp or "").encode("utf-8"))
     return h.hexdigest()
 
 
@@ -97,7 +104,7 @@ def validate_relations(relations: list[dict], nodes: list[dict]) -> list[dict]:
 
 def build_record(*, title: str, sources: list[str], nodes: list[dict], relations: list[dict],
                  content_hash_value: str, model: str, elapsed_sec: float,
-                 degraded_missing: list[str]) -> dict:
+                 degraded_missing: list[str], skeleton_method: str = "") -> dict:
     return {
         "id": str(uuid.uuid4()),
         "schema_version": 2,
@@ -113,5 +120,8 @@ def build_record(*, title: str, sources: list[str], nodes: list[dict], relations
             "elapsed_sec": round(float(elapsed_sec), 1),
             "degraded": bool(degraded_missing),
             "missing": list(degraded_missing or []),
+            # Provenance: khung xương đến từ đâu (headings/tree_sections/clusters/
+            # llm_outline/single) — không có nó thì record đã lưu không chẩn đoán được.
+            "skeleton_method": skeleton_method or "",
         },
     }

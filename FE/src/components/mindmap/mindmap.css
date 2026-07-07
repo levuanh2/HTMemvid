@@ -10,6 +10,78 @@
 .me-container { outline: none; }
 .me-container :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* Màu quan hệ (arrows) — mực chàm, KHÔNG dùng seal đỏ (seal chỉ cho provenance/active).
+   Adapter tham chiếu var này trong ARROW_STYLE. */
+.me-container { --mm-relation: #4a5a8a; }
+html.dark .me-container { --mm-relation: #7e90c4; }
+
+/* Typography theo kind — mind-elixir style theo ĐỘ SÂU, map 1:1 với kind:
+   root (me-root) / section (me-main cấp 1) / idea+detail (sâu hơn).
+   Selectors verified against mind-elixir 5.13 dist — kiểm lại khi nâng version. */
+.me-container me-root me-tpc {
+  font-family: "Spectral", Georgia, serif;
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+}
+.me-container me-main > me-wrapper > me-parent > me-tpc {
+  font-family: "Spectral", Georgia, serif;
+  font-weight: 600;
+  font-size: 14px;
+}
+.me-container me-tpc { font-size: 13px; }
+
+/* Tag ※N (số trích đoạn nguồn trên node) — mono + seal outline: đây là provenance,
+   dùng seal đỏ là ĐÚNG vai (đồng bộ chip trích đoạn trong EvidenceDrawer). */
+.me-container me-tpc .tags span {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+/* Legend nổi góc dưới trái canvas */
+.mm-legend {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  pointer-events: none;
+}
+.mm-legend .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+.mm-legend .dash {
+  display: inline-block;
+  width: 18px;
+  border-top: 2px dashed var(--mm-relation);
+  margin-right: 4px;
+  vertical-align: 3px;
+}
+.mm-legend .mm-legend-hint {
+  color: var(--text-muted, var(--text-secondary));
+  border-left: 1px solid var(--border-color);
+  padding-left: 12px;
+}
+@media (max-width: 640px) { .mm-legend { display: none; } }
+
 @media (prefers-reduced-motion: reduce) {
   .me-container * { transition: none !important; animation: none !important; }
   .animate-spin { animation: none !important; }

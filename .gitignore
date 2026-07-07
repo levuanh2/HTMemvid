@@ -67,3 +67,9 @@ data/
 
 # Temp test data
 TMP_TEST_DATA*/
+
+# Personal Obsidian checkpoint memory
+00_Active_Plans/
+02_Session_Logs/
+05_Debug_Logs/
+06_Resume_States/

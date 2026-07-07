@@ -516,24 +516,6 @@ def ask_ai(
     raise RuntimeError(f"All AI providers failed (tried {PROVIDERS}): {last_error}")
 
 
-def summarize_whole_document(text: str, model: str | None = None) -> str:
-    from langdetect import detect
-
-    try:
-        lang = detect(text)
-    except Exception:
-        lang = "vi"
-
-    if lang == "vi":
-        system_prompt = "Bạn là trợ lý tóm tắt tài liệu. Hãy tóm tắt ngắn gọn, mạch lạc, ưu tiên ý chính."
-    elif lang.startswith("zh"):
-        system_prompt = "你是专业助手，请用中文简洁总结主要内容，3-6句。"
-    else:
-        system_prompt = "You are a concise assistant. Summarize the document in 3-6 sentences."
-
-    return ask_ai(text, system_prompt=system_prompt, model=model)
-
-
 def summarize_results(query: str, chunks: list[str], model: str | None = None) -> str:
     sources = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(chunks))
     system_prompt = (

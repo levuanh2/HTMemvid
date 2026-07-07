@@ -26,11 +26,23 @@ def test_headings_build_tree_in_document_order():
 
 
 def test_fallback_tree_sections_when_no_headings():
+    chunks = [{"key": "0", "text": "abc", "heading_path": "", "chunk_keys": ["0"]},
+              {"key": "1", "text": "def", "heading_path": "", "chunk_keys": ["1"]}]
+    sections = [{"title": "Phần A", "chunk_refs": ["0"]},
+                {"title": "Phần B", "chunk_refs": ["1"]}]
+    nodes, method = build_skeleton(_mk(chunks, sections))
+    assert method == "tree_sections"
+    assert any(n["title"] == "Phần A" and n["kind"] == "section" for n in nodes)
+
+
+def test_single_tree_section_is_rejected_as_filler():
+    # 1 section duy nhất ("Tổng quan tài liệu" size-based) = filler, không phải
+    # cấu trúc — phải rơi tiếp xuống clusters/single thay vì giữ node vô nghĩa.
     chunks = [{"key": "0", "text": "abc", "heading_path": "", "chunk_keys": ["0"]}]
     sections = [{"title": "Tổng quan tài liệu", "chunk_refs": ["0"]}]
     nodes, method = build_skeleton(_mk(chunks, sections))
-    assert method == "tree_sections"
-    assert any(n["title"] == "Tổng quan tài liệu" and n["kind"] == "section" for n in nodes)
+    assert method == "single"
+    assert len(nodes) == 1 and nodes[0]["kind"] == "root"
 
 
 def test_fallback_clusters_when_nothing_else(monkeypatch):

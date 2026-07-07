@@ -1,6 +1,16 @@
 // Shared logic for the signature: the retrieval apparatus (pipeline trace)
 // and the evidence margin (citation ⇄ source-frame linking).
 
+// ── Mammoth backslash-escape (\. \( \)…) trong chunk text lưu sẵn ────────
+// Data ĐÃ index còn escape (unescape ingest chỉ áp cho doc mới) → FE bỏ escape
+// trước khi render markdown. Set an toàn, KHÔNG đụng ký tự cấu trúc (# * - [ ]).
+// Mirror BE/app/domains/ingest/clean.py::unescape_mammoth — đổi một bên phải đổi bên kia.
+const SAFE_UNESCAPE_RE = /\\([.()!?,:;…"'])/g;
+
+export function unescapeMd(text) {
+  return String(text ?? "").replace(SAFE_UNESCAPE_RE, "$1");
+}
+
 // ── Retrieval pipeline node labels (Vietnamese) ──────────────────
 // Keys mirror `current_node` values emitted by BE/app/graphs/query_graph.py.
 export const NODE_LABELS = {

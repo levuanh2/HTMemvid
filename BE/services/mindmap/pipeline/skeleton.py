@@ -41,7 +41,9 @@ def _from_headings(title: str, chunks: list[dict]) -> list[dict] | None:
 
 def _from_tree_sections(title: str, sections: list[dict]) -> list[dict] | None:
     sections = [s for s in (sections or []) if (s.get("title") or "").strip()]
-    if not sections:
+    # 1 section duy nhất (vd "Tổng quan tài liệu" size-based) = không có cấu trúc
+    # thật — trả None để rơi xuống clusters/LLM outline thay vì node filler.
+    if len(sections) < 2:
         return None
     root = _root(title)
     nodes = [root]

@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import MindMapModal from "./MindMapModal";
 import SummaryModal from "./SummaryModal";
-import { apiFetch, generateMindmap, cancelMindmap } from "../../utils/api";
+import { apiFetch, generateMindmap, cancelMindmap, generateSummary, cancelSummary } from "../../utils/api";
 import { createMindmapPoller, stageLabel } from "../../utils/mindmapJob";
+import { createSummaryPoller, stageLabel as summaryStageLabel, LENGTH_MODES } from "../../utils/summaryJob";
 import { saveActiveMindmapJob, loadActiveMindmapJob, clearActiveMindmapJob } from "../../utils/activeMindmapJob";
+import { saveActiveSummaryJob, loadActiveSummaryJob, clearActiveSummaryJob } from "../../utils/activeSummaryJob";
 import { toast } from "../ui/Toaster";
 import { Icon } from "../ui/Icon";
 import Spinner from "../ui/Spinner";
 import { normStem } from "../../utils/evidence";
+import MdSnippet from "../ui/Markdown";
 
 const IDLE_JOB_UI = { running: false, label: "", progress: null, stalled: false };
 
@@ -64,8 +67,11 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   // Task 4 — background generation: chip state driven by the Task 1 poller
   // (no FE hard-timeout; onTick reports stage label / progress / stalled).
   const [mindmapJobUi, setMindmapJobUi] = useState(IDLE_JOB_UI);
+  const [summaryJobUi, setSummaryJobUi] = useState(IDLE_JOB_UI);
   const [loading, setLoading]             = useState(false);
-  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false); // POST round-trip của /generate-summary
+  const [summaryLength, setSummaryLength] = useState("medium");
+  const [summaryCancelNotice, setSummaryCancelNotice] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [summaries, setSummaries]         = useState([]);
   // `mindmapGenerating` now only drives the viewer's in-overlay "generating"
@@ -79,11 +85,18 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   // ── Mindmap job refs ───────────────────────────────
   const pollerRef = useRef(null); // fresh createMindmapPoller() instance per run
   const currentMindmapJobIdRef = useRef(null);
+  // ── Summary job refs (mirror mindmap — poller riêng, không chia sẻ ref) ──
+  const summaryPollerRef = useRef(null);
+  const currentSummaryJobIdRef = useRef(null);
+  const summaryCancelRequestedRef = useRef(false);
   // Fix Round 1 (Fix 3): guards the "Đã huỷ tạo sơ đồ" notice so it fires exactly
   // once per generation regardless of which path notices the cancel first — the
   // optimistic click path (handleCancelMindMap, fires immediately) or the
   // authoritative status-driven path (poll tick observing status "cancelled").
   const cancelNoticeShownRef = useRef(false);
+  // true từ lúc user bấm Huỷ tới khi job đạt terminal — giữ label "Đang huỷ…"
+  // không bị onTick ghi đè bằng stage label thường.
+  const cancelRequestedRef = useRef(false);
   const showCancelNotice = useCallback(() => {
     if (cancelNoticeShownRef.current) return;
     cancelNoticeShownRef.current = true;
@@ -145,7 +158,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
       nodes: Array.isArray(data.nodes) ? data.nodes : [],
       diagram: data.diagram || null,
       sources: Array.isArray(data.sources) ? data.sources : sourceList,
-      createdAt: data.createdAt || new Date().toISOString(),
+      createdAt: data.createdAt || data.created_at || new Date().toISOString(),
       strategy: data.strategy || "iterative",
       initialLayoutType: "napkin",
     };
@@ -176,11 +189,16 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     // a second click can't leave an orphaned poller ticking in the background.
     pollerRef.current?.stop();
     currentMindmapJobIdRef.current = jobId;
+    cancelRequestedRef.current = false;
     setMindmapJobUi({ running: true, label: "Đang tạo sơ đồ…", progress: null, stalled: false });
 
     const fetchStatus = (id) =>
       apiFetch(`/mindmap-status/${encodeURIComponent(id)}`).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        if (!r.ok) {
+          const e = new Error(`HTTP ${r.status}`);
+          e.status = r.status; // poller cần biết 404 = job không tồn tại (terminal)
+          throw e;
+        }
         return r.json();
       });
 
@@ -189,7 +207,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
       onTick: (status, { stalled }) => {
         setMindmapJobUi({
           running: true,
-          label: stageLabel(status),
+          label: cancelRequestedRef.current ? "Đang huỷ…" : stageLabel(status),
           progress: typeof status.progress === "number" ? status.progress : null,
           stalled,
         });
@@ -227,10 +245,14 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     if (active?.jobId) {
       startMindmapPoller(active.jobId, active.sources, { resumed: true, isRegenerate: false });
     }
+    const activeSummary = loadActiveSummaryJob();
+    if (activeSummary?.jobId) {
+      startSummaryPoller(activeSummary.jobId, { resumed: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => () => { pollerRef.current?.stop(); }, []);
+  useEffect(() => () => { pollerRef.current?.stop(); summaryPollerRef.current?.stop(); }, []);
 
   // ── Handlers ───────────────────────────────────────
   // Shared by "Tạo sơ đồ" (force=false, uses BE content-hash cache) and the
@@ -279,20 +301,24 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     return runMindmapGeneration(sources, { force: true });
   };
 
-  // Real cancel (Task 16, rewired Task 4): stop the FE poller immediately AND
-  // tell the BE to actually abort the job (cooperative-abort flag the worker
-  // checks between graph nodes) — fire-and-forget, we don't block the UI on it.
+  // Real cancel (codex #4): BE chỉ kiểm cờ cancel GIỮA các node — LLM call đang
+  // bay không dừng được, job có thể vẫn chạy xong và persist. Vì vậy KHÔNG stop
+  // poller ngay: gửi cancel rồi tiếp tục poll tới trạng thái terminal thật
+  // ("Đang huỷ…" → onCancelled xác nhận / onDone nếu job kịp xong trước cancel).
   const handleCancelMindMap = () => {
     const jobId = currentMindmapJobIdRef.current;
-    if (pollerRef.current) { pollerRef.current.stop(); pollerRef.current = null; }
-    clearActiveMindmapJob();
-    currentMindmapJobIdRef.current = null;
-    setMindmapJobUi(IDLE_JOB_UI);
-    if (jobId) {
-      cancelMindmap(jobId).catch((err) => console.error("[MindMap] cancel request failed:", err));
+    if (!jobId) { // không có job đang theo dõi — dọn UI là đủ
+      pollerRef.current?.stop();
+      pollerRef.current = null;
+      clearActiveMindmapJob();
+      setMindmapJobUi(IDLE_JOB_UI);
+      setMindmapGenerating(false);
+      showCancelNotice();
+      return;
     }
-    setMindmapGenerating(false);
-    showCancelNotice();
+    cancelRequestedRef.current = true;
+    setMindmapJobUi((prev) => ({ ...prev, running: true, label: "Đang huỷ…" }));
+    cancelMindmap(jobId).catch((err) => console.error("[MindMap] cancel request failed:", err));
   };
 
   // "Hỏi về đoạn này" (EvidenceDrawer) → close the mindmap overlay so the chat
@@ -323,25 +349,111 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     } catch (err) { console.error("Mind Map delete error:", err); alert("Không xóa được sơ đồ!"); }
   };
 
+  // ── Summary v2 job flow (mirror mindmap: poller + resume + cancel thật) ──
+  const handleSummaryDone = useCallback(async (record, { resumed = false } = {}) => {
+    clearActiveSummaryJob();
+    await fetchSummaries(); // BE đã tự persist record — chỉ cần refresh danh sách
+    if (resumed) {
+      toast("Tóm tắt đã xong trong lúc bạn vắng mặt — mở từ danh sách", { type: "info" });
+    } else {
+      toast("Tóm tắt sẵn sàng", { type: "success" });
+      setShowSummaryModal(record);
+    }
+  }, [fetchSummaries]);
+
+  const handleSummaryError = useCallback((err) => {
+    clearActiveSummaryJob();
+    console.error("Summary Error:", err);
+    toast(err?.message ? `Không tạo được tóm tắt: ${err.message}` : "Không tạo được tóm tắt, kiểm tra console!", { type: "error" });
+  }, []);
+
+  const startSummaryPoller = useCallback((jobId, { resumed = false } = {}) => {
+    // poller không tự guard double-start — dừng instance cũ trước khi gán mới
+    summaryPollerRef.current?.stop();
+    currentSummaryJobIdRef.current = jobId;
+    summaryCancelRequestedRef.current = false;
+    setSummaryJobUi({ running: true, label: "Đang tóm tắt…", progress: null, stalled: false });
+
+    const fetchStatus = (id) =>
+      apiFetch(`/summary-status/${encodeURIComponent(id)}`).then((r) => {
+        if (!r.ok) {
+          const e = new Error(`HTTP ${r.status}`);
+          e.status = r.status; // 404 = job không tồn tại (terminal)
+          throw e;
+        }
+        return r.json();
+      });
+
+    const poller = createSummaryPoller({
+      fetchStatus,
+      onTick: (status, { stalled }) => {
+        setSummaryJobUi({
+          running: true,
+          label: summaryCancelRequestedRef.current ? "Đang huỷ…" : summaryStageLabel(status),
+          progress: typeof status.progress === "number" ? status.progress : null,
+          stalled,
+        });
+      },
+      onDone: (result) => {
+        setSummaryJobUi(IDLE_JOB_UI);
+        currentSummaryJobIdRef.current = null;
+        handleSummaryDone(result, { resumed });
+      },
+      onError: (err) => {
+        setSummaryJobUi(IDLE_JOB_UI);
+        currentSummaryJobIdRef.current = null;
+        handleSummaryError(err);
+      },
+      onCancelled: () => {
+        setSummaryJobUi(IDLE_JOB_UI);
+        currentSummaryJobIdRef.current = null;
+        clearActiveSummaryJob();
+        setSummaryCancelNotice(true);
+      },
+    });
+    summaryPollerRef.current = poller;
+    poller.start(jobId);
+  }, [handleSummaryDone, handleSummaryError]);
+
   const handleGenerateSummary = async () => {
-    if (!selectedSources?.length) { alert("Vui lòng chọn ít nhất một tài liệu để tóm tắt!"); return; }
+    if (!selectedSources?.length) { toast("Vui lòng chọn ít nhất một tài liệu để tóm tắt!", { type: "error" }); return; }
     setSummaryLoading(true);
+    setSummaryCancelNotice(false);
     try {
-      const res = await apiFetch(`/summarize-documents`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources: selectedSources, use_dancer: true, use_entity_chain: true, use_cod: true, use_structured: true, use_fact_check: true }) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setShowSummaryModal({ ...data, sources: selectedSources });
-    } catch (err) { console.error("Summary Error:", err); alert("Không tạo được tóm tắt, kiểm tra console!"); }
-    finally { setSummaryLoading(false); }
+      const startData = await generateSummary(selectedSources, { lengthMode: summaryLength });
+      if (startData.error) throw new Error(startData.error);
+
+      if (startData.status === "done" && startData.result) {
+        // Cache-hit: BE trả record thẳng, KHÔNG có job_id — branch trước (aec6017)
+        await handleSummaryDone(startData.result, { resumed: false });
+        return;
+      }
+
+      if (!startData.job_id) throw new Error("Server không trả job_id.");
+      saveActiveSummaryJob({ jobId: startData.job_id, sources: selectedSources, startedAt: Date.now(), extra: { lengthMode: summaryLength } });
+      startSummaryPoller(startData.job_id, { resumed: false });
+    } catch (err) {
+      handleSummaryError(err);
+    } finally {
+      setSummaryLoading(false);
+    }
   };
 
-  const handleSaveSummary = async (payload) => {
-    try {
-      const res = await apiFetch(`/summaries`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      await fetchSummaries();
-    } catch (err) { console.error("Save summary error:", err); alert("Không lưu được tóm tắt!"); }
+  // Cancel thật (mirror mindmap): gửi cờ rồi TIẾP TỤC poll tới terminal —
+  // LLM call đang bay không dừng được, job có thể vẫn kịp xong.
+  const handleCancelSummary = () => {
+    const jobId = currentSummaryJobIdRef.current;
+    if (!jobId) {
+      summaryPollerRef.current?.stop();
+      summaryPollerRef.current = null;
+      clearActiveSummaryJob();
+      setSummaryJobUi(IDLE_JOB_UI);
+      setSummaryCancelNotice(true);
+      return;
+    }
+    summaryCancelRequestedRef.current = true;
+    setSummaryJobUi((prev) => ({ ...prev, running: true, label: "Đang huỷ…" }));
+    cancelSummary(jobId).catch((err) => console.error("[Summary] cancel request failed:", err));
   };
 
   const handleDeleteSummary = async (id) => {
@@ -361,8 +473,15 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   // whole background run, not just the initial POST round-trip — otherwise a
   // second click while a job (or a resumed one) is in flight could kick off a
   // duplicate generation.
-  const isGenerating = artifactTab === "mindmap" ? (loading || mindmapJobUi.running) : summaryLoading;
+  const isGenerating = artifactTab === "mindmap"
+    ? (loading || mindmapJobUi.running)
+    : (summaryLoading || summaryJobUi.running);
   const onGenerate = artifactTab === "mindmap" ? handleGenerateMindMap : handleGenerateSummary;
+  // Chip tiến độ dùng chung markup — jobUi/cancel theo tab đang mở
+  const jobUi = artifactTab === "mindmap" ? mindmapJobUi : summaryJobUi;
+  const onCancelJob = artifactTab === "mindmap" ? handleCancelMindMap : handleCancelSummary;
+  const cancelNotice = artifactTab === "mindmap" ? mindmapCancelNotice : summaryCancelNotice;
+  const cancelNoticeText = artifactTab === "mindmap" ? "Đã huỷ tạo sơ đồ." : "Đã huỷ tạo tóm tắt.";
 
   // MindMapModal forwards `data` to MindmapView verbatim, so this is how
   // generating/progress/cancel/ask-about reach it without widening that
@@ -423,7 +542,8 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
                       </span>
                     </div>
                     {c.snippet && (
-                      <p className="font-reading text-[13px] leading-[1.55] text-text-secondary line-clamp-4">{c.snippet}</p>
+                      <MdSnippet text={c.snippet}
+                        className="font-reading text-[13px] leading-[1.55] text-text-secondary line-clamp-4" />
                     )}
                   </div>
                 );
@@ -472,6 +592,24 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
           </div>
         </div>
 
+        {/* Độ dài tóm tắt — nằm trong content_hash BE: đổi mode = bản tóm tắt khác */}
+        {artifactTab === "summary" && (
+          <div className="flex gap-1 mb-2.5" role="radiogroup" aria-label="Độ dài tóm tắt">
+            {LENGTH_MODES.map((m) => (
+              <button
+                key={m.value}
+                onClick={() => setSummaryLength(m.value)}
+                className={`pill-tab flex-1 !px-2 !py-1.5 justify-center ${summaryLength === m.value ? "pill-tab-active" : ""}`}
+                role="radio"
+                aria-checked={summaryLength === m.value}
+                disabled={isGenerating}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         <button
           onClick={onGenerate}
           disabled={isGenerating || !selectedSources?.length}
@@ -484,25 +622,23 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
           )}
         </button>
 
-        {/* Background-generation progress chip (Task 4): generation now runs
-            without opening the overlay, so this chip in the sidebar is the
-            only running indicator — same Huỷ action reachable here and from
-            the viewer's banner (when "Tạo lại" keeps it open). */}
-        {artifactTab === "mindmap" && mindmapJobUi.running && (
+        {/* Background-generation progress chip — dùng chung cho cả hai tab
+            (jobUi/onCancelJob đã switch theo artifactTab ở phần Derived). */}
+        {jobUi.running && (
           <div className="mx-3 mb-2 flex items-center gap-2 rounded-[8px] border px-2.5 py-2 text-[12px]"
-            style={{ borderColor: mindmapJobUi.stalled ? "var(--warn)" : "var(--border-strong)", background: "var(--bg-elevated)" }}>
+            style={{ borderColor: jobUi.stalled ? "var(--warn)" : "var(--border-strong)", background: "var(--bg-elevated)" }}>
             <span className="animate-spin inline-block w-3.5 h-3.5 rounded-full border-2 border-t-transparent"
               style={{ borderColor: "var(--accent)", borderTopColor: "transparent" }} aria-hidden />
             <span className="flex-1 truncate text-text-secondary">
-              {mindmapJobUi.stalled ? "Có vẻ kẹt — vẫn đang chờ máy chủ…" : mindmapJobUi.label}
-              {typeof mindmapJobUi.progress === "number" ? ` (${mindmapJobUi.progress}%)` : ""}
+              {jobUi.stalled ? "Có vẻ kẹt — vẫn đang chờ máy chủ…" : jobUi.label}
+              {typeof jobUi.progress === "number" ? ` (${jobUi.progress}%)` : ""}
             </span>
-            <button onClick={handleCancelMindMap} className="text-[12px] underline text-text-muted hover:text-accent">Huỷ</button>
+            <button onClick={onCancelJob} className="text-[12px] underline text-text-muted hover:text-accent">Huỷ</button>
           </div>
         )}
-        {artifactTab === "mindmap" && !mindmapJobUi.running && mindmapCancelNotice && (
+        {!jobUi.running && cancelNotice && (
           <div className="mt-2 flex items-center gap-1.5 text-[12px] text-text-muted">
-            <Icon name="Ban" size={12} /> Đã huỷ tạo sơ đồ.
+            <Icon name="Ban" size={12} /> {cancelNoticeText}
           </div>
         )}
 
@@ -517,7 +653,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
               <div className="flex flex-col gap-1.5">
                 {mindMaps.map((map) => (
                   <ListCard key={map.id} icon="Network" title={map.title}
-                    meta={`${map.sources?.length || 0} tài liệu · ${formatTimeAgo(map.createdAt)}`}
+                    meta={`${map.sources?.length || 0} tài liệu · ${formatTimeAgo(map.createdAt || map.created_at)}`}
                     onOpen={() => setShowModalMap(map)} onDelete={() => handleDeleteMap(map.id)} deleteLabel="Xóa sơ đồ" />
                 ))}
               </div>
@@ -527,14 +663,11 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
               <p className="text-[12px] text-text-muted text-center py-4">Chưa có tóm tắt nào được lưu.</p>
             ) : (
               <div className="flex flex-col gap-1.5">
-                {summaries.map((item) => {
-                  const summaryId = item.id || item?.data?.id;
-                  return (
-                    <ListCard key={item.id} icon="ScrollText" title={item.title || "Tóm tắt"}
-                      meta={formatTimeAgo(item.createdAt)}
-                      onOpen={() => setShowSummaryModal(item.data || item)} onDelete={() => handleDeleteSummary(summaryId)} deleteLabel="Xóa tóm tắt" />
-                  );
-                })}
+                {summaries.map((item) => (
+                  <ListCard key={item.id} icon="ScrollText" title={item.title || "Tóm tắt"}
+                    meta={formatTimeAgo(item.created_at || item.createdAt)}
+                    onOpen={() => setShowSummaryModal(item)} onDelete={() => handleDeleteSummary(item.id)} deleteLabel="Xóa tóm tắt" />
+                ))}
               </div>
             )
           )}
@@ -552,7 +685,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
         />
       )}
       {showSummaryModal && (
-        <SummaryModal data={showSummaryModal} onClose={() => setShowSummaryModal(null)} onSave={handleSaveSummary} />
+        <SummaryModal data={showSummaryModal} onClose={() => setShowSummaryModal(null)} />
       )}
 
       <style>{`@media (min-width: 768px) { .md\\:hidden { display: none !important; } }`}</style>

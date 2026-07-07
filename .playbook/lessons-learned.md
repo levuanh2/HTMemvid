@@ -1,5 +1,29 @@
 # Lessons Learned
 
+## Summary v2 (2026-07-06): thay pipeline 6-technique bằng section-first mirror mindmap
+
+- **Bối cảnh:** tóm tắt cũ (`summarize_advanced.py` FROST/CoD/DANCER/extract/fact-check)
+  sync (block request doc dài), không cache, không citation, lưu JSON, không dùng heading
+  từ ingest. Thay HẲN (đã xóa file + endpoint `/summarize-documents`, `/summarize-file`,
+  `POST /summaries`) bằng pipeline section-first — spec `docs/SUMMARY_V2_SPEC.md`.
+- **Thiết kế:** copy nguyên pattern mindmap đã trưởng thành thay vì phát minh mới:
+  `services/summary/pipeline/` (schema/sections/summarize/synthesize) import trực tiếp
+  `skeleton.py`/`outline.py` của mindmap (plain Python, monolith); `summary_graph.py`
+  5 node clone mindmap_graph (guard/cancel/done-atomic-với-result); store sqlite +
+  `content_hash` (CÓ length_mode trong hash — đổi độ dài = record khác);
+  FE generalize `createMindmapPoller` → `jobPoller.js` + `makeActiveJobStore` —
+  wrapper mindmap giữ nguyên API, test cũ pass không sửa.
+- **Bài học:** feature mới cùng shape (job nền dài + LLM + cache + poll) → generalize
+  hạ tầng CŨ thành module chung với wrapper backward-compatible, đừng copy-paste body.
+  Toàn bộ ràng buộc playbook (done atomic, degraded honest, no FE hard-timeout,
+  cache-hit không job_id, chunk_refs lọc id thật) được thừa hưởng miễn phí từ template.
+- **Regression:** `test_summary_{schema,sections,summarize,synthesize,graph,store,routes}.py`
+  (38 test, graph THẬT + route contract cache-hit-no-job_id + old endpoint 404);
+  FE `summaryJob.test.js`/`activeJob.test.js`. Suite: BE 289 passed, FE 43 passed.
+- **Lưu ý vận hành:** đổi prompt/logic summary → bump `PIPELINE_VERSION`
+  (`services/summary/pipeline/schema.py`). `summaries.json` cũ migrate 1 lần khi startup
+  → `.migrated`; record legacy render qua `summary_md` fallback trong SummaryModal.
+
 ## Cache 3 tầng (Redis): bucket-key encode mọi điều kiện match = chống poisoning theo cấu trúc
 
 - **Bối cảnh (2026-07-06):** thêm semantic response cache + retrieval cache (Redis, fail-open)
@@ -28,6 +52,60 @@
   round-trip, real-graph history bypass). Đổi system prompt qa_chain → bump
   `llm_cache.PROMPT_VERSION`; đổi format `_make_query_cache_key` → sửa
   `llm_cache._parse_cache_key` (lệch = miss im lặng, hướng fail-safe).
+
+## Thư viện render bằng CSS riêng (mind-elixir): import style là PHẦN CỦA API, không phải trang trí
+
+- **Root cause (2026-07-05):** mind-elixir v5 layout hoàn toàn bằng `dist/MindElixir.css`
+  (custom elements `me-nodes`/`me-tpc` mặc định inline). Viewer mới (thay ReactFlow) chỉ
+  import JS, không import CSS → sơ đồ vỡ hoàn toàn ở CẢ viewer lẫn PNG export, mà build/test
+  vẫn xanh (không lớp nào kiểm "CSS có vào bundle"). Kèm 2 bẫy cùng họ: theme override chỉ
+  set 4/22 cssVar (var thiếu = declaration invalid vì CSS không có fallback), và snapdom chụp
+  `mind.nodes` tách khỏi `.map-canvas` làm descendant selector không match trong clone.
+- **Prevention:**
+  1. Thêm thư viện render mới → đọc package.json exports tìm `"./style"`; smoke DOM thật
+     (mở viewer nhìn bằng mắt/screenshot) chứ đừng tin build xanh.
+  2. Override theme → set đủ TOÀN BỘ bộ var thư viện tiêu thụ; guard bằng test liệt kê
+     (`FE/src/components/mindmap/theme.test.js`) để version sau thêm var là test đỏ.
+  3. snapdom/html2canvas: target chụp phải CHỨA mọi tổ tiên mà CSS selector cần
+     (`.map-canvas me-nodes{...}` → chụp `.map-canvas`, không chụp `me-nodes`). Thêm `scale: 2`.
+- **Chẩn đoán nhanh loại lỗi này:** mọi text dồn 1 dòng + element không có kích thước
+  = layout CSS không được nạp, đừng đi tìm bug data/adapter.
+
+## Text hiển thị cho user phải đi qua MỘT đường render, không phải `<p>{raw}</p>`
+
+- **Root cause (2026-07-05):** chunk text lưu sqlite là markdown mammoth thô (`__bold__`,
+  `\(escape\)`). ChatArea render qua react-markdown nên đẹp; 2 surface bằng chứng
+  (EvidenceDrawer, lề bằng chứng SidebarRight) lại `<p>{text}</p>` raw → user thấy
+  `__Triển khai...\(IDS/IPS\)__`. Cùng một loại data, hai số phận — vì mỗi chỗ tự quyết
+  cách hiển thị.
+- **Prevention:**
+  1. Data có thể chứa markup → dùng chung MỘT component render (`ui/Markdown.jsx::MdSnippet`
+     cho trích đoạn; ChatArea giữ map riêng vì có citation-chip). Chỗ mới hiển thị chunk/note
+     → dùng lại MdSnippet, đừng tự `<p>`.
+  2. Escape-cleanup 2 phía phải MIRROR nhau và ghi chú chéo: BE `clean.py::unescape_mammoth`
+     (data mới, tận gốc) ↔ FE `evidence.js::unescapeMd` (data cũ đã lưu). Đổi set ký tự một
+     bên phải đổi bên kia.
+  3. Set unescape phải BẢO THỦ (chỉ punctuation `. ( ) ! ? , : ; … " '`) — unescape `\# \* \- \[`
+     là tự tạo heading/list/link markdown giả từ text vốn được escape có chủ đích.
+
+## Cấu trúc mindmap đến từ INGEST, không phải từ pipeline mindmap
+
+- **Root cause (2026-07-05):** map nông không phải lỗi skeleton/enrich — tài liệu docx không
+  mang heading nào tới pipeline (mammoth cần Word Heading styles; sinh viên dùng bold/số tay).
+  Sửa prompt/pipeline bao nhiêu cũng không thêm được chiều sâu mà nguồn không mang theo.
+  Fix đúng tầng: promote heading heuristic ở `clean.py` (ingest) + map heading qua
+  `chunk_index` sống sót sub-split + LLM outline fallback CHỈ khi deterministic bó tay.
+- **Prevention:**
+  1. Chẩn đoán "output nghèo" → truy NGƯỢC pipeline tới tận nguồn dữ liệu (chunk metadata
+     thật trong index.json) trước khi sửa prompt/LLM.
+  2. Metadata dẫn xuất đi kèm chunk (heading, span, page) phải map qua ID/index bám theo
+     entry (như `chunk_index`), KHÔNG qua alignment `len(a)==len(b)` — mọi bước sub-split/
+    lọc sẽ phá alignment và rớt metadata im lặng.
+  3. Cache key phải hash MỌI input ảnh hưởng output (cả metadata), không chỉ text — không thì
+     fix ingest xong cache vẫn trả kết quả cũ và tưởng fix hỏng. `generator.skeleton_method`
+     được persist để chẩn đoán nhanh record đã lưu sinh từ đường nào.
+  4. Degraded phải TRUNG THỰC: mọi nhánh no-op (SKIP_MODEL_LOAD, LLM lỗi, outline fail) phải
+     khai `degraded/missing`, đừng trả kết quả thiếu như bản hoàn chỉnh.
 
 ## Xoá source trên FAISS: LangChain dùng docstore id, legacy raw-FAISS dùng `chunk_id`
 

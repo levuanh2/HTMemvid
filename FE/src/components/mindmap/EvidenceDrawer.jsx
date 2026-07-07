@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../ui/Icon";
 import Spinner from "../ui/Spinner";
+import MdSnippet from "../ui/Markdown";
 import { fetchChunkText } from "../../utils/api";
 
 const SNIPPET_MAX = 600;
@@ -143,9 +144,8 @@ export default function EvidenceDrawer({ node, onClose, generating, onAskAbout }
 
         <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3.5">
           {node.note && (
-            <p className="font-reading text-[13.5px] leading-[1.6] text-text-secondary mb-4 pb-4 border-b border-border">
-              {node.note}
-            </p>
+            <MdSnippet text={node.note}
+              className="font-reading text-[13.5px] leading-[1.6] text-text-secondary mb-4 pb-4 border-b border-border" />
           )}
 
           {entries.length === 0 ? (
@@ -173,9 +173,8 @@ export default function EvidenceDrawer({ node, onClose, generating, onAskAbout }
                     <p className="text-[12.5px] text-text-muted italic">Không tải được trích đoạn này.</p>
                   ) : (
                     <>
-                      <p className="font-reading text-[13px] leading-[1.55] text-text-secondary whitespace-pre-wrap">
-                        {entry.snippet}{entry.truncated ? "…" : ""}
-                      </p>
+                      <MdSnippet text={`${entry.snippet}${entry.truncated ? "…" : ""}`}
+                        className="font-reading text-[13px] leading-[1.55] text-text-secondary" />
                       {typeof onAskAbout === "function" && (
                         <button
                           onClick={() => onAskAbout(entry.snippet)}

@@ -70,7 +70,11 @@ def test_route_graph_store_real_pipeline_persists_v2_record(tmp_path, monkeypatc
     assert root is not None
     assert {n["title"] for n in sections} == {"1. Mở đầu", "2. Kết luận"}
 
-    # SKIP_MODEL_LOAD path: enrich returns skeleton unchanged (not degraded),
-    # relations is skipped outright (also not degraded) — see enrich.py/relations.py.
-    assert record["generator"]["degraded"] is False
+    # SKIP_MODEL_LOAD path (honesty fix): không có LLM nghĩa là skeleton CHƯA
+    # được làm giàu + quan hệ CHƯA được tìm — record phải khai degraded thay vì
+    # im lặng trả khung xương như bản hoàn chỉnh (see enrich.py/relations.py).
+    assert record["generator"]["degraded"] is True
+    assert "enrich" in record["generator"]["missing"]
+    assert "relations" in record["generator"]["missing"]
+    assert record["generator"]["skeleton_method"] == "headings"
     assert record["relations"] == []

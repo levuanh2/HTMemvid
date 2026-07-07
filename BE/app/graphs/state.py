@@ -69,6 +69,26 @@ class QueryState(TypedDict):
     review_decision: NotRequired[Optional[dict]]
 
 
+class SummaryState(TypedDict):
+    job_id: str
+    source_names: list
+    length_mode: NotRequired[str]
+    mm_input: NotRequired[dict]
+    content_hash: NotRequired[str]
+    sections: NotRequired[list]
+    skeleton_method: NotRequired[str]
+    section_summaries: NotRequired[list]
+    overview_meta: NotRequired[dict]  # {title, overview, entities} từ Synthesize
+    degraded_missing: NotRequired[list]
+    result: NotRequired[dict]
+    cancelled: NotRequired[bool]
+    progress: int
+    current_node: str
+    error: Optional[str]
+    # LangGraph chỉ giữ field có trong TypedDict — _t0 tính elapsed_sec ở AssemblePersist.
+    _t0: NotRequired[float]
+
+
 class MindmapState(TypedDict):
     job_id: str
     source_names: list

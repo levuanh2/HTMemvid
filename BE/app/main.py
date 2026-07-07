@@ -40,16 +40,16 @@ from app.domains.vectorstore.store import (
     rebuild_chunk_index,
     MODEL_NAME,
 )
-from app.clients.llm_factory import ask_ai, summarize_whole_document, summarize_results
+from app.clients.llm_factory import ask_ai, summarize_results
 from app.domains.cache import llm_cache
 # Chỉ dùng cho local Ollama (Gemini sẽ bỏ qua model).
 SLM_MODEL = os.environ.get("SLM_MODEL_CHAT", os.environ.get("SLM_MODEL", "qwen3.6:35b-a3b"))
-SLM_MODEL_SUMMARY = os.environ.get("SLM_MODEL_SUMMARY", "gemma2:2b")
 from app.domains.mindmap import store as mindmap_store
 from app.domains.mindmap.input_collector import collect_mindmap_input
 from services.mindmap.pipeline import schema as mindmap_schema
+from app.domains.summary import store as summary_store
+from services.summary.pipeline import schema as summary_schema
 from app.domains.ingest.chunk_processor import process_and_store_chunks
-from app.domains.summary.summarize_advanced import advanced_summarize
 from app.domains.memory.tree import (
     build_memory_tree_for_sources,
     query_with_memory_tree,
@@ -117,6 +117,7 @@ os.makedirs(INDEX_DIR, exist_ok=True)
 # LangGraph ingest pipeline (Bước 2) sẽ được khởi tạo sau khi các helper (vd: _update_source_status) sẵn sàng.
 INGEST_GRAPH = None
 QUERY_GRAPH = None
+SUMMARY_GRAPH = None
 MINDMAP_GRAPH = None
 QUERY_GRAPH_BUILD_ERROR: Optional[str] = None
 
@@ -977,10 +978,16 @@ _warmup_ollama_background()
 # === Dựng toàn bộ LangGraph pipeline qua wiring tập trung (T4) ===
 from app.wiring import build_graphs as _build_graphs
 from app.clients.mindmap_factory import get_mindmap_pipeline as _get_mindmap_pipeline
+from app.clients.summary_factory import get_summary_pipeline as _get_summary_pipeline
 
-# Migrate legacy mindmaps.json → sqlite một lần khi startup (best-effort, idempotent).
+# Migrate legacy mindmaps.json / summaries.json → sqlite một lần khi startup
+# (best-effort, idempotent — file được rename .migrated sau khi import).
 try:
     mindmap_store.migrate_from_json(MINDMAPS_PATH)
+except Exception:
+    pass
+try:
+    summary_store.migrate_from_json(SUMMARIES_PATH)
 except Exception:
     pass
 
@@ -1006,11 +1013,14 @@ _graphs = _build_graphs(
     collect_mindmap_input=collect_mindmap_input,
     mindmap_pipeline=_get_mindmap_pipeline(),
     persist_mindmap=mindmap_store.save_record,
+    summary_pipeline=_get_summary_pipeline(),
+    persist_summary=summary_store.save_record,
 )
 INGEST_GRAPH = _graphs.ingest
 QUERY_GRAPH = _graphs.query
 QUERY_GRAPH_BUILD_ERROR = _graphs.query_build_error
 MINDMAP_GRAPH = _graphs.mindmap
+SUMMARY_GRAPH = _graphs.summary
 
 
 def _langgraph_invoke(graph: Any, state: dict, *, thread_id: str, command: Any = None) -> dict:
@@ -1154,35 +1164,6 @@ def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> 
             _ss_append(session_id, [{"role": "user", "content": question}, {"role": "assistant", "content": str(payload.get("answer"))}])
     except Exception:
         pass
-
-
-def _load_summaries() -> list[dict]:
-    if not SUMMARIES_PATH.exists():
-        return []
-    try:
-        with open(SUMMARIES_PATH, encoding='utf-8') as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return data
-    except Exception as exc:
-        print(f"⚠️ Không thể đọc summaries.json: {exc}")
-    return []
-
-
-def _save_summaries(records: list[dict]) -> None:
-    try:
-        tmp_path = SUMMARIES_PATH.with_suffix('.tmp')
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            json.dump(records, f, ensure_ascii=False, indent=2)
-        tmp_path.replace(SUMMARIES_PATH)
-    except Exception as exc:
-        print(f"⚠️ Không thể lưu summaries.json: {exc}")
-
-
-def _append_summary(record: dict) -> None:
-    records = _load_summaries()
-    records.insert(0, record)
-    _save_summaries(records)
 
 
 # -------------------------
@@ -1817,202 +1798,124 @@ def query_stream(job_id: str):
     )
 
 # -------------------------
-# 📝 Summarize file
+# 📝 Summary v2 — section-first, job async (mirror mindmap; spec docs/SUMMARY_V2_SPEC.md)
 # -------------------------
-@app.post('/summarize-file')
-def summarize_file():
-    file = request.files.get('file')
-    if not file:
-        return jsonify({'error': 'Missing file'}), 400
-
-    save_path = os.path.join(INPUT_DIR, file.filename)
-    file.save(save_path)
-
-    text = extract_text(save_path)
-    if not text.strip():
-        return jsonify({'error': 'Cannot read file content'}), 400
-
-    summary = summarize_whole_document(text)
-    return jsonify({'summary': summary})
+def _summary_input_and_hash(source_names: list[str], length_mode: str) -> tuple[dict, str]:
+    mm = collect_mindmap_input(INDEX_META_JSON_PATH, source_names)
+    h = summary_schema.content_hash(mm.get("sources") or [],
+                                    [c["text"] for c in mm.get("chunks") or []],
+                                    [c.get("heading_path", "") for c in mm.get("chunks") or []],
+                                    length_mode)
+    return mm, h
 
 
-# -------------------------
-# 📚 Advanced Summarize Documents
-# -------------------------
-@app.post('/summarize-documents')
-def summarize_documents():
-    """
-    Tóm tắt tài liệu theo các công thức nâng cao:
-    - ATS Process (D, M, G, E)
-    - DANCER (Divide-and-Conquer)
-    - Entity Chain Planning
-    - Chain of Density
-    - Structured Extraction
-    - FactCC
-    """
+def _start_summary_job(source_names: list[str], mm_input: dict, content_hash: str,
+                       length_mode: str) -> str:
+    job_id = str(uuid.uuid4())
+    from app.domains.jobs.jobs_store import create_job
+    create_job(job_id, job_type="summary", status="pending", progress=0, current_node="Queued")
+    threading.Thread(target=run_summary_job,
+                     args=(job_id, source_names, mm_input, content_hash, length_mode),
+                     daemon=True).start()
+    return job_id
+
+
+def run_summary_job(job_id: str, source_names: list[str], mm_input: dict,
+                    content_hash: str, length_mode: str) -> None:
     try:
-        data = request.json or {}
-        sources = data.get('sources') or []
-        
-        if not sources or not isinstance(sources, list):
-            return jsonify({'error': 'Missing or invalid sources'}), 400
-        
-        # Lấy text từ các sources đã index
-        with open(INDEX_META_JSON_PATH, encoding='utf-8') as f:
-            meta = json.load(f)
-        
-        # Normalize source names (giống logic trong generate-mindmap)
-        def normalize_video_name(name: str) -> str:
-            if not name:
-                return ""
-            name = Path(name).name if '/' in name or '\\' in name else name
-            cleaned = unicodedata.normalize('NFKD', name.strip()).replace('\u00a0', ' ')
-            cleaned = cleaned.replace('.mp4', '')
-            cleaned = re.sub(r'_\d{8}_\d{6}$', '', cleaned)
-            return cleaned.strip().lower()
-        
-        normalized_sources = set()
-        for s in sources:
-            normalized = normalize_video_name(s)
-            if normalized:
-                normalized_sources.add(normalized)
-        
-        # Lấy tất cả chunks từ các sources đã chọn
-        all_texts = []
-        from app.domains.vectorstore import chunk_text_store
-        for key, m in meta.items():
-            if not isinstance(key, str) or not key.isdigit():
-                continue
-            video_raw = m.get("video", "").strip()
-            if not video_raw:
-                continue
-            video_clean = normalize_video_name(video_raw)
-            if video_clean in normalized_sources:
-                text = (chunk_text_store.get_text(int(key)) or m.get("text") or "").strip()
-                if text:
-                    all_texts.append(text)
-        
-        if not all_texts:
-            return jsonify({'error': 'No content found for selected sources'}), 404
-        
-        # Ghép tất cả text lại (đã là chunk từ ingest, không cần tách lại)
-        combined_text = "\n\n".join(all_texts)
-        
-        # Cấu hình các phương pháp (có thể override từ request)
-        use_dancer = data.get('use_dancer')
-        use_entity_chain = data.get('use_entity_chain')
-        use_cod = data.get('use_cod')
-        use_structured = data.get('use_structured')
-        use_fact_check = data.get('use_fact_check')
-
-        # Chế độ tóm tắt: fast | balanced | quality
-        raw_mode = (data.get("mode") or data.get("generation_mode") or "").strip().lower()
-        if raw_mode in {"fast", "balanced", "quality"}:
-            generation_mode = raw_mode
-        else:
-            generation_mode = "balanced"
-        
-        # Gọi hàm tóm tắt nâng cao
-        result = advanced_summarize(
-            text=combined_text,
-            pre_chunks=all_texts,  # dùng lại chunk đã có, tránh tách lại
-            use_dancer=use_dancer,
-            use_entity_chain=use_entity_chain,
-            use_cod=use_cod,
-            use_structured=use_structured,
-            use_fact_check=use_fact_check,
-            model=SLM_MODEL_SUMMARY,
-            mode=generation_mode
-        )
-        result["sources"] = list(normalized_sources)
-        return jsonify(result)
-        
+        if SUMMARY_GRAPH is None:
+            raise RuntimeError("SUMMARY_GRAPH chưa khởi tạo — kiểm tra logs khởi động.")
+        _langgraph_invoke(SUMMARY_GRAPH, {
+            "job_id": job_id, "source_names": source_names, "mm_input": mm_input,
+            "content_hash": content_hash, "length_mode": length_mode,
+            "progress": 0, "current_node": "", "error": None,
+        }, thread_id=job_id)
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        from app.domains.jobs.jobs_store import update_job
+        update_job(job_id, status="error", error_text=_job_error_text(e))
 
 
-# -------------------------
-# 💾 Save & list summaries
-# -------------------------
+@app.post("/generate-summary")
+def generate_summary():
+    data = request.json or {}
+    raw_sources = data.get("sources") or []
+    if not isinstance(raw_sources, list):
+        return jsonify({"error": "Sources phải là list"}), 400
+
+    source_names: list[str] = []
+    for item in raw_sources:
+        candidate = None
+        if isinstance(item, str):
+            candidate = item.strip()
+        elif isinstance(item, dict):
+            for key in ("video", "name", "id", "source", "title"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    candidate = value.strip()
+                    break
+        if candidate and candidate not in source_names:
+            source_names.append(candidate)
+
+    if not source_names:
+        return jsonify({"error": "No sources selected"}), 400
+
+    raw_mode = str(data.get("length_mode") or "").strip().lower()
+    length_mode = raw_mode if raw_mode in summary_schema.LENGTH_MODES else "medium"
+
+    force = bool(data.get("force"))
+    try:
+        mm_input, content_hash = _summary_input_and_hash(source_names, length_mode)
+    except Exception as e:
+        return jsonify({"error": f"Không đọc được dữ liệu nguồn: {e}"}), 500
+    if not mm_input.get("chunks"):
+        return jsonify({"error": "Nguồn chưa có dữ liệu đã index"}), 400
+    if not force:
+        cached = summary_store.get_by_hash(content_hash)
+        if cached:
+            # Cache hit KHÔNG có job_id — FE phải branch theo status="done" trước (aec6017)
+            return jsonify({"status": "done", "result": cached, "cached": True}), 200
+    job_id = _start_summary_job(source_names, mm_input, content_hash, length_mode)
+    return jsonify({"job_id": job_id, "status": "started"}), 202
+
+
+@app.get("/summary-status/<job_id>")
+def summary_status(job_id: str):
+    from app.domains.jobs.jobs_store import get_job as _js_get
+    j = _js_get(job_id)
+    if not j or j.get("job_type") not in ("summary", None):
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify({
+        "status": j.get("status"),
+        "progress": j.get("progress", 0),
+        "current_node": j.get("current_node") or "",
+        "result": j.get("result"),
+        "error": j.get("error"),
+    }), 200
+
+
+@app.post("/summary-cancel/<job_id>")
+def summary_cancel(job_id: str):
+    from app.domains.jobs.jobs_store import request_cancel
+    request_cancel(job_id)
+    return jsonify({"ok": True}), 200
+
+
 @app.route('/summaries', methods=['OPTIONS'])
 def summaries_options():
     return jsonify({"ok": True}), 200
 
 
-@app.post('/summaries')
-def save_summary():
-    try:
-        payload = request.json or {}
-        title = (payload.get("title") or "").strip() or "Tóm tắt"
-        data = payload.get("data") or {}
-        sources = payload.get("sources") or []
-
-        # Chuẩn hóa tiêu đề để tránh trùng (case/space)
-        def _norm(s: str) -> str:
-            return unicodedata.normalize("NFKD", s or "").strip().lower()
-
-        records = _load_summaries()
-        norm_title = _norm(title)
-
-        # Nếu đã tồn tại tiêu đề tương tự -> cập nhật thay vì thêm mới
-        existing_idx = next((i for i, r in enumerate(records) if _norm(r.get("title")) == norm_title), None)
-
-        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        if existing_idx is not None:
-            # Cập nhật bản ghi cũ, giữ nguyên id/createdAt nếu có
-            existing = records[existing_idx]
-            updated = {
-                "id": existing.get("id") or str(uuid.uuid4()),
-                "title": title,
-                "data": data,
-                "sources": sources,
-                "createdAt": existing.get("createdAt") or now_iso,
-                "updatedAt": now_iso,
-            }
-            records[existing_idx] = updated
-            _save_summaries(records)
-            return jsonify({"message": "Updated", "summary": updated})
-
-        # Nếu chưa có, thêm mới
-        record = {
-            "id": str(uuid.uuid4()),
-            "title": title,
-            "data": data,
-            "sources": sources,
-            "createdAt": now_iso,
-        }
-        _append_summary(record)
-        return jsonify({"message": "Saved", "summary": record})
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
 @app.get('/summaries')
 def list_summaries():
-    records = _load_summaries()
-    return jsonify({"summaries": records})
+    return jsonify({"summaries": summary_store.list_records()})
 
 
 @app.delete('/summaries/<string:summary_id>')
 def delete_summary(summary_id: str):
-    try:
-        records = _load_summaries()
-        new_records = [
-            r for r in records
-            if str(r.get("id")) != str(summary_id)
-            and str(r.get("data", {}).get("id")) != str(summary_id)
-        ]
-        removed = len(records) - len(new_records)
-        if removed == 0:
-            return jsonify({"error": "Summary not found"}), 404
-        _save_summaries(new_records)
-        return jsonify({"message": "Deleted", "removed": removed})
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+    if not summary_store.delete_record(summary_id):
+        return jsonify({"error": "Summary not found"}), 404
+    return jsonify({"message": "Deleted", "removed": 1})
+
 
 
 # -------------------------
@@ -2094,6 +1997,11 @@ def delete_source():
             mindmap_store.delete_by_source(target_stem)
         except Exception as e:
             print("mindmap store cleanup failed:", e)
+
+        try:
+            summary_store.delete_by_source(target_stem)
+        except Exception as e:
+            print("summary store cleanup failed:", e)
 
         return jsonify({'message': 'Deleted', 'removed': removed_total})
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { pollIntervalMs, stageLabel, createMindmapPoller, STALL_MS } from "./mindmapJob";
+import { pollIntervalMs, stageLabel, createMindmapPoller, STALL_MS, MAX_CONSECUTIVE_FETCH_FAILURES } from "./mindmapJob";
 
 describe("pollIntervalMs", () => {
   it("giãn 2s → 5s → 10s", () => {
@@ -69,6 +69,28 @@ describe("createMindmapPoller", () => {
     poller.start("j1");
     await vi.advanceTimersByTimeAsync(30_000);
     expect(events.done).toEqual([{ id: "ok" }]);
+  });
+
+  it("404 = terminal ngay (jobId cũ trong localStorage), không poll vô hạn", async () => {
+    const fetchStatus = vi.fn(async () => {
+      const e = new Error("HTTP 404");
+      e.status = 404;
+      throw e;
+    });
+    const { poller, events } = mk([], { fetchStatus });
+    poller.start("j-stale");
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(events.errors).toHaveLength(1);
+    expect(fetchStatus).toHaveBeenCalledTimes(1); // không retry 404
+  });
+
+  it("lỗi mạng liên tiếp quá ngân sách → terminal, không kẹt 'đang tạo' mãi", async () => {
+    const fetchStatus = vi.fn(async () => { throw new Error("mạng rớt"); });
+    const { poller, events } = mk([], { fetchStatus });
+    poller.start("j1");
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(events.errors).toHaveLength(1);
+    expect(fetchStatus).toHaveBeenCalledTimes(MAX_CONSECUTIVE_FETCH_FAILURES);
   });
 
   it("cancelled → onCancelled; stop() chặn tick sau", async () => {

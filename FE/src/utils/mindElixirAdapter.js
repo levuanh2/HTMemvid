@@ -8,10 +8,18 @@ export const REL_LABELS = {
   supports: "bổ trợ", contrasts: "đối lập", contains: "bao hàm",
 };
 
+// --mm-relation (định nghĩa trong mindmap.css, flip theo html.dark) chứ KHÔNG phải
+// --accent: seal đỏ dành riêng cho provenance/active/error, không dùng trang trí quan hệ.
 const ARROW_STYLE = {
-  stroke: "var(--accent)", strokeWidth: 2, strokeDasharray: "6 4",
-  labelColor: "var(--accent)", opacity: 0.9,
+  stroke: "var(--mm-relation)", strokeWidth: 2, strokeDasharray: "6 4",
+  labelColor: "var(--mm-relation)", opacity: 0.9,
 };
+
+// Ngược của REL_LABELS: nhãn tiếng Việt → type, để arrow user vẽ/reconnect vẫn giữ
+// đúng semantic type nếu label còn khớp (thay vì luôn rớt về relates_to).
+const LABEL_TO_TYPE = Object.fromEntries(
+  Object.entries(REL_LABELS).map(([type, label]) => [label, type])
+);
 
 export function recordToMindElixir(record) {
   const norm = normalizeMindmapRecord(record);
@@ -37,6 +45,9 @@ export function recordToMindElixir(record) {
   }
   const toTree = (n) => ({
     id: n.id, topic: n.title,
+    // Tag ※N = node có N trích đoạn nguồn — hiện provenance ngay trên canvas.
+    // mindElixirToRecord bỏ qua tags nên round-trip an toàn.
+    ...(n.chunkRefs?.length ? { tags: [`※ ${n.chunkRefs.length}`] } : {}),
     children: (byParent.get(n.id) || [])
       .slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map(toTree),
   });
@@ -71,7 +82,9 @@ export function mindElixirToRecord(mindData, sidecar, baseRecord) {
   );
   const relations = (mindData.arrows || []).map((a) => ({
     source: a.from, target: a.to,
-    type: baseType.get(`${a.from}→${a.to}`) || "relates_to",
+    // Ưu tiên type gốc theo (source,target); arrow mới/reconnect thì suy từ nhãn
+    // (LABEL_TO_TYPE) trước khi rớt về relates_to — codex #5.
+    type: baseType.get(`${a.from}→${a.to}`) || LABEL_TO_TYPE[a.label] || "relates_to",
     label: a.label || "",
   }));
 

@@ -1,4 +1,4 @@
-"""Phase 5 — RQ worker entrypoint (Step 1: ingest; Step 2: + summary).
+"""Phase 5 — RQ worker entrypoint (Step 1: ingest; Step 2: + summary; Step 3: + mindmap).
 
 Run:  python -m app.jobs.worker
 
@@ -14,9 +14,9 @@ import os
 
 
 def _queue_names() -> list[str]:
-    # Step 1: ingest. Step 2: + summary. (mindmap added later.)
-    raw = (os.getenv("RQ_QUEUES") or "ingest,summary").strip()
-    return [n.strip() for n in raw.split(",") if n.strip()] or ["ingest", "summary"]
+    # Step 1: ingest. Step 2: + summary. Step 3: + mindmap.
+    raw = (os.getenv("RQ_QUEUES") or "ingest,summary,mindmap").strip()
+    return [n.strip() for n in raw.split(",") if n.strip()] or ["ingest", "summary", "mindmap"]
 
 
 def main() -> None:

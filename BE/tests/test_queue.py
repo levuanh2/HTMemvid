@@ -242,5 +242,53 @@ def test_run_summary_job_marks_error_without_flask(tmp_jobs_db, monkeypatch):
 def test_queue_stats_has_per_queue_breakdown(monkeypatch):
     monkeypatch.setenv("QUEUE_ENABLED", "false")
     s = q.queue_stats()
-    assert "ingest" in s and "summary" in s
+    assert "ingest" in s and "summary" in s and "mindmap" in s
     assert set(s["summary"].keys()) == {"queued", "started", "failed"}
+
+
+# --------------------------------------------------------------- Step 3: mindmap
+def test_mindmap_enqueues_to_mindmap_queue(monkeypatch):
+    monkeypatch.setenv("QUEUE_ENABLED", "true")
+    seen = {}
+
+    class FakeQ:
+        def enqueue(self, func, *a, **k):
+            seen["func"], seen["kw"] = func, k
+
+    def fake_get_queue(name="ingest"):
+        seen["queue"] = name
+        return FakeQ()
+
+    monkeypatch.setattr(q, "get_queue", fake_get_queue)
+    res = q.enqueue_job(main.run_mindmap_job, args=("j", [], {}, "h"),
+                        queue="mindmap", job_id="j")
+    assert res["mode"] == "rq"
+    assert seen["queue"] == "mindmap"          # correct queue name
+    assert seen["func"] is main.run_mindmap_job
+    assert seen["kw"].get("job_id") == "j"
+
+
+def test_mindmap_thread_path_when_disabled(monkeypatch, tmp_path):
+    # QUEUE_ENABLED=false -> mindmap still dispatched via a thread (existing behaviour).
+    monkeypatch.setenv("QUEUE_ENABLED", "false")
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.sqlite"))
+    calls = {}
+    ev = threading.Event()
+
+    def fake_run(jid, *a):
+        calls["jid"] = jid
+        ev.set()
+
+    monkeypatch.setattr(main, "run_mindmap_job", fake_run)
+    jid = main._start_mindmap_job(["s"], {"chunks": []}, "h")
+    assert ev.wait(2.0) and calls["jid"] == jid   # ran in-thread, not queued
+
+
+def test_run_mindmap_job_marks_error_without_flask(tmp_jobs_db, monkeypatch):
+    # RQ worker executes run_mindmap_job with NO Flask request context; failure -> job error.
+    jid = "mm-fail"
+    jobs_store.create_job(jid, "mindmap", status="pending")
+    monkeypatch.setattr(main, "MINDMAP_GRAPH", None)  # force a controlled failure
+    main.run_mindmap_job(jid, [], {}, "h")
+    j = jobs_store.get_job(jid)
+    assert j["status"] == "error" and (j["error"] or "").strip()

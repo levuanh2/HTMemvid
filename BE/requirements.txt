@@ -40,6 +40,7 @@ pydantic>=2.7.4,<2.11      # 2.11+ kéo typing_inspection → ForbiddenQualifier
 python-docx
 python-dotenv
 redis>=5,<6   # cache semantic/retrieval (fail-open khi REDIS_URL rỗng) — pure-python, không chạm langgraph. Xem docs/SEMANTIC_CACHE_SPEC.md
+rq>=1.16,<2   # Phase 5: RQ worker cho heavy background jobs (ingest trước). Dùng redis ở trên. Chỉ chạy khi QUEUE_ENABLED=true.
 qrcode[pil]
 requests
 scikit-learn

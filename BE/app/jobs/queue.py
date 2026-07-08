@@ -12,7 +12,8 @@ import threading
 from datetime import datetime, timezone
 
 # Active queues. Step 1: ingest. Step 2: + summary. Step 3: + mindmap.
-QUEUE_NAMES = ("ingest", "summary", "mindmap")
+# Step 4: + rebuild (rebuild-index) + memory (memory-tree build).
+QUEUE_NAMES = ("ingest", "summary", "mindmap", "rebuild", "memory")
 
 
 def queue_enabled() -> bool:

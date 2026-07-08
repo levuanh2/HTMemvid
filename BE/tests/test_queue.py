@@ -242,8 +242,98 @@ def test_run_summary_job_marks_error_without_flask(tmp_jobs_db, monkeypatch):
 def test_queue_stats_has_per_queue_breakdown(monkeypatch):
     monkeypatch.setenv("QUEUE_ENABLED", "false")
     s = q.queue_stats()
-    assert "ingest" in s and "summary" in s and "mindmap" in s
+    for name in ("ingest", "summary", "mindmap", "rebuild", "memory"):
+        assert name in s
     assert set(s["summary"].keys()) == {"queued", "started", "failed"}
+
+
+# --------------------------------------------------------------- Step 4: rebuild
+def test_rebuild_enqueues_to_rebuild_queue(monkeypatch):
+    monkeypatch.setenv("QUEUE_ENABLED", "true")
+    seen = {}
+
+    class FakeQ:
+        def enqueue(self, func, *a, **k):
+            seen["func"], seen["kw"] = func, k
+
+    def fake_get_queue(name="ingest"):
+        seen["queue"] = name
+        return FakeQ()
+
+    monkeypatch.setattr(q, "get_queue", fake_get_queue)
+    res = q.enqueue_job(main.run_rebuild_index_job, args=("j",), queue="rebuild", job_id="j")
+    assert res["mode"] == "rq"
+    assert seen["queue"] == "rebuild"          # correct queue name
+    assert seen["func"] is main.run_rebuild_index_job
+    assert seen["kw"].get("job_id") == "j"
+
+
+def test_rebuild_thread_path_when_disabled(monkeypatch):
+    monkeypatch.setenv("QUEUE_ENABLED", "false")
+    ev = threading.Event()
+    res = q.enqueue_job(lambda jid: ev.set(), args=("j",), queue="rebuild")
+    assert res["mode"] == "thread"
+    assert ev.wait(2.0)
+
+
+def test_run_rebuild_index_job_success_without_flask(tmp_jobs_db, monkeypatch):
+    # RQ worker executes run_rebuild_index_job with NO Flask request context.
+    jid = "rb-ok"
+    jobs_store.create_job(jid, "rebuild", status="pending")
+    monkeypatch.setattr("app.scripts.rebuild_index_from_video.rebuild_faiss_index_from_videos",
+                        lambda progress_cb=None: {"num_videos": 3, "num_chunks": 42})
+    main.run_rebuild_index_job(jid)
+    j = jobs_store.get_job(jid)
+    assert j["status"] == "done" and j["progress"] == 100
+    assert j["result"]["num_chunks"] == 42 and j["result"]["num_videos"] == 3
+
+
+def test_run_rebuild_index_job_marks_error_without_flask(tmp_jobs_db, monkeypatch):
+    jid = "rb-fail"
+    jobs_store.create_job(jid, "rebuild", status="pending")
+
+    def boom(progress_cb=None):
+        raise RuntimeError("rebuild boom")
+
+    monkeypatch.setattr("app.scripts.rebuild_index_from_video.rebuild_faiss_index_from_videos", boom)
+    main.run_rebuild_index_job(jid)
+    j = jobs_store.get_job(jid)
+    assert j["status"] == "error" and (j["error"] or "").strip()
+
+
+# --------------------------------------------------------------- Step 4: memory-tree
+def test_memory_tree_enqueues_to_memory_queue(monkeypatch):
+    monkeypatch.setenv("QUEUE_ENABLED", "true")
+    seen = {}
+
+    class FakeQ:
+        def enqueue(self, func, *a, **k):
+            seen["func"], seen["kw"] = func, k
+
+    def fake_get_queue(name="ingest"):
+        seen["queue"] = name
+        return FakeQ()
+
+    monkeypatch.setattr(q, "get_queue", fake_get_queue)
+    res = q.enqueue_job(main.run_memory_tree_job, args=(["s"],), queue="memory")
+    assert res["mode"] == "rq"
+    assert seen["queue"] == "memory"           # correct queue name
+    assert seen["func"] is main.run_memory_tree_job
+
+
+def test_memory_tree_thread_path_when_disabled(monkeypatch):
+    # QUEUE_ENABLED=false -> memory-tree still dispatched via a thread (existing behaviour).
+    monkeypatch.setenv("QUEUE_ENABLED", "false")
+    ev = threading.Event()
+    seen = {}
+
+    def fake_build(stems):
+        seen["stems"] = stems
+        ev.set()
+
+    monkeypatch.setattr(main, "build_memory_tree_for_sources", fake_build)
+    main._trigger_memory_tree_build(["srcA"])
+    assert ev.wait(2.0) and seen["stems"] == ["srcA"]   # ran in-thread, not queued
 
 
 # --------------------------------------------------------------- Step 3: mindmap

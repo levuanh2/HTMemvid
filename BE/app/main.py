@@ -123,8 +123,13 @@ QUERY_GRAPH_BUILD_ERROR: Optional[str] = None
 
 _jobs_update_job = None
 _jobs_create_job = None
+_jobs_get_job = None
 try:
-    from app.domains.jobs.jobs_store import update_job as _jobs_update_job, create_job as _jobs_create_job
+    from app.domains.jobs.jobs_store import (
+        update_job as _jobs_update_job,
+        create_job as _jobs_create_job,
+        get_job as _jobs_get_job,
+    )
 except Exception:
     pass
 
@@ -759,53 +764,19 @@ def rebuild_index_from_video():
             "error": None,
             "created_at": time.time(),
         }
-
-    def rebuild_task(jid: str) -> None:
+    # Phase 5 Step 4: also mirror status into the shared jobs.sqlite so an RQ worker in a
+    # separate process is visible to /rebuild-status (in-mem `jobs` dict is per-process).
+    if _jobs_create_job is not None:
         try:
-            with jobs_lock:
-                if jid not in jobs:
-                    return
-                jobs[jid]["status"] = "running"
-                jobs[jid]["progress"] = 0
+            _jobs_create_job(job_id, job_type="rebuild", status="pending", progress=0, current_node="Queued")
+        except Exception:
+            pass
 
-            def progress_cb(progress: int, extra: Optional[Dict[str, Any]] = None) -> None:
-                with jobs_lock:
-                    if jid not in jobs:
-                        return
-                    jobs[jid]["progress"] = progress
-                    if extra:
-                        if "num_videos" in extra and extra["num_videos"] is not None:
-                            jobs[jid]["num_videos"] = int(extra["num_videos"])
-                        if "num_chunks" in extra and extra["num_chunks"] is not None:
-                            jobs[jid]["num_chunks"] = int(extra["num_chunks"])
-
-            from app.scripts.rebuild_index_from_video import rebuild_faiss_index_from_videos
-            result = rebuild_faiss_index_from_videos(progress_cb=progress_cb)
-            with jobs_lock:
-                if jid in jobs:
-                    jobs[jid]["status"] = "done"
-                    jobs[jid]["progress"] = 100
-                    jobs[jid]["num_chunks"] = int(result.get("num_chunks") or 0)
-                    jobs[jid]["num_videos"] = int(result.get("num_videos") or jobs[jid].get("num_videos") or 0)
-        except Exception as exc:
-            with jobs_lock:
-                if jid in jobs:
-                    jobs[jid]["status"] = "error"
-                    jobs[jid]["error"] = str(exc)
-            print(f"[REBUILD] job_id={jid} failed: {exc}")
-        finally:
-            # Release file lock best-effort
-            try:
-                if REBUILD_LOCK_PATH.exists():
-                    REBUILD_LOCK_PATH.unlink()
-            except Exception:
-                pass
-
-    thread = threading.Thread(target=rebuild_task, args=(job_id,), daemon=True)
+    from app.jobs.queue import enqueue_job
     try:
-        thread.start()
+        res = enqueue_job(run_rebuild_index_job, args=(job_id,), queue="rebuild", job_id=job_id)
     except Exception as exc:
-        # If thread failed to start, cleanup lock and job
+        # enqueue_job already falls back to a thread; a raise here is unexpected -> cleanup.
         try:
             if REBUILD_LOCK_PATH.exists():
                 REBUILD_LOCK_PATH.unlink()
@@ -814,13 +785,89 @@ def rebuild_index_from_video():
         with jobs_lock:
             jobs.pop(job_id, None)
         return jsonify({"error": f"Failed to start rebuild job: {str(exc)}"}), 500
-
+    _event = {"rq": "rebuild_enqueue_rq", "thread": "rebuild_enqueue_thread",
+              "thread_fallback": "rebuild_queue_fallback_thread"}.get(res.get("mode"),
+                                                                      f"rebuild_enqueue_{res.get('mode')}")
+    print(f"{_event} job_id={job_id}", flush=True)
     return jsonify({"status": "started", "job_id": job_id}), 202
+
+
+def run_rebuild_index_job(job_id: str) -> None:
+    """Rebuild FAISS index from QR videos. Runs in a daemon thread (QUEUE_ENABLED=false)
+    OR an RQ worker process (QUEUE_ENABLED=true) — identical behaviour, no Flask request
+    context. Enqueued by dotted path `app.main.run_rebuild_index_job`. Status is mirrored
+    into the shared jobs.sqlite (worker-visible) AND the in-mem `jobs` dict (legacy/same
+    process). Releases REBUILD_LOCK_PATH in finally (path on the shared index volume)."""
+    print(f"rebuild_job_running job_id={job_id}", flush=True)
+
+    def _set_store(**kw):
+        if _jobs_update_job is not None:
+            try:
+                _jobs_update_job(job_id, **kw)
+            except Exception:
+                pass
+
+    def _set_dict(**kw):
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id].update(kw)
+
+    try:
+        _set_dict(status="running", progress=0)
+        _set_store(status="running", progress=0, current_node="Rebuild")
+
+        _counts = {"num_videos": 0, "num_chunks": 0}
+
+        def progress_cb(progress: int, extra: Optional[Dict[str, Any]] = None) -> None:
+            upd: Dict[str, Any] = {"progress": progress}
+            if extra:
+                if extra.get("num_videos") is not None:
+                    _counts["num_videos"] = int(extra["num_videos"])
+                if extra.get("num_chunks") is not None:
+                    _counts["num_chunks"] = int(extra["num_chunks"])
+            _set_dict(**upd, **_counts)
+            _set_store(progress=progress, result=dict(_counts))
+
+        from app.scripts.rebuild_index_from_video import rebuild_faiss_index_from_videos
+        result = rebuild_faiss_index_from_videos(progress_cb=progress_cb)
+        num_chunks = int(result.get("num_chunks") or 0)
+        num_videos = int(result.get("num_videos") or _counts["num_videos"] or 0)
+        _set_dict(status="done", progress=100, num_chunks=num_chunks, num_videos=num_videos)
+        _set_store(status="done", progress=100,
+                   result={"num_chunks": num_chunks, "num_videos": num_videos})
+        print(f"rebuild_job_done job_id={job_id} num_videos={num_videos} num_chunks={num_chunks}", flush=True)
+    except Exception as exc:
+        _set_dict(status="error", error=str(exc))
+        _set_store(status="error", error_text=_job_error_text(exc))
+        print(f"rebuild_job_failed job_id={job_id} err={str(exc)[:80]}", flush=True)
+    finally:
+        try:
+            if REBUILD_LOCK_PATH.exists():
+                REBUILD_LOCK_PATH.unlink()
+        except Exception:
+            pass
 
 
 @app.get('/rebuild-status/<job_id>')
 def rebuild_status(job_id: str):
     _cleanup_old_jobs()
+    # Prefer the shared jobs.sqlite (worker-visible); fall back to the in-mem dict (legacy).
+    if _jobs_get_job is not None:
+        try:
+            j = _jobs_get_job(job_id)
+        except Exception:
+            j = None
+        if j is not None and j.get("job_type") in ("rebuild", None):
+            res = j.get("result") if isinstance(j.get("result"), dict) else {}
+            return jsonify({
+                "status": j.get("status"),
+                "progress": j.get("progress"),
+                # Default 0 before the first progress/result write (preserve legacy contract:
+                # the in-mem dict returned 0/0 on a freshly started job, not null).
+                "num_chunks": res.get("num_chunks") or 0,
+                "num_videos": res.get("num_videos") or 0,
+                "error": j.get("error"),
+            }), 200
     with jobs_lock:
         job = jobs.get(job_id)
         if not job:
@@ -1213,34 +1260,38 @@ def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> 
 # -------------------------
 # 🔄 Background tasks (non-blocking)
 # -------------------------
-def _build_memory_tree_background(source_stems: List[str]):
-    """
-    Background task: Build Memory Tree cho các source đã ingest.
-    Chạy trong thread riêng, không block request.
-    """
+def run_memory_tree_job(source_stems: List[str]):
+    """Build Memory Tree for the given sources. Runs in a daemon thread
+    (QUEUE_ENABLED=false) OR an RQ worker process (QUEUE_ENABLED=true) — identical
+    behaviour, no Flask request context. Enqueued by dotted path
+    `app.main.run_memory_tree_job`. Fire-and-forget: there is no per-job status store
+    today (results land in memory_trees.json, surfaced by /memory-tree-status); errors are
+    logged, not persisted, matching the existing contract."""
+    print(f"memory_tree_job_running sources={source_stems}", flush=True)
     try:
-        print(f"🔄 [Background] Bắt đầu build Memory Tree cho {len(source_stems)} source(s)...")
         build_memory_tree_for_sources(source_stems)
-        print(f"✅ [Background] Hoàn thành build Memory Tree cho {source_stems}")
+        print(f"memory_tree_job_done sources={source_stems}", flush=True)
     except Exception as exc:
         import traceback
         traceback.print_exc()
-        print(f"⚠️ [Background] Lỗi build Memory Tree: {exc}")
+        print(f"memory_tree_job_failed sources={source_stems} err={str(exc)[:80]}", flush=True)
+
+
+# Backward-compatible alias (older callers / tests may reference this name).
+_build_memory_tree_background = run_memory_tree_job
 
 
 def _trigger_memory_tree_build(source_stems: List[str]):
-    """
-    Trigger background task để build Memory Tree (non-blocking).
-    """
+    """Trigger Memory Tree build (non-blocking). Phase 5 Step 4: via enqueue_job — daemon
+    thread when QUEUE_ENABLED=false (default, unchanged), RQ 'memory' queue when true."""
     if not source_stems:
         return
-    thread = threading.Thread(
-        target=_build_memory_tree_background,
-        args=(source_stems,),
-        daemon=True
-    )
-    thread.start()
-    print(f"🚀 [Background] Đã trigger build Memory Tree cho: {source_stems}")
+    from app.jobs.queue import enqueue_job
+    res = enqueue_job(run_memory_tree_job, args=(source_stems,), queue="memory")
+    _event = {"rq": "memory_tree_enqueue_rq", "thread": "memory_tree_enqueue_thread",
+              "thread_fallback": "memory_tree_queue_fallback_thread"}.get(res.get("mode"),
+                                                                          f"memory_tree_enqueue_{res.get('mode')}")
+    print(f"{_event} sources={source_stems}", flush=True)
 
 
 def _run_ingest_job(source_id: str, file_path: str, filename: str) -> None:

@@ -1332,9 +1332,13 @@ def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> 
             except Exception:
                 sch = None
             cited = [c.get("chunk_id") for c in (payload.get("chunks") or []) if isinstance(c, dict) and c.get("chunk_id")]
+            _rewritten = out.get("standalone_question")
+            _mode = out.get("context_mode") or "standalone"
             _save_conversation_turns(
                 session_id, question, str(payload.get("answer")),
                 source_ids=src, source_context_hash=sch, cited_chunk_ids=cited or None,
+                rewritten_query=(_rewritten if _rewritten and _rewritten != question else None),
+                metadata={"context_mode": _mode, "context_signature": out.get("context_signature")},
             )
     except Exception:
         pass
@@ -1801,12 +1805,34 @@ def query():
                 except Exception:
                     conv_ctx = None
 
+            # Phase C: rewrite the follow-up into a standalone question for retrieval.
+            # Original question is preserved for answer generation. Fail-open to original.
+            standalone_q = question
+            context_mode = "standalone"
+            context_sig = None
+            if _conversation_enabled() and conv_ctx is not None and not conv_ctx.is_empty:
+                context_sig = conv_ctx.context_signature
+                try:
+                    from app.domains.conversation.rewrite import rewrite_followup_question, decide_context_mode
+                    _rw = rewrite_followup_question(question, conv_ctx, sources or [])
+                    context_mode = decide_context_mode(_rw)
+                    if context_mode == "contextual":
+                        standalone_q = (_rw.get("standalone_question") or question)
+                        print(f"conversation_rewrite mode={context_mode} conf={_rw.get('confidence')} "
+                              f"q={question[:40]!r} -> {standalone_q[:60]!r}", flush=True)
+                except Exception:
+                    pass
+
             init_state = {
                 "job_id": jid,
                 "session_id": session_id,
                 "conversation_history": history,
                 "conversation_context": (conv_ctx.to_dict() if conv_ctx is not None else None),
                 "source_context_hash": conv_sch,
+                "original_question": question,
+                "standalone_question": standalone_q,
+                "context_mode": context_mode,
+                "context_signature": context_sig,
                 "q": question,
                 "selected_sources": sources or [],
                 "use_memory_tree": bool(use_mem),

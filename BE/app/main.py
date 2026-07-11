@@ -67,6 +67,13 @@ except Exception:
     _jobs_migrate_from_dict = None
     _jobs_mark_interrupted = None
 
+# Conversation Context Layer store (idempotent; feature-flagged at the call sites).
+try:
+    from app.domains.conversation.store import init_db as _conv_init_db
+    _conv_init_db()
+except Exception:
+    _conv_init_db = None
+
 # Debug log AI mode (không in ra API key thật)
 print("=== AI MODE ===")
 print("OLLAMA_HOST:", os.getenv("OLLAMA_HOST"))
@@ -318,7 +325,9 @@ def _sf_nonempty(cached: Optional[dict]) -> bool:
     return isinstance(p, dict) and bool(str(p.get("answer") or "").strip())
 
 
-def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict) -> None:
+def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict,
+                         *, source_ids: Optional[list] = None,
+                         source_context_hash: Optional[str] = None) -> None:
     """Mark a follower job done using the leader's cached result. Atomic done+result
     (mirrors _finalize_query_job) — never sets done without the payload."""
     payload = cached.get("payload") if isinstance(cached, dict) else None
@@ -342,6 +351,17 @@ def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict)
                 {"role": "user", "content": question},
                 {"role": "assistant", "content": str(payload.get("answer"))},
             ])
+    except Exception:
+        pass
+
+    # Conversation Context Layer: record the follower's turn in its own session (flag-gated).
+    try:
+        if payload.get("answer"):
+            cited = [c.get("chunk_id") for c in (payload.get("chunks") or []) if isinstance(c, dict) and c.get("chunk_id")]
+            _save_conversation_turns(
+                session_id, question, str(payload.get("answer")),
+                source_ids=source_ids, source_context_hash=source_context_hash, cited_chunk_ids=cited or None,
+            )
     except Exception:
         pass
 
@@ -386,6 +406,10 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
     if not sf_key:
         _SF_METRICS["bypass_unsafe"] += 1
         return {"served": False, "lock": None}
+    try:
+        _sf_sch = llm_cache.source_context_hash(sources, language, category, use_mem)
+    except Exception:
+        _sf_sch = None
     cache_key = _make_query_cache_key(question, sources, use_mem,
                                       {"category": category, "language": language})
 
@@ -395,7 +419,7 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
         _SF_METRICS["follower_hit"] += 1
         _SF_METRICS["dup_avoided"] += 1
         _sf_log("singleflight_follower_cache_hit", kind="warm")
-        _finalize_from_cache(jid, session_id, question, cached)
+        _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch)
         return {"served": True}
 
     token = uuid.uuid4().hex
@@ -424,7 +448,7 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
             _SF_METRICS["follower_hit"] += 1
             _SF_METRICS["dup_avoided"] += 1
             _sf_log("singleflight_follower_cache_hit", kind="leader")
-            _finalize_from_cache(jid, session_id, question, cached)
+            _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch)
             return {"served": True}
         # Leader vanished (errored/released) without a cached answer → fail open early,
         # but re-check cache once to close the write-then-release race.
@@ -439,7 +463,7 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
                 _SF_METRICS["follower_hit"] += 1
                 _SF_METRICS["dup_avoided"] += 1
                 _sf_log("singleflight_follower_cache_hit", kind="leader_race")
-                _finalize_from_cache(jid, session_id, question, cached)
+                _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch)
                 return {"served": True}
             break
 
@@ -1215,6 +1239,48 @@ def _attach_evidence(payload: dict, out: dict, max_chunks: int = 12) -> None:
             payload["chunks"] = ev
 
 
+def _conversation_enabled() -> bool:
+    """Feature gate for the Conversation Context Layer (default OFF)."""
+    try:
+        from shared.config import get_settings
+        return bool(get_settings().conversation_context_enabled)
+    except Exception:
+        return False
+
+
+def _save_conversation_turns(
+    session_id: str,
+    question: str,
+    answer: str,
+    *,
+    source_ids: Optional[list] = None,
+    source_context_hash: Optional[str] = None,
+    cited_chunk_ids: Optional[list] = None,
+    rewritten_query: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> None:
+    """Persist a user+assistant turn pair to the conversation store. Best-effort:
+    a DB failure must never break /query (fail-open). Gated on the feature flag."""
+    if not _conversation_enabled():
+        return
+    if not session_id or not (answer or "").strip():
+        return
+    try:
+        from app.domains.conversation import store as _conv
+        _conv.append_message(
+            session_id, "user", question,
+            selected_source_ids=source_ids, source_context_hash=source_context_hash,
+        )
+        _conv.append_message(
+            session_id, "assistant", str(answer),
+            selected_source_ids=source_ids, source_context_hash=source_context_hash,
+            cited_chunk_ids=cited_chunk_ids, rewritten_query=rewritten_query,
+            answer_summary=str(answer)[:300], metadata=metadata,
+        )
+    except Exception:
+        pass
+
+
 def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> None:
     """Trích payload/status từ kết quả graph → cập nhật query_jobs/jobs_store + persist history.
 
@@ -1253,6 +1319,23 @@ def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> 
         if isinstance(payload, dict) and payload.get("answer"):
             from app.domains.jobs.sessions_store import append_messages as _ss_append
             _ss_append(session_id, [{"role": "user", "content": question}, {"role": "assistant", "content": str(payload.get("answer"))}])
+    except Exception:
+        pass
+
+    # Conversation Context Layer: structured turn store with source scope (flag-gated).
+    try:
+        if isinstance(payload, dict) and payload.get("answer"):
+            src = out.get("selected_sources") or []
+            try:
+                import app.domains.cache.llm_cache as _lc
+                sch = _lc.source_context_hash(src, out.get("language"), out.get("category"), bool(out.get("use_memory_tree", True)))
+            except Exception:
+                sch = None
+            cited = [c.get("chunk_id") for c in (payload.get("chunks") or []) if isinstance(c, dict) and c.get("chunk_id")]
+            _save_conversation_turns(
+                session_id, question, str(payload.get("answer")),
+                source_ids=src, source_context_hash=sch, cited_chunk_ids=cited or None,
+            )
     except Exception:
         pass
 
@@ -1643,6 +1726,13 @@ def query():
     job_id = str(uuid.uuid4())
     if not session_id:
         session_id = str(uuid.uuid4())
+    # Conversation Context Layer: ensure the conversation row exists (flag-gated, fail-open).
+    if _conversation_enabled():
+        try:
+            from app.domains.conversation import store as _conv
+            _conv.ensure_conversation(session_id, active_source_scope=selected_sources or [])
+        except Exception:
+            pass
     try:
         from app.domains.jobs.jobs_store import create_job as _js_create
         _js_create(job_id, job_type="query", status="pending", progress=0, current_node="Queued")

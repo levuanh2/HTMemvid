@@ -89,7 +89,7 @@ def sf_env(monkeypatch):
     monkeypatch.setattr(main, "_get_session_history_safe", lambda sid, n: [])
     served = []
     monkeypatch.setattr(main, "_finalize_from_cache",
-                        lambda jid, sid, q, cached: served.append((jid, cached)))
+                        lambda jid, sid, q, cached, **kw: served.append((jid, cached)))
     fake = FakeRedis()
     redis_client.reset_for_tests(fake)
     yield {"fake": fake, "served": served, "monkeypatch": monkeypatch}

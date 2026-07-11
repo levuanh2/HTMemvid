@@ -60,6 +60,9 @@ services:
       RQ_JOB_TIMEOUT_SEC: "${RQ_JOB_TIMEOUT_SEC:-1800}"
       JOBS_DB_PATH: "${JOBS_DB_PATH:-/app/memory/jobs.sqlite}"
       LOG_DB_PATH: "${LOG_DB_PATH:-/app/memory/logs.sqlite}"
+      # Conversation Context Layer (default OFF; conversation DB on the shared memory volume).
+      CONVERSATION_CONTEXT_ENABLED: "${CONVERSATION_CONTEXT_ENABLED:-false}"
+      CONVERSATIONS_DB_PATH: "${CONVERSATIONS_DB_PATH:-/app/memory/conversations.sqlite}"
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -193,6 +196,9 @@ services:
       RQ_JOB_TIMEOUT_SEC: "${RQ_JOB_TIMEOUT_SEC:-1800}"
       JOBS_DB_PATH: "${JOBS_DB_PATH:-/app/memory/jobs.sqlite}"
       LOG_DB_PATH: "${LOG_DB_PATH:-/app/memory/logs.sqlite}"
+      # Parity with backend (worker never serves /query, but shares the DB path).
+      CONVERSATION_CONTEXT_ENABLED: "${CONVERSATION_CONTEXT_ENABLED:-false}"
+      CONVERSATIONS_DB_PATH: "${CONVERSATIONS_DB_PATH:-/app/memory/conversations.sqlite}"
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"

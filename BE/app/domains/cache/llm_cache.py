@@ -228,6 +228,19 @@ def _bucket_id(sources: List[str], language: Optional[str], category: Optional[s
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
+def source_context_hash(
+    sources: Optional[List[str]] = None,
+    language: Optional[str] = None,
+    category: Optional[str] = None,
+    use_memory_tree: bool = True,
+) -> str:
+    """Public alias for the cache bucket — the source-scope signature that already
+    encodes prompt_version + embedding model + index_version + sources + filters.
+    Reused by the Conversation Context Layer to scope turns to a document set so
+    context never leaks across unrelated sources."""
+    return _bucket_id(list(sources or []), language, category, use_memory_tree)
+
+
 def _entry_key(bucket: str, eid: str) -> str:
     return f"{_NS}:{_ENV}:sc:{bucket}:e:{eid}"
 

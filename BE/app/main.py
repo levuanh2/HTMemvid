@@ -1778,10 +1778,35 @@ def query():
                 history = _ss_get(session_id, limit_messages=8)
             except Exception:
                 history = []
+
+            # Conversation Context Layer (flag-gated): replace the unscoped session
+            # history with source-scoped, reset-aware turns so context never leaks
+            # across documents and respects Clear-context. Fail-open to the legacy history.
+            conv_ctx = None
+            conv_sch = None
+            if _conversation_enabled():
+                try:
+                    conv_sch = llm_cache.source_context_hash(sources or [], language, category, bool(use_mem))
+                except Exception:
+                    conv_sch = None
+                try:
+                    from app.domains.conversation.context_builder import build_recent_conversation_context
+                    conv_ctx = build_recent_conversation_context(
+                        session_id, selected_sources=sources or [], source_context_hash=conv_sch,
+                    )
+                    if not conv_ctx.is_empty:
+                        history = [{"role": t["role"], "content": t["content"]} for t in conv_ctx.turns]
+                    else:
+                        history = []  # no same-scope context → treat as standalone (no leak)
+                except Exception:
+                    conv_ctx = None
+
             init_state = {
                 "job_id": jid,
                 "session_id": session_id,
                 "conversation_history": history,
+                "conversation_context": (conv_ctx.to_dict() if conv_ctx is not None else None),
+                "source_context_hash": conv_sch,
                 "q": question,
                 "selected_sources": sources or [],
                 "use_memory_tree": bool(use_mem),
@@ -2053,6 +2078,54 @@ def run_summary_job(job_id: str, source_names: list[str], mm_input: dict,
         from app.domains.jobs.jobs_store import update_job
         update_job(job_id, status="error", error_text=_job_error_text(e))
         print(f"summary_job_failed job_id={job_id} err={str(e)[:80]}", flush=True)
+
+
+# -------------------------
+# 💬 Conversation Context Layer — controls (Phase B)
+# Flag-gated; when disabled the routes report a clear disabled state so the FE can
+# degrade gracefully. All handlers fail open — a store error never 500s the chat.
+# -------------------------
+@app.post('/conversations/<conversation_id>/clear-context')
+def clear_conversation_context(conversation_id: str):
+    """Clear context: stop using older turns from now on. Keeps messages in the DB."""
+    if not _conversation_enabled():
+        return jsonify({"ok": False, "error": "conversation_context_disabled"}), 404
+    try:
+        from app.domains.conversation import store as _conv
+        reset_at = _conv.set_context_reset(conversation_id)
+        return jsonify({"ok": True, "conversation_id": conversation_id, "context_reset_at": reset_at})
+    except Exception as e:
+        logging.exception("[conversation] clear-context failed: %s", e)
+        return jsonify({"ok": False, "error": "clear_context_failed"}), 500
+
+
+@app.delete('/conversations/<conversation_id>')
+def delete_conversation(conversation_id: str):
+    """Delete chat history: hard-delete this conversation's messages (storage-saving)."""
+    if not _conversation_enabled():
+        return jsonify({"ok": False, "error": "conversation_context_disabled"}), 404
+    try:
+        from app.domains.conversation import store as _conv
+        removed = _conv.delete_messages(conversation_id)
+        _conv.soft_delete(conversation_id)
+        return jsonify({"ok": True, "conversation_id": conversation_id, "removed": removed})
+    except Exception as e:
+        logging.exception("[conversation] delete failed: %s", e)
+        return jsonify({"ok": False, "error": "delete_failed"}), 500
+
+
+@app.get('/conversations/<conversation_id>/messages')
+def get_conversation_messages(conversation_id: str):
+    """Return this conversation's messages (for restoring the chat UI)."""
+    if not _conversation_enabled():
+        return jsonify({"conversation_id": conversation_id, "messages": []}), 404
+    try:
+        from app.domains.conversation import store as _conv
+        msgs = _conv.get_messages(conversation_id)
+        return jsonify({"conversation_id": conversation_id, "messages": msgs})
+    except Exception as e:
+        logging.exception("[conversation] get-messages failed: %s", e)
+        return jsonify({"conversation_id": conversation_id, "messages": []}), 500
 
 
 @app.post("/generate-summary")

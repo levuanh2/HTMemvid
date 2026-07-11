@@ -39,6 +39,13 @@ class QueryState(TypedDict):
     q: str
     selected_sources: list
     use_memory_tree: bool
+    # Conversation Context Layer (Phase B/C) — all optional so flag-off state is unchanged.
+    conversation_context: NotRequired[Optional[dict]]  # structured recent context (source-scoped)
+    source_context_hash: NotRequired[Optional[str]]      # cache bucket for the current scope
+    original_question: NotRequired[str]                  # user's raw question (answer prompt)
+    standalone_question: NotRequired[str]                # rewritten follow-up (retrieval)
+    context_mode: NotRequired[str]                       # standalone | contextual | low_confidence_contextual
+    context_signature: NotRequired[Optional[str]]        # hash of the turns used (cache safety)
     category: NotRequired[Optional[str]]
     language: NotRequired[Optional[str]]
     retrieved_chunks: list

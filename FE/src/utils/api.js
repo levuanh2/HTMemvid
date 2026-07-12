@@ -76,6 +76,30 @@ export const cancelSummary = async (jobId) => {
   return res.json();
 };
 
+// ── Conversation Context Layer: clear context / delete history / restore ──
+// All are flag-gated on the backend: a 404 means the feature is off — callers
+// treat that as a no-op success (the FE-side reset still happens).
+export const clearConversationContext = async (conversationId) => {
+  const res = await apiFetch(`/conversations/${encodeURIComponent(conversationId)}/clear-context`, { method: "POST" });
+  if (res.status === 404) return { ok: false, disabled: true };
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+};
+
+export const deleteConversation = async (conversationId) => {
+  const res = await apiFetch(`/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
+  if (res.status === 404) return { ok: false, disabled: true };
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+};
+
+export const getConversationMessages = async (conversationId) => {
+  const res = await apiFetch(`/conversations/${encodeURIComponent(conversationId)}/messages`);
+  if (res.status === 404) return { messages: [], disabled: true };
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+};
+
 // `fetchChunkText` — evidence lookup for the mindmap drawer. Returns the raw
 // chunk text, or null when the chunk id has no text (BE 404s that case).
 export const fetchChunkText = async (chunkId) => {

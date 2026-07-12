@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
-import { apiFetch, apiUrl } from "../../utils/api";
+import { apiFetch, apiUrl, clearConversationContext, deleteConversation } from "../../utils/api";
+import { newConversationId } from "../../utils/conversation";
 import { Icon } from "../ui/Icon";
 import { nodeLabel, processCitations, parseCiteHref, normStem } from "../../utils/evidence";
 
@@ -106,10 +107,12 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [sessionId] = useState(() => {
-    try { if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID(); } catch {}
-    return null;
-  });
+  const [sessionId, setSessionId] = useState(() => newConversationId());
+  // Conversation controls: kebab menu, a transient notice, and whether the AI is
+  // currently using prior turns as context (hidden right after Clear context).
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [contextCleared, setContextCleared] = useState(false);
   const [jobProgress, setJobProgress] = useState(0);
   const [jobNode, setJobNode] = useState("");
   const [seenNodes, setSeenNodes] = useState([]);
@@ -207,9 +210,45 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
     });
   };
 
+  // ── Conversation controls ───────────────────────────
+  // Guarded while a query streams so we never rotate/clear mid-answer.
+  const showNotice = (msg) => { setNotice(msg); setTimeout(() => setNotice(""), 4000); };
+
+  const handleNewChat = () => {
+    if (loading) return;
+    setMenuOpen(false);
+    setSessionId(newConversationId());   // fresh thread, empty context (keeps selected sources)
+    setMessages([]);
+    setContextCleared(false);
+    onEvidence?.(null); onHighlight?.(null);
+    showNotice("Đã mở cuộc trò chuyện mới.");
+  };
+
+  const handleClearContext = async () => {
+    if (loading) return;
+    setMenuOpen(false);
+    setContextCleared(true);            // messages stay visible; AI stops using old turns
+    try { await clearConversationContext(sessionId); } catch {}
+    showNotice("Đã xóa ngữ cảnh. Câu hỏi tiếp theo sẽ được xử lý như chủ đề mới.");
+  };
+
+  const handleDeleteHistory = async () => {
+    if (loading) return;
+    setMenuOpen(false);
+    if (!window.confirm("Xóa toàn bộ lịch sử chat của cuộc trò chuyện này? Hành động này không thể hoàn tác.")) return;
+    try { await deleteConversation(sessionId); } catch {}
+    setMessages([]);
+    setContextCleared(false);
+    onEvidence?.(null); onHighlight?.(null);
+    showNotice("Đã xóa lịch sử chat.");
+  };
+
+  const usingContext = !contextCleared && messages.some((m) => m.role === "ai");
+
   // ── Send (logic unchanged; + evidence capture) ──────
   const handleSend = async () => {
     if (!input.trim() || loading) return;
+    setContextCleared(false);          // a new question resumes using conversation context
     const userMsg = { role: "user", content: input };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
@@ -283,6 +322,55 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
   // ── Render ─────────────────────────────────────────
   return (
     <div className="flex flex-col h-full min-h-0" style={{ background: "var(--bg-base)" }}>
+
+      {/* Conversation toolbar: context indicator + controls (New chat / Clear / Delete) */}
+      <div className="flex items-center gap-2 px-5 sm:px-8 h-9 border-b flex-shrink-0"
+        style={{ borderColor: "var(--border-color)", background: "var(--bg-sidebar)" }}>
+        {usingContext && (
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-text-muted">
+            <Icon name="MessageSquare" size={12} className="text-brand" />
+            Đang dùng ngữ cảnh cuộc trò chuyện
+          </span>
+        )}
+        <div className="flex-1" />
+        <button
+          onClick={handleNewChat} disabled={loading}
+          className="pill-action !py-1 !text-[12px] disabled:opacity-40"
+          title="Bắt đầu cuộc trò chuyện mới">
+          <Icon name="Plus" size={13} /> Chat mới
+        </button>
+        <div className="relative">
+          <button
+            onClick={() => setMenuOpen((v) => !v)} disabled={loading}
+            className="icon-btn w-8 h-8 disabled:opacity-40"
+            aria-label="Tùy chọn cuộc trò chuyện" aria-expanded={menuOpen}>
+            <Icon name="MoreVertical" size={16} />
+          </button>
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden />
+              <div className="absolute right-0 top-9 z-20 min-w-[190px] rounded-[8px] border py-1 shadow-lg"
+                style={{ borderColor: "var(--border-color)", background: "var(--bg-elevated)" }}>
+                <button onClick={handleClearContext} className="menu-item">
+                  <Icon name="Eraser" size={14} /> Xóa ngữ cảnh
+                </button>
+                <button onClick={handleDeleteHistory} className="menu-item menu-item--danger">
+                  <Icon name="Trash2" size={14} /> Xóa lịch sử chat
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Transient feedback (New chat / Clear context / Delete history) */}
+      {notice && (
+        <div className="px-5 sm:px-8 py-1.5 text-[12px] flex items-center gap-2 border-b flex-shrink-0"
+          style={{ borderColor: "var(--border-color)", background: "color-mix(in srgb, var(--brand) 8%, transparent)", color: "var(--text-secondary)" }}>
+          <Icon name="Info" size={13} className="text-brand" />
+          <span>{notice}</span>
+        </div>
+      )}
 
       {/* Notice: sources still indexing */}
       {hasIndexReadySources && (
@@ -431,6 +519,11 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
         .scrollbar-none::-webkit-scrollbar { display: none; }
         .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
         @media (min-width: 768px) { .md\\:hidden { display: none !important; } }
+        .menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 12px;
+          font-size: 13px; color: var(--text-primary); background: transparent; text-align: left; }
+        .menu-item:hover { background: color-mix(in srgb, var(--brand) 10%, transparent); }
+        .menu-item--danger { color: var(--err); }
+        .menu-item--danger:hover { background: color-mix(in srgb, var(--err) 12%, transparent); }
       `}</style>
     </div>
   );

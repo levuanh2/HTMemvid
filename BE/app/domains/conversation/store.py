@@ -143,20 +143,25 @@ def _loads(raw: Optional[str], default: Any) -> Any:
 
 # ---- conversations ----------------------------------------------------------
 
-def ensure_conversation(conversation_id: str, *, active_source_scope: Any = None, user_id: Optional[str] = None) -> None:
+def ensure_conversation(conversation_id: str, *, active_source_scope: Any = None,
+                        user_id: Optional[str] = None, enforce_owner: bool = False) -> bool:
     """Create the conversation row if absent (idempotent). Bumps updated_at.
 
     First writer establishes ownership: user_id is set on INSERT and preserved
-    (COALESCE) on conflict — an existing owner is never overwritten. Ownership is
-    not yet enforced on reads/mutations (Phase B)."""
+    (COALESCE) on conflict — an existing owner is never overwritten. When
+    enforce_owner is True and the row already belongs to a different (or NULL)
+    owner, nothing is mutated and False is returned (denied). Returns True when the
+    row is created/confirmed for this caller (always True when not enforcing)."""
     if not conversation_id:
-        return
+        return False
     init_db()
     now = time.time()
     scope = _dumps(active_source_scope)
     with _lock:
         conn = get_conn()
         try:
+            if _owner_blocks(conn, conversation_id, user_id, enforce_owner):
+                return False
             conn.execute(
                 """
                 INSERT INTO conversations(conversation_id, created_at, updated_at, active_source_scope, user_id)
@@ -169,6 +174,7 @@ def ensure_conversation(conversation_id: str, *, active_source_scope: Any = None
                 (conversation_id, now, now, scope, user_id),
             )
             conn.commit()
+            return True
         finally:
             conn.close()
 
@@ -201,8 +207,45 @@ def get_conversation(conversation_id: str) -> Optional[dict]:
     }
 
 
-def set_context_reset(conversation_id: str, ts: Optional[float] = None) -> float:
-    """Set context_reset_at = ts (default now). Returns the timestamp used."""
+def _owner_blocks(conn: sqlite3.Connection, conversation_id: str, user_id: Optional[str], enforce: bool) -> bool:
+    """True when an owner-enforced op must be denied: the conversation exists and
+    its user_id differs from the caller (a legacy NULL owner is also denied under
+    enforcement — fail-closed). Absent row → not blocked (create-type ops may
+    establish ownership). No-op when enforce is False."""
+    if not enforce:
+        return False
+    row = conn.execute(
+        "SELECT user_id FROM conversations WHERE conversation_id = ?", (conversation_id,)
+    ).fetchone()
+    if row is None:
+        return False
+    return row[0] != user_id
+
+
+def owner_check(conversation_id: str, user_id: Optional[str]) -> Optional[bool]:
+    """None if the conversation is absent; True if owned by user_id; False if it
+    exists with a different (or NULL) owner. Used by routes to map owner-mismatch
+    → 404 without an existence oracle."""
+    if not conversation_id:
+        return None
+    init_db()
+    with _lock:
+        conn = get_conn()
+        try:
+            row = conn.execute(
+                "SELECT user_id FROM conversations WHERE conversation_id = ?", (conversation_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+    if row is None:
+        return None
+    return row[0] == user_id
+
+
+def set_context_reset(conversation_id: str, ts: Optional[float] = None,
+                      *, user_id: Optional[str] = None, enforce_owner: bool = False) -> Optional[float]:
+    """Set context_reset_at = ts (default now). Returns the timestamp used, or None
+    when owner-enforced and the caller is not the owner (denied, no mutation)."""
     if not conversation_id:
         return 0.0
     init_db()
@@ -211,15 +254,18 @@ def set_context_reset(conversation_id: str, ts: Optional[float] = None) -> float
     with _lock:
         conn = get_conn()
         try:
+            if _owner_blocks(conn, conversation_id, user_id, enforce_owner):
+                return None
             conn.execute(
                 """
-                INSERT INTO conversations(conversation_id, created_at, updated_at, context_reset_at)
-                VALUES(?, ?, ?, ?)
+                INSERT INTO conversations(conversation_id, created_at, updated_at, context_reset_at, user_id)
+                VALUES(?, ?, ?, ?, ?)
                 ON CONFLICT(conversation_id) DO UPDATE SET
                     updated_at=excluded.updated_at,
-                    context_reset_at=excluded.context_reset_at
+                    context_reset_at=excluded.context_reset_at,
+                    user_id=COALESCE(conversations.user_id, excluded.user_id)
                 """,
-                (conversation_id, now, now, reset_at),
+                (conversation_id, now, now, reset_at, user_id),
             )
             conn.commit()
         finally:
@@ -227,7 +273,7 @@ def set_context_reset(conversation_id: str, ts: Optional[float] = None) -> float
     return reset_at
 
 
-def soft_delete(conversation_id: str) -> None:
+def soft_delete(conversation_id: str, *, user_id: Optional[str] = None, enforce_owner: bool = False) -> None:
     if not conversation_id:
         return
     init_db()
@@ -235,6 +281,8 @@ def soft_delete(conversation_id: str) -> None:
     with _lock:
         conn = get_conn()
         try:
+            if _owner_blocks(conn, conversation_id, user_id, enforce_owner):
+                return
             conn.execute(
                 "UPDATE conversations SET deleted_at = ?, updated_at = ? WHERE conversation_id = ?",
                 (now, now, conversation_id),
@@ -257,8 +305,11 @@ def append_message(
     rewritten_query: Optional[str] = None,
     answer_summary: Optional[str] = None,
     metadata: Any = None,
+    user_id: Optional[str] = None,
+    enforce_owner: bool = False,
 ) -> Optional[str]:
-    """Append one turn. Returns message_id, or None if skipped (empty role/content)."""
+    """Append one turn. Returns message_id, or None if skipped (empty role/content),
+    or None when owner-enforced and the conversation belongs to a different owner."""
     if not conversation_id:
         return None
     role = (role or "").strip()
@@ -266,7 +317,9 @@ def append_message(
     if not role or not content:
         return None
     init_db()
-    ensure_conversation(conversation_id)
+    # Establish/confirm ownership before writing; denied → do not append.
+    if not ensure_conversation(conversation_id, user_id=user_id, enforce_owner=enforce_owner):
+        return None
     now = time.time()
     message_id = uuid.uuid4().hex
     with _lock:
@@ -316,10 +369,15 @@ def get_messages(
     *,
     after_ts: Optional[float] = None,
     limit: Optional[int] = None,
+    user_id: Optional[str] = None,
+    enforce_owner: bool = False,
 ) -> list[dict]:
-    """Return messages for a conversation, oldest first. after_ts filters created_at > after_ts."""
+    """Return messages for a conversation, oldest first. after_ts filters created_at
+    > after_ts. Owner-enforced + not the owner → empty (never another user's data)."""
     if not conversation_id:
         return []
+    if enforce_owner and owner_check(conversation_id, user_id) is not True:
+        return []  # foreign or absent → no data
     init_db()
     sql = (
         "SELECT message_id, conversation_id, role, content, created_at, selected_source_ids, "
@@ -362,14 +420,17 @@ def get_messages(
     return out
 
 
-def delete_messages(conversation_id: str) -> int:
-    """Hard-delete all messages for a conversation. Returns rows removed."""
+def delete_messages(conversation_id: str, *, user_id: Optional[str] = None, enforce_owner: bool = False) -> int:
+    """Hard-delete all messages for a conversation. Returns rows removed.
+    Owner-enforced + a different owner → 0 (nothing deleted)."""
     if not conversation_id:
         return 0
     init_db()
     with _lock:
         conn = get_conn()
         try:
+            if _owner_blocks(conn, conversation_id, user_id, enforce_owner):
+                return 0
             cur = conn.execute(
                 "DELETE FROM conversation_messages WHERE conversation_id = ?",
                 (conversation_id,),

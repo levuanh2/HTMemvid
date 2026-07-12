@@ -69,15 +69,22 @@ def build_recent_conversation_context(
     source_context_hash: Optional[str] = None,
     max_turns: int = 6,
     max_chars: int = 8000,
+    *,
+    user_id: Optional[str] = None,
+    enforce_owner: bool = False,
 ) -> ConversationContext:
     if not conversation_id:
         return _empty(conversation_id)
     try:
         from app.domains.conversation import store as _conv
+        # Owner-enforced: a non-owner sees no context (get_messages returns []),
+        # so this never reads another user's turns.
         conv = _conv.get_conversation(conversation_id)
         reset_at = conv.get("context_reset_at") if conv else None
         # Only turns created after the last Clear-context.
-        msgs = _conv.get_messages(conversation_id, after_ts=reset_at)
+        msgs = _conv.get_messages(
+            conversation_id, after_ts=reset_at, user_id=user_id, enforce_owner=enforce_owner
+        )
     except Exception:
         return _empty(conversation_id)
 

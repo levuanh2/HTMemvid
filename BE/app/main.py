@@ -328,7 +328,8 @@ def _sf_nonempty(cached: Optional[dict]) -> bool:
 
 def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict,
                          *, source_ids: Optional[list] = None,
-                         source_context_hash: Optional[str] = None) -> None:
+                         source_context_hash: Optional[str] = None,
+                         user_id: Optional[str] = None, enforce_owner: bool = False) -> None:
     """Mark a follower job done using the leader's cached result. Atomic done+result
     (mirrors _finalize_query_job) — never sets done without the payload."""
     payload = cached.get("payload") if isinstance(cached, dict) else None
@@ -362,6 +363,7 @@ def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict,
             _save_conversation_turns(
                 session_id, question, str(payload.get("answer")),
                 source_ids=source_ids, source_context_hash=source_context_hash, cited_chunk_ids=cited or None,
+                user_id=user_id, enforce_owner=enforce_owner,
             )
     except Exception:
         pass
@@ -369,7 +371,8 @@ def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict,
 
 def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
                        category: Optional[str], language: Optional[str],
-                       session_id: str) -> dict:
+                       session_id: str, *, user_id: Optional[str] = None,
+                       enforce_owner: bool = False) -> dict:
     """Decide leader/follower/bypass for one query job. Returns:
       {"served": True}                    -> follower finalized from cache (skip graph)
       {"served": False, "lock": (k, tok)} -> leader (run graph, release lock after)
@@ -420,7 +423,7 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
         _SF_METRICS["follower_hit"] += 1
         _SF_METRICS["dup_avoided"] += 1
         _sf_log("singleflight_follower_cache_hit", kind="warm")
-        _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch)
+        _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch, user_id=user_id, enforce_owner=enforce_owner)
         return {"served": True}
 
     token = uuid.uuid4().hex
@@ -449,7 +452,7 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
             _SF_METRICS["follower_hit"] += 1
             _SF_METRICS["dup_avoided"] += 1
             _sf_log("singleflight_follower_cache_hit", kind="leader")
-            _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch)
+            _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch, user_id=user_id, enforce_owner=enforce_owner)
             return {"served": True}
         # Leader vanished (errored/released) without a cached answer → fail open early,
         # but re-check cache once to close the write-then-release race.
@@ -464,7 +467,7 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
                 _SF_METRICS["follower_hit"] += 1
                 _SF_METRICS["dup_avoided"] += 1
                 _sf_log("singleflight_follower_cache_hit", kind="leader_race")
-                _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch)
+                _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch, user_id=user_id, enforce_owner=enforce_owner)
                 return {"served": True}
             break
 
@@ -1036,6 +1039,21 @@ def _current_user_id() -> Optional[str]:
         return None
 
 
+def _require_app_user():
+    """Auth gate for protected app routes. Returns (user_id, error_response).
+
+    Flag OFF → (None, None): allow, open/backward-compatible.
+    Flag ON  → (user_id, None) for a valid token, else (None, 401 response).
+    The ownership resolution here is deliberately OUTSIDE any fail-open block —
+    an auth failure denies (fail-closed), it never downgrades to open."""
+    if not _auth_protect_enabled():
+        return None, None
+    uid = _current_user_id()
+    if not uid:
+        return None, (jsonify({"error": "unauthorized"}), 401)
+    return uid, None
+
+
 def owned_stems(user_id: Optional[str]) -> set:
     """Canonical source stems owned by `user_id`, from the registry.
 
@@ -1375,33 +1393,42 @@ def _save_conversation_turns(
     cited_chunk_ids: Optional[list] = None,
     rewritten_query: Optional[str] = None,
     metadata: Optional[dict] = None,
+    user_id: Optional[str] = None,
+    enforce_owner: bool = False,
 ) -> None:
     """Persist a user+assistant turn pair to the conversation store. Best-effort:
-    a DB failure must never break /query (fail-open). Gated on the feature flag."""
+    a DB failure must never break /query (fail-open). Gated on the feature flag.
+    When owner-enforced without a user, skip (never write NULL-owned protected rows)."""
     if not _conversation_enabled():
         return
     if not session_id or not (answer or "").strip():
         return
+    if enforce_owner and not user_id:
+        return  # flag on + no authenticated user → do not persist
     try:
         from app.domains.conversation import store as _conv
         _conv.append_message(
             session_id, "user", question,
             selected_source_ids=source_ids, source_context_hash=source_context_hash,
+            user_id=user_id, enforce_owner=enforce_owner,
         )
         _conv.append_message(
             session_id, "assistant", str(answer),
             selected_source_ids=source_ids, source_context_hash=source_context_hash,
             cited_chunk_ids=cited_chunk_ids, rewritten_query=rewritten_query,
             answer_summary=str(answer)[:300], metadata=metadata,
+            user_id=user_id, enforce_owner=enforce_owner,
         )
     except Exception:
         pass
 
 
-def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> None:
+def _finalize_query_job(jid: str, session_id: str, question: str, out: dict,
+                        *, user_id: Optional[str] = None, enforce_owner: bool = False) -> None:
     """Trích payload/status từ kết quả graph → cập nhật query_jobs/jobs_store + persist history.
 
-    Dùng chung cho /query và /query-resume.
+    Dùng chung cho /query và /query-resume. user_id/enforce_owner scope the
+    conversation-turn persistence to the caller (Phase B).
     """
     raw_pl = out.get("payload")
     payload = dict(raw_pl) if isinstance(raw_pl, dict) else {}
@@ -1456,6 +1483,7 @@ def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> 
                 source_ids=src, source_context_hash=sch, cited_chunk_ids=cited or None,
                 rewritten_query=(_rewritten if _rewritten and _rewritten != question else None),
                 metadata={"context_mode": _mode, "context_signature": out.get("context_signature")},
+                user_id=user_id, enforce_owner=enforce_owner,
             )
     except Exception:
         pass
@@ -1849,16 +1877,23 @@ def query():
     job_id = str(uuid.uuid4())
     if not session_id:
         session_id = str(uuid.uuid4())
+    # Auth Hardening Phase B: capture the caller identity NOW (request context;
+    # the query runs in a thread with no request). /query itself is NOT gated in
+    # Phase B — but with the flag on, conversation persistence/read is owner-scoped,
+    # and with no authenticated user we skip it entirely (no NULL-owned rows).
+    req_user_id = _current_user_id()
+    conv_enforce = _auth_protect_enabled()
     # Conversation Context Layer: ensure the conversation row exists (flag-gated, fail-open).
-    if _conversation_enabled():
+    if _conversation_enabled() and not (conv_enforce and not req_user_id):
         try:
             from app.domains.conversation import store as _conv
-            _conv.ensure_conversation(session_id, active_source_scope=selected_sources or [])
+            _conv.ensure_conversation(session_id, active_source_scope=selected_sources or [],
+                                      user_id=req_user_id, enforce_owner=conv_enforce)
         except Exception:
             pass
     try:
         from app.domains.jobs.jobs_store import create_job as _js_create
-        _js_create(job_id, job_type="query", status="pending", progress=0, current_node="Queued", user_id=_current_user_id())
+        _js_create(job_id, job_type="query", status="pending", progress=0, current_node="Queued", user_id=req_user_id)
     except Exception:
         pass
     with query_jobs_lock:
@@ -1883,7 +1918,7 @@ def query():
             # Phase 3 single-flight: coalesce duplicate/equivalent concurrent queries.
             # Fail-open — leader runs the graph below; follower served from cache returns here.
             try:
-                _sf = _single_flight_try(jid, question, sources, use_mem, category, language, session_id)
+                _sf = _single_flight_try(jid, question, sources, use_mem, category, language, session_id, user_id=req_user_id, enforce_owner=conv_enforce)
             except Exception:
                 _sf = {"served": False, "lock": None}  # single-flight must never break the answer path
             if _sf.get("served"):
@@ -1907,7 +1942,7 @@ def query():
             # across documents and respects Clear-context. Fail-open to the legacy history.
             conv_ctx = None
             conv_sch = None
-            if _conversation_enabled():
+            if _conversation_enabled() and not (conv_enforce and not req_user_id):
                 try:
                     conv_sch = llm_cache.source_context_hash(sources or [], language, category, bool(use_mem))
                 except Exception:
@@ -1916,6 +1951,7 @@ def query():
                     from app.domains.conversation.context_builder import build_recent_conversation_context
                     conv_ctx = build_recent_conversation_context(
                         session_id, selected_sources=sources or [], source_context_hash=conv_sch,
+                        user_id=req_user_id, enforce_owner=conv_enforce,
                     )
                     if not conv_ctx.is_empty:
                         history = [{"role": t["role"], "content": t["content"]} for t in conv_ctx.turns]
@@ -1978,7 +2014,7 @@ def query():
             if review is not None:
                 _mark_query_interrupted(jid, review)
                 return
-            _finalize_query_job(jid, session_id, question, out)
+            _finalize_query_job(jid, session_id, question, out, user_id=req_user_id, enforce_owner=conv_enforce)
         except Exception as exc:
             err_txt = _job_error_text(exc)
             with query_jobs_lock:
@@ -2074,6 +2110,10 @@ def query_resume(job_id: str):
                 query_jobs[job_id]["status"] = "interrupted"
         return _admission_rejected_response()
 
+    # Capture caller identity in request context (resume_job runs in a thread).
+    resume_uid = _current_user_id()
+    resume_enforce = _auth_protect_enabled()
+
     def resume_job() -> None:
         try:
             from langgraph.types import Command
@@ -2082,7 +2122,7 @@ def query_resume(job_id: str):
             if review is not None:
                 _mark_query_interrupted(job_id, review)
                 return
-            _finalize_query_job(job_id, session_id, question, out)
+            _finalize_query_job(job_id, session_id, question, out, user_id=resume_uid, enforce_owner=resume_enforce)
         except Exception as exc:
             err_txt = _job_error_text(exc)
             with query_jobs_lock:
@@ -2235,9 +2275,17 @@ def clear_conversation_context(conversation_id: str):
     """Clear context: stop using older turns from now on. Keeps messages in the DB."""
     if not _conversation_enabled():
         return jsonify({"ok": False, "error": "conversation_context_disabled"}), 404
+    uid, err = _require_app_user()
+    if err:
+        return err
+    enforce = _auth_protect_enabled()
     try:
         from app.domains.conversation import store as _conv
-        reset_at = _conv.set_context_reset(conversation_id)
+        if enforce and _conv.owner_check(conversation_id, uid) is False:
+            return jsonify({"ok": False, "error": "not_found"}), 404  # owner mismatch → no oracle
+        reset_at = _conv.set_context_reset(conversation_id, user_id=uid, enforce_owner=enforce)
+        if enforce and reset_at is None:
+            return jsonify({"ok": False, "error": "not_found"}), 404
         return jsonify({"ok": True, "conversation_id": conversation_id, "context_reset_at": reset_at})
     except Exception as e:
         logging.exception("[conversation] clear-context failed: %s", e)
@@ -2249,10 +2297,16 @@ def delete_conversation(conversation_id: str):
     """Delete chat history: hard-delete this conversation's messages (storage-saving)."""
     if not _conversation_enabled():
         return jsonify({"ok": False, "error": "conversation_context_disabled"}), 404
+    uid, err = _require_app_user()
+    if err:
+        return err
+    enforce = _auth_protect_enabled()
     try:
         from app.domains.conversation import store as _conv
-        removed = _conv.delete_messages(conversation_id)
-        _conv.soft_delete(conversation_id)
+        if enforce and _conv.owner_check(conversation_id, uid) is False:
+            return jsonify({"ok": False, "error": "not_found"}), 404  # owner mismatch → no oracle
+        removed = _conv.delete_messages(conversation_id, user_id=uid, enforce_owner=enforce)
+        _conv.soft_delete(conversation_id, user_id=uid, enforce_owner=enforce)
         return jsonify({"ok": True, "conversation_id": conversation_id, "removed": removed})
     except Exception as e:
         logging.exception("[conversation] delete failed: %s", e)
@@ -2264,9 +2318,15 @@ def get_conversation_messages(conversation_id: str):
     """Return this conversation's messages (for restoring the chat UI)."""
     if not _conversation_enabled():
         return jsonify({"conversation_id": conversation_id, "messages": []}), 404
+    uid, err = _require_app_user()
+    if err:
+        return err
+    enforce = _auth_protect_enabled()
     try:
         from app.domains.conversation import store as _conv
-        msgs = _conv.get_messages(conversation_id)
+        if enforce and _conv.owner_check(conversation_id, uid) is False:
+            return jsonify({"error": "not_found"}), 404  # owner mismatch → no oracle
+        msgs = _conv.get_messages(conversation_id, user_id=uid, enforce_owner=enforce)
         return jsonify({"conversation_id": conversation_id, "messages": msgs})
     except Exception as e:
         logging.exception("[conversation] get-messages failed: %s", e)

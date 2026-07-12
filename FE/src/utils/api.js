@@ -1,4 +1,7 @@
-const API = import.meta.env.VITE_API_URL;
+// Base URL: support both env names. `VITE_API_URL` is what this file has always
+// read; `VITE_API_BASE` is what the Docker build sets — accept either so the FE
+// reaches the backend in every environment. DEV falls back to localhost:8080.
+const API = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE;
 
 export const apiUrl = (path) => {
   let base = String(API ?? "")

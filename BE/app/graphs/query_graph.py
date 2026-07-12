@@ -222,19 +222,23 @@ def build_query_graph(
             selected_sources = state.get("selected_sources") or []
             f_category = state.get("category") or None
             f_language = state.get("language") or None
+            # Conversation Context Layer: retrieve with the rewritten standalone question
+            # when present (resolves "nó"/"phần đó" for better recall); the original q is
+            # kept in state for answer generation. Retrieval cache keys on this same query.
+            retrieve_q = (state.get("standalone_question") or "").strip() or state["q"]
 
             def _do_hybrid_retrieve():
-                # Tier 3: retrieval cache (Redis, fail-open) — key theo state["q"] tại
-                # thời điểm gọi nên đúng cả khi CRAG rewrite câu hỏi. Xem docs/SEMANTIC_CACHE_SPEC.md.
+                # Tier 3: retrieval cache (Redis, fail-open) — key theo retrieve_q tại
+                # thời điểm gọi nên đúng cả khi CRAG/rewrite đổi câu hỏi. Xem docs/SEMANTIC_CACHE_SPEC.md.
                 cached = llm_cache.retrieval_get(
-                    state["q"], selected_sources, RETRIEVE_TOP_K, f_category, f_language
+                    retrieve_q, selected_sources, RETRIEVE_TOP_K, f_category, f_language
                 )
                 if cached is not None:
                     return cached
                 if USE_LC_ENSEMBLE:
                     out = hybrid_retrieve_with_ensemble(
                         retriever,
-                        state["q"],
+                        retrieve_q,
                         selected_sources=selected_sources,
                         top_k=RETRIEVE_TOP_K,
                         category=f_category,
@@ -242,14 +246,14 @@ def build_query_graph(
                     )
                 else:
                     out = retriever.retrieve(
-                        state["q"],
+                        retrieve_q,
                         selected_sources=selected_sources,
                         top_k=RETRIEVE_TOP_K,
                         category=f_category,
                         language=f_language,
                     )
                 llm_cache.retrieval_put(
-                    state["q"], selected_sources, RETRIEVE_TOP_K, f_category, f_language, out
+                    retrieve_q, selected_sources, RETRIEVE_TOP_K, f_category, f_language, out
                 )
                 return out
 

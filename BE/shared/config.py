@@ -105,6 +105,11 @@ class Settings:
     supervisor_enabled: bool = False
     hitl_enabled: bool = False
 
+    # --- Conversation Context Layer (follow-up awareness) ---
+    # Mặc định OFF → /query hành xử y hệt hôm nay. Khi bật: lưu turn hội thoại,
+    # dựng ngữ cảnh source-scoped, viết lại câu follow-up trước khi retrieve.
+    conversation_context_enabled: bool = False
+
     # --- Rerank (Two-Stage Retrieval — Stage 2 / Precision) ---
     # Mặc định OFF → pipeline y hệt cũ. Khi bật: Stage 1 lấy rerank_candidate_k
     # ứng viên (rộng), cross-encoder lọc xuống rerank_top_n (= hybrid_top_k nếu 0).
@@ -175,6 +180,7 @@ class Settings:
             crag_rewrite_max=_int("CRAG_REWRITE_MAX", 1),
             supervisor_enabled=_flag("SUPERVISOR_ENABLED", "0"),
             hitl_enabled=_flag("HITL_ENABLED", "0"),
+            conversation_context_enabled=_flag("CONVERSATION_CONTEXT_ENABLED", "0"),
             rerank_enabled=_flag("RERANK_ENABLED", "0"),
             rerank_backend=os.getenv("RERANK_BACKEND", "cross_encoder"),
             rerank_model=os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),

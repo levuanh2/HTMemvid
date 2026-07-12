@@ -60,6 +60,12 @@ services:
       RQ_JOB_TIMEOUT_SEC: "${RQ_JOB_TIMEOUT_SEC:-1800}"
       JOBS_DB_PATH: "${JOBS_DB_PATH:-/app/memory/jobs.sqlite}"
       LOG_DB_PATH: "${LOG_DB_PATH:-/app/memory/logs.sqlite}"
+      # Auth MVP (Bearer token). Do NOT hardcode a real secret here — pass AUTH_SECRET
+      # from the host/deploy env. Empty in dev → ephemeral per-process secret.
+      AUTH_SECRET: "${AUTH_SECRET:-}"
+      AUTH_REQUIRE_SECRET: "${AUTH_REQUIRE_SECRET:-false}"
+      AUTH_TOKEN_TTL_SEC: "${AUTH_TOKEN_TTL_SEC:-604800}"
+      USERS_DB_PATH: "${USERS_DB_PATH:-/app/memory/users.sqlite}"
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"

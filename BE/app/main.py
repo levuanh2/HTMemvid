@@ -67,6 +67,13 @@ except Exception:
     _jobs_migrate_from_dict = None
     _jobs_mark_interrupted = None
 
+# Auth MVP user store (idempotent). Bearer-token auth; existing app APIs stay open.
+try:
+    from app.domains.auth.users_store import init_db as _users_init_db
+    _users_init_db()
+except Exception:
+    _users_init_db = None
+
 # Debug log AI mode (không in ra API key thật)
 print("=== AI MODE ===")
 print("OLLAMA_HOST:", os.getenv("OLLAMA_HOST"))
@@ -85,7 +92,8 @@ CORS(
     app,
     resources={r"/*": {"origins": _cors_origins}},
     methods=["GET", "POST", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    # "Authorization" for Bearer-token auth (no cookie credentials in this phase).
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
@@ -681,6 +689,67 @@ def health():
     if err:
         payload["query_graph_error"] = err[:800]
     return jsonify(payload), 200
+
+
+# -------------------------
+# 🔐 Auth MVP (Bearer token) — register / login / logout / me
+# Additive; existing app APIs stay OPEN in this phase (no @require_auth applied).
+# -------------------------
+@app.post('/auth/register')
+def auth_register():
+    from app.domains.auth import service as _auth
+    from app.domains.auth import tokens as _tokens
+    from app.domains.auth import users_store as _users
+    data = request.json or {}
+    email = data.get("email") or ""
+    password = data.get("password") or ""
+    display_name = data.get("display_name")
+    if not _auth.valid_email(email):
+        return jsonify({"error": "invalid_email"}), 400
+    if not _auth.valid_password(password):
+        return jsonify({"error": "weak_password", "message": "Mật khẩu cần ít nhất 8 ký tự."}), 400
+    try:
+        user = _users.create_user(email, password, display_name)
+    except _users.EmailExistsError:
+        return jsonify({"error": "email_exists"}), 409
+    token = _tokens.make_token(user)
+    return jsonify({"token": token, "user": _auth.public_user(user)}), 201
+
+
+@app.post('/auth/login')
+def auth_login():
+    from app.domains.auth import service as _auth
+    from app.domains.auth import tokens as _tokens
+    from app.domains.auth import users_store as _users
+    data = request.json or {}
+    email = data.get("email") or ""
+    password = data.get("password") or ""
+    # Reuse the Phase-4 token-bucket limiter (off by default; fail-open).
+    allowed, retry_after = _rate_limit_check(f"login:{_client_ip()}")
+    if not allowed:
+        return _rate_limited_response(retry_after)
+    user = _users.verify_password(email, password)
+    if user is None:
+        # Generic error — no user enumeration.
+        return jsonify({"error": "invalid_credentials"}), 401
+    token = _tokens.make_token(user)
+    return jsonify({"token": token, "user": _auth.public_user(user)}), 200
+
+
+@app.post('/auth/logout')
+def auth_logout():
+    # Stateless: the client drops the token. (No token_version bump = not logout-all.)
+    return jsonify({"ok": True}), 200
+
+
+@app.get('/auth/me')
+def auth_me():
+    from app.domains.auth import service as _auth
+    user = _auth.current_user_from_request()
+    if user is None:
+        return jsonify({"error": "unauthorized"}), 401
+    return jsonify({"user": _auth.public_user(user)}), 200
+
 
 @app.get('/stats')
 def stats():

@@ -33,6 +33,13 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    # Additive migration (Auth Hardening Phase A): owner column, nullable.
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(summaries)").fetchall()}
+    if "user_id" not in cols:
+        conn.execute("ALTER TABLE summaries ADD COLUMN user_id TEXT")
+
+
 def init_db() -> None:
     with _lock:
         conn = get_conn()
@@ -44,11 +51,14 @@ def init_db() -> None:
                     content_hash TEXT,
                     sources_json TEXT,
                     created_at TEXT,
-                    record_json TEXT
+                    record_json TEXT,
+                    user_id TEXT
                 );
                 """
             )
+            _ensure_columns(conn)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sum_hash ON summaries(content_hash)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sum_user ON summaries(user_id, content_hash)")
             conn.commit()
         finally:
             conn.close()
@@ -88,7 +98,7 @@ def _decode_record(raw: str | None) -> Optional[dict]:
     return data if isinstance(data, dict) else None
 
 
-def save_record(record: dict) -> None:
+def save_record(record: dict, user_id: Optional[str] = None) -> None:
     init_db()
     normalized = _normalized_record(record)
     with _lock:
@@ -96,8 +106,8 @@ def save_record(record: dict) -> None:
         try:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO summaries(id, content_hash, sources_json, created_at, record_json)
-                VALUES(?,?,?,?,?)
+                INSERT OR REPLACE INTO summaries(id, content_hash, sources_json, created_at, record_json, user_id)
+                VALUES(?,?,?,?,?,?)
                 """,
                 (
                     str(normalized.get("id") or ""),
@@ -105,6 +115,7 @@ def save_record(record: dict) -> None:
                     json.dumps(normalized.get("sources") or [], ensure_ascii=False),
                     _created_at(normalized),
                     json.dumps(normalized, ensure_ascii=False),
+                    user_id,
                 ),
             )
             conn.commit()

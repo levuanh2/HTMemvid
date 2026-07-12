@@ -65,7 +65,8 @@ def init_db() -> None:
                     context_reset_at    REAL,
                     deleted_at          REAL,
                     title               TEXT,
-                    active_source_scope TEXT
+                    active_source_scope TEXT,
+                    user_id             TEXT
                 )
                 """
             )
@@ -90,9 +91,20 @@ def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_cmsg_conv_created "
                 "ON conversation_messages(conversation_id, created_at)"
             )
+            _ensure_columns(conn)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(user_id, conversation_id)"
+            )
             conn.commit()
         finally:
             conn.close()
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    # Additive migration (Auth Hardening Phase A): owner column, nullable.
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()}
+    if "user_id" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN user_id TEXT")
 
 
 # ---- config helpers (mirror sessions_store env knobs) -----------------------
@@ -131,8 +143,12 @@ def _loads(raw: Optional[str], default: Any) -> Any:
 
 # ---- conversations ----------------------------------------------------------
 
-def ensure_conversation(conversation_id: str, *, active_source_scope: Any = None) -> None:
-    """Create the conversation row if absent (idempotent). Bumps updated_at."""
+def ensure_conversation(conversation_id: str, *, active_source_scope: Any = None, user_id: Optional[str] = None) -> None:
+    """Create the conversation row if absent (idempotent). Bumps updated_at.
+
+    First writer establishes ownership: user_id is set on INSERT and preserved
+    (COALESCE) on conflict — an existing owner is never overwritten. Ownership is
+    not yet enforced on reads/mutations (Phase B)."""
     if not conversation_id:
         return
     init_db()
@@ -143,13 +159,14 @@ def ensure_conversation(conversation_id: str, *, active_source_scope: Any = None
         try:
             conn.execute(
                 """
-                INSERT INTO conversations(conversation_id, created_at, updated_at, active_source_scope)
-                VALUES(?, ?, ?, ?)
+                INSERT INTO conversations(conversation_id, created_at, updated_at, active_source_scope, user_id)
+                VALUES(?, ?, ?, ?, ?)
                 ON CONFLICT(conversation_id) DO UPDATE SET
                     updated_at=excluded.updated_at,
-                    active_source_scope=COALESCE(excluded.active_source_scope, conversations.active_source_scope)
+                    active_source_scope=COALESCE(excluded.active_source_scope, conversations.active_source_scope),
+                    user_id=COALESCE(conversations.user_id, excluded.user_id)
                 """,
-                (conversation_id, now, now, scope),
+                (conversation_id, now, now, scope, user_id),
             )
             conn.commit()
         finally:
@@ -165,7 +182,7 @@ def get_conversation(conversation_id: str) -> Optional[dict]:
         try:
             row = conn.execute(
                 "SELECT conversation_id, created_at, updated_at, context_reset_at, deleted_at, "
-                "title, active_source_scope FROM conversations WHERE conversation_id = ?",
+                "title, active_source_scope, user_id FROM conversations WHERE conversation_id = ?",
                 (conversation_id,),
             ).fetchone()
         finally:
@@ -180,6 +197,7 @@ def get_conversation(conversation_id: str) -> Optional[dict]:
         "deleted_at": row[4],
         "title": row[5],
         "active_source_scope": _loads(row[6], None),
+        "user_id": row[7] if len(row) > 7 else None,
     }
 
 

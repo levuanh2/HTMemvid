@@ -46,6 +46,10 @@ def _ensure_job_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE jobs ADD COLUMN token_buffer TEXT DEFAULT ''")
     if "cancel_requested" not in cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN cancel_requested INT DEFAULT 0")
+    # Auth Hardening Phase A: owner column, nullable (unenforced this phase).
+    if "user_id" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN user_id TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id)")
 
 
 def init_db() -> None:
@@ -77,17 +81,17 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def create_job(job_id: str, job_type: str, status: str = "pending", progress: int = 0, current_node: str = "") -> None:
+def create_job(job_id: str, job_type: str, status: str = "pending", progress: int = 0, current_node: str = "", user_id: Optional[str] = None) -> None:
     init_db()
     with _lock:
         conn = get_conn()
         try:
             conn.execute(
                 """
-                INSERT OR IGNORE INTO jobs(job_id, job_type, status, progress, current_node, created_at, updated_at)
-                VALUES(?,?,?,?,?,?,?)
+                INSERT OR IGNORE INTO jobs(job_id, job_type, status, progress, current_node, created_at, updated_at, user_id)
+                VALUES(?,?,?,?,?,?,?,?)
                 """,
-                (job_id, job_type, status, int(progress), current_node, _now(), _now()),
+                (job_id, job_type, status, int(progress), current_node, _now(), _now(), user_id),
             )
             conn.commit()
         finally:
@@ -139,7 +143,7 @@ def get_job(job_id: str) -> Optional[dict]:
         conn = get_conn()
         try:
             cur = conn.execute(
-                "SELECT job_id, job_type, status, progress, current_node, created_at, updated_at, result_json, error_text, token_buffer, cancel_requested FROM jobs WHERE job_id=?",
+                "SELECT job_id, job_type, status, progress, current_node, created_at, updated_at, result_json, error_text, token_buffer, cancel_requested, user_id FROM jobs WHERE job_id=?",
                 (job_id,),
             )
             row = cur.fetchone()
@@ -163,6 +167,7 @@ def get_job(job_id: str) -> Optional[dict]:
                 "error": row[8],
                 "token_buffer": row[9] if len(row) > 9 and row[9] is not None else "",
                 "cancel_requested": bool(row[10]) if len(row) > 10 and row[10] is not None else False,
+                "user_id": row[11] if len(row) > 11 else None,
             }
             return job
         finally:

@@ -854,7 +854,7 @@ def rebuild_index_from_video():
     # separate process is visible to /rebuild-status (in-mem `jobs` dict is per-process).
     if _jobs_create_job is not None:
         try:
-            _jobs_create_job(job_id, job_type="rebuild", status="pending", progress=0, current_node="Queued")
+            _jobs_create_job(job_id, job_type="rebuild", status="pending", progress=0, current_node="Queued", user_id=_current_user_id())
         except Exception:
             pass
 
@@ -1016,10 +1016,65 @@ def _save_source_registry(registry: Dict[str, Dict]) -> None:
         print(f"⚠️ Không thể lưu source_registry.json: {exc}")
 
 
+# -------------------------
+# 🔐 Auth Hardening Phase A — ownership helpers (UNENFORCED this phase).
+# Flag default OFF; helpers are wired to storage (registry/jobs) but no route
+# changes its auth/scoping behavior yet. See the auth-hardening plan.
+# -------------------------
+def _auth_protect_enabled() -> bool:
+    return (os.getenv("AUTH_PROTECT_APP_APIS", "false") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _current_user_id() -> Optional[str]:
+    """Resolve the caller's user_id from the Bearer token, or None. Fail-safe:
+    any error → None (never raises into a route)."""
+    try:
+        from app.domains.auth import service as _auth
+        user = _auth.current_user_from_request()
+        return user.get("user_id") if user else None
+    except Exception:
+        return None
+
+
+def owned_stems(user_id: Optional[str]) -> set:
+    """Canonical source stems owned by `user_id`, from the registry.
+
+    When AUTH_PROTECT_APP_APIS is OFF, legacy/None-owner rows are included (today's
+    open behavior). When ON, only rows whose user_id matches are returned (and, for
+    a None user_id, nothing) — the fail-closed base the later phases enforce."""
+    try:
+        registry = _load_source_registry()
+    except Exception:
+        return set()
+    protect = _auth_protect_enabled()
+    out: set = set()
+    for row in registry.values():
+        if not isinstance(row, dict):
+            continue
+        stem = row.get("source_stem")
+        if not stem:
+            continue
+        owner = row.get("user_id")
+        if protect:
+            if user_id is not None and owner == user_id:
+                out.add(stem)
+        else:
+            # open mode: everything visible (owner filter is a no-op)
+            out.add(stem)
+    return out
+
+
+def user_data_root(user_id: Optional[str]) -> "Path":
+    """Physical-ready seam. Returns the CURRENT global data root today; a future
+    physical-partition phase swaps this to DATA_DIR/users/<user_id>/ without
+    touching call sites."""
+    return Path(DATA_DIR_DEFAULT)
+
+
 def _update_source_status(
-    source_id: str, 
-    status: str, 
-    progress: float = None, 
+    source_id: str,
+    status: str,
+    progress: float = None,
     error: Optional[str] = None,
     substatus: Optional[str] = None,
     capabilities: Optional[Dict[str, bool]] = None
@@ -1489,7 +1544,7 @@ def _trigger_background_ingest(source_id: str, file_path: str, filename: str):
 
     job_id = source_id  # re-use source_id làm job_id để FE polling đơn giản
     try:
-        _jobs_create_job(job_id, job_type="ingest", status="pending", progress=0, current_node="Queued")
+        _jobs_create_job(job_id, job_type="ingest", status="pending", progress=0, current_node="Queued", user_id=_current_user_id())
     except Exception:
         pass
 
@@ -1598,6 +1653,8 @@ def _ingest_uploaded_file(file) -> dict:
         "status": "processing",
         "progress": 0.0,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        # Auth Hardening Phase A: owner stamp (None when no token). Unenforced this phase.
+        "user_id": _current_user_id(),
     }
     _save_source_registry(registry)
     _trigger_background_ingest(source_id, save_path, filename)
@@ -1801,7 +1858,7 @@ def query():
             pass
     try:
         from app.domains.jobs.jobs_store import create_job as _js_create
-        _js_create(job_id, job_type="query", status="pending", progress=0, current_node="Queued")
+        _js_create(job_id, job_type="query", status="pending", progress=0, current_node="Queued", user_id=_current_user_id())
     except Exception:
         pass
     with query_jobs_lock:
@@ -2128,7 +2185,7 @@ def _start_summary_job(source_names: list[str], mm_input: dict, content_hash: st
     (/summary-status) unchanged; result still in summary_store."""
     job_id = str(uuid.uuid4())
     from app.domains.jobs.jobs_store import create_job
-    create_job(job_id, job_type="summary", status="pending", progress=0, current_node="Queued")
+    create_job(job_id, job_type="summary", status="pending", progress=0, current_node="Queued", user_id=_current_user_id())
     from app.jobs.queue import enqueue_job
     res = enqueue_job(run_summary_job,
                       args=(job_id, source_names, mm_input, content_hash, length_mode),
@@ -2405,7 +2462,7 @@ def _start_mindmap_job(source_names: list[str], mm_input: dict, content_hash: st
     (/mindmap-status) unchanged; result still in mindmap_store."""
     job_id = str(uuid.uuid4())
     from app.domains.jobs.jobs_store import create_job
-    create_job(job_id, job_type="mindmap", status="pending", progress=0, current_node="Queued")
+    create_job(job_id, job_type="mindmap", status="pending", progress=0, current_node="Queued", user_id=_current_user_id())
     from app.jobs.queue import enqueue_job
     res = enqueue_job(run_mindmap_job,
                       args=(job_id, source_names, mm_input, content_hash),

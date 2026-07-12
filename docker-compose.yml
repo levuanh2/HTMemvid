@@ -63,6 +63,8 @@ services:
       # Conversation Context Layer (default OFF; conversation DB on the shared memory volume).
       CONVERSATION_CONTEXT_ENABLED: "${CONVERSATION_CONTEXT_ENABLED:-false}"
       CONVERSATIONS_DB_PATH: "${CONVERSATIONS_DB_PATH:-/app/memory/conversations.sqlite}"
+      # Multi-user API protection (Auth Hardening). Default OFF = app APIs stay open.
+      AUTH_PROTECT_APP_APIS: "${AUTH_PROTECT_APP_APIS:-false}"
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"

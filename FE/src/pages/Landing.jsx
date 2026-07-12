@@ -1,6 +1,7 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "../components/ui/Icon";
 import { useTheme } from "../hooks/useTheme";
+import { useAuth } from "../auth/useAuth";
 
 // Landing — public marketing page (route "/").
 // Built entirely from the existing "Phòng đọc" design system (giấy dó paper +
@@ -85,7 +86,10 @@ function ChatBubble({ role, children }) {
 
 export default function Landing() {
   const { isDark, toggleTheme } = useTheme();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const scrollTo = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const onLogout = async () => { await logout(); navigate("/"); };
 
   return (
     <div className="h-screen overflow-y-auto" style={{ background: "var(--bg-base)" }}>
@@ -106,8 +110,17 @@ export default function Landing() {
           <button onClick={toggleTheme} className="icon-btn w-8 h-8" aria-label="Đổi giao diện sáng/tối" title="Sáng/tối">
             <Icon name={isDark ? "Sun" : "Moon"} size={15} />
           </button>
-          <Link to="/login" className="btn-secondary !py-1.5 !text-[13px] hidden sm:inline-flex">Đăng nhập</Link>
-          <Link to="/register" className="btn-seal !py-1.5 !text-[13px]">Bắt đầu</Link>
+          {user ? (
+            <>
+              <button onClick={onLogout} className="btn-secondary !py-1.5 !text-[13px] hidden sm:inline-flex">Đăng xuất</button>
+              <Link to="/app" className="btn-seal !py-1.5 !text-[13px]">Vào workspace</Link>
+            </>
+          ) : (
+            <>
+              <Link to="/login" className="btn-secondary !py-1.5 !text-[13px] hidden sm:inline-flex">Đăng nhập</Link>
+              <Link to="/register" className="btn-seal !py-1.5 !text-[13px]">Bắt đầu</Link>
+            </>
+          )}
         </nav>
       </header>
 
@@ -122,7 +135,11 @@ export default function Landing() {
             Upload tài liệu, hỏi đáp bám nguồn, tóm tắt, tạo mindmap và tiếp tục hỏi bằng ngữ cảnh hội thoại.
           </p>
           <div className="flex flex-wrap gap-3 mt-7">
-            <Link to="/register" className="btn-seal inline-flex items-center gap-2">Bắt đầu miễn phí <Icon name="ArrowRight" size={16} /></Link>
+            {user ? (
+              <Link to="/app" className="btn-seal inline-flex items-center gap-2">Vào workspace <Icon name="ArrowRight" size={16} /></Link>
+            ) : (
+              <Link to="/register" className="btn-seal inline-flex items-center gap-2">Bắt đầu miễn phí <Icon name="ArrowRight" size={16} /></Link>
+            )}
             <button onClick={() => scrollTo("demo")} className="btn-secondary">Xem demo</button>
           </div>
         </div>
@@ -243,8 +260,14 @@ export default function Landing() {
         <div className="max-w-[1080px] mx-auto px-5 sm:px-8 py-16 text-center">
           <h2 className="font-display text-[26px] sm:text-[32px] font-semibold text-text-primary mb-4">Bắt đầu học với tài liệu của bạn</h2>
           <div className="flex flex-wrap gap-3 justify-center">
-            <Link to="/register" className="btn-seal inline-flex items-center gap-2">Bắt đầu miễn phí <Icon name="ArrowRight" size={16} /></Link>
-            <Link to="/login" className="btn-secondary">Đăng nhập</Link>
+            {user ? (
+              <Link to="/app" className="btn-seal inline-flex items-center gap-2">Vào workspace <Icon name="ArrowRight" size={16} /></Link>
+            ) : (
+              <>
+                <Link to="/register" className="btn-seal inline-flex items-center gap-2">Bắt đầu miễn phí <Icon name="ArrowRight" size={16} /></Link>
+                <Link to="/login" className="btn-secondary">Đăng nhập</Link>
+              </>
+            )}
           </div>
         </div>
       </section>

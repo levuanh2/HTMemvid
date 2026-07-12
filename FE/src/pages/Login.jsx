@@ -1,30 +1,40 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "../components/ui/Icon";
+import Spinner from "../components/ui/Spinner";
 import { isValidEmail, isValidPassword } from "../auth/validate";
+import { safeNext } from "../auth/authRedirect";
+import { useAuth } from "../auth/useAuth";
 
-// Login — Phase 1 VISUAL PLACEHOLDER.
-// No real authentication yet: on a valid-looking submit we just navigate to /app.
-// Backend auth (POST /auth/login) + AuthContext land in Phase 2/3. Do not treat
-// this as secure.
 export default function Login() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = safeNext(params.get("next"));
+  const { user, loading, login, error, setError } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const onSubmit = (e) => {
+  // Already signed in → skip the form.
+  if (!loading && user) return <Navigate to={next} replace />;
+
+  const onSubmit = async (e) => {
     e.preventDefault();
     if (!isValidEmail(email)) return setError("Email chưa hợp lệ.");
     if (!isValidPassword(password)) return setError("Mật khẩu cần ít nhất 8 ký tự.");
-    setError("");
-    // Phase 1: no backend — go straight to the workspace.
-    navigate("/app");
+    setSubmitting(true);
+    try {
+      await login(email, password);
+      navigate(next, { replace: true });
+    } catch {
+      // error is surfaced via context.error
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <div className="h-screen overflow-y-auto flex items-center justify-center px-5 py-10"
-      style={{ background: "var(--bg-base)" }}>
+    <div className="h-screen overflow-y-auto flex items-center justify-center px-5 py-10" style={{ background: "var(--bg-base)" }}>
       <div className="w-full max-w-[400px]">
         <Link to="/" className="inline-flex items-center gap-1.5 text-[13px] text-text-muted hover:text-brand mb-6 transition-theme">
           <Icon name="ArrowLeft" size={14} /> Về trang chủ
@@ -57,18 +67,18 @@ export default function Login() {
               </div>
             )}
 
-            <button type="submit" className="btn-seal w-full mt-1">Đăng nhập</button>
+            <button type="submit" disabled={submitting}
+              className="btn-seal w-full mt-1 inline-flex items-center justify-center gap-2 disabled:opacity-60">
+              {submitting ? <><Spinner size={14} /> Đang đăng nhập…</> : "Đăng nhập"}
+            </button>
           </form>
 
           <p className="text-[13px] text-text-secondary text-center mt-5">
             Chưa có tài khoản?{" "}
-            <Link to="/register" className="text-brand font-medium hover:underline">Tạo tài khoản</Link>
+            <Link to={`/register${params.get("next") ? `?next=${encodeURIComponent(params.get("next"))}` : ""}`}
+              className="text-brand font-medium hover:underline">Tạo tài khoản</Link>
           </p>
         </div>
-
-        <p className="text-[11px] text-text-muted text-center mt-4 font-mono">
-          Bản xem trước · xác thực thật sẽ có ở giai đoạn sau
-        </p>
       </div>
     </div>
   );

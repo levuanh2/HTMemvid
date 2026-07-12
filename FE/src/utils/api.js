@@ -15,8 +15,66 @@ export const apiUrl = (path) => {
   return base ? `${base}${p}` : p;
 };
 
+import { getToken, clearToken } from "../auth/tokenStore";
+
+// apiFetch — attaches `Authorization: Bearer <token>` when a token exists and the
+// caller hasn't already set one. Only the Authorization header is added; body,
+// method and any caller headers (incl. multipart Content-Type for uploads) are
+// left untouched, so existing query/upload/summary/mindmap calls are unchanged.
 export const apiFetch = (path, options = {}) => {
-  return fetch(apiUrl(path), options);
+  const token = getToken();
+  const headers = { ...(options.headers || {}) };
+  const hasAuth = Object.keys(headers).some((k) => k.toLowerCase() === "authorization");
+  if (token && !hasAuth) headers["Authorization"] = `Bearer ${token}`;
+  return fetch(apiUrl(path), { ...options, headers });
+};
+
+// ── Auth API helpers (Bearer token) ────────────────────
+async function _authJson(res) {
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(body?.error || `HTTP ${res.status}`);
+    err.code = body?.error || `http_${res.status}`;
+    err.status = res.status;
+    throw err;
+  }
+  return body;
+}
+
+export const registerUser = async ({ email, password, display_name }) => {
+  const res = await apiFetch(`/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, display_name: display_name || undefined }),
+  });
+  return _authJson(res); // { token, user }
+};
+
+export const loginUser = async ({ email, password }) => {
+  const res = await apiFetch(`/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  return _authJson(res); // { token, user }
+};
+
+export const logoutUser = async () => {
+  try {
+    await apiFetch(`/auth/logout`, { method: "POST" });
+  } catch {
+    // Best-effort — the client-side token is cleared regardless.
+  }
+};
+
+export const getCurrentUser = async () => {
+  const res = await apiFetch(`/auth/me`);
+  if (res.status === 401) {
+    clearToken();
+    return null;
+  }
+  const body = await _authJson(res);
+  return body.user; // { id, email, display_name }
 };
 
 // ── Mindmap: generate / poll / cancel ──────────────────

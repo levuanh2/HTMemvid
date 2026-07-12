@@ -1,8 +1,10 @@
 import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import SidebarLeft from "./SidebarLeft";
 import ChatArea from "./ChatArea";
 import SidebarRight from "./SidebarRight";
 import { useTheme } from "../../hooks/useTheme";
+import { useAuth } from "../../auth/useAuth";
 import { Icon } from "../ui/Icon";
 import Toaster from "../ui/Toaster";
 
@@ -11,6 +13,9 @@ export default function MainLayout({ selectedSources, setSelectedSources }) {
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
   const { isDark, setLight, setDark } = useTheme();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const handleLogout = async () => { await logout(); navigate("/"); };
 
   // ── Signature state: evidence margin ⇄ citation chips ──
   // `evidence` = provenance of the latest answer ({ sources, chunks }).
@@ -80,6 +85,18 @@ export default function MainLayout({ selectedSources, setSelectedSources }) {
               <Icon name="Moon" size={15} />
             </button>
           </div>
+
+          {/* Account: user identity + logout */}
+          {user && (
+            <div className="flex items-center gap-1.5">
+              <span className="hidden md:inline text-[12.5px] text-text-secondary max-w-[160px] truncate" title={user.email}>
+                {user.display_name || user.email}
+              </span>
+              <button onClick={handleLogout} className="icon-btn w-9 h-9" aria-label="Đăng xuất" title="Đăng xuất">
+                <Icon name="LogOut" size={16} />
+              </button>
+            </div>
+          )}
         </div>
       </header>
 

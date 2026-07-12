@@ -1089,6 +1089,70 @@ def user_data_root(user_id: Optional[str]) -> "Path":
     return Path(DATA_DIR_DEFAULT)
 
 
+# Phase C — source/query ownership.
+# Sentinel stem that matches NO chunk: used when an enforced query resolves to zero
+# owned sources, so retrieval returns [] instead of falling back to the global corpus.
+_NO_OWNED_SOURCES = ["\x00__no_owned_sources__"]
+
+
+def _source_owner_ok(stem_or_id: str, user_id: Optional[str]) -> bool:
+    """True when the source (matched by source_id key OR canonical stem) is owned by
+    user_id. Registry is the authoritative owner map; never trusts client-supplied
+    user_id."""
+    try:
+        registry = _load_source_registry()
+    except Exception:
+        return False
+    norm = _normalize_video_stem(stem_or_id)
+    for sid, row in registry.items():
+        if not isinstance(row, dict):
+            continue
+        row_stem = _normalize_video_stem(row.get("source_stem") or row.get("filename") or "")
+        if sid == stem_or_id or (norm and row_stem == norm):
+            return row.get("user_id") == user_id
+    return False
+
+
+def _resolve_owned_query_sources(raw_sources, user_id: Optional[str]):
+    """Return (resolved_sources, error_response|None).
+
+    Flag OFF → (raw, None): today's behavior (empty means global).
+    Flag ON  → owner-scoped:
+      * raw empty   → all owned stems (or the NO-OWNED sentinel → retrieval returns [])
+      * raw present → every requested stem must be owned, else 403; returns the
+        canonicalized owned subset. Never falls back to the global corpus."""
+    if not _auth_protect_enabled():
+        return (list(raw_sources) if raw_sources else []), None
+    owned = owned_stems(user_id)  # set of canonical stems
+    raw = [s for s in (raw_sources or []) if s]
+    if not raw:
+        return (sorted(owned) if owned else list(_NO_OWNED_SOURCES)), None
+    norm = [_normalize_video_stem(s) for s in raw]
+    if any(n not in owned for n in norm):
+        return None, (jsonify({"error": "forbidden_source"}), 403)
+    return norm, None
+
+
+def _query_job_owner_ok(job_id: str, user_id: Optional[str]) -> Optional[bool]:
+    """None if the job is unknown; True if owned by user_id; False if foreign.
+    Checks the in-memory query_jobs map first (carries user_id), then jobs_store —
+    so neither the sqlite nor the in-process fallback path can leak across users."""
+    with query_jobs_lock:
+        j = query_jobs.get(job_id)
+    if j is not None and "user_id" in j:
+        return j.get("user_id") == user_id
+    try:
+        from app.domains.jobs.jobs_store import get_job as _js_get
+        row = _js_get(job_id)
+    except Exception:
+        row = None
+    if row is not None:
+        return row.get("user_id") == user_id
+    if j is not None:
+        return False  # in-mem present without user_id (legacy) → deny under enforcement
+    return None
+
+
 def _update_source_status(
     source_id: str,
     status: str,
@@ -1587,6 +1651,9 @@ def _trigger_background_ingest(source_id: str, file_path: str, filename: str):
 # -------------------------
 @app.post('/process-doc')
 def process_doc():
+    _uid, err = _require_app_user()
+    if err:
+        return err
     text = request.json.get('text', '')
     if not text:
         return jsonify({'error': 'Missing text'}), 400
@@ -1699,6 +1766,9 @@ def _ingest_uploaded_file(file) -> dict:
 @app.post('/upload-file')
 def upload_file():
     """Upload file và trả response ngay, xử lý ingest chạy background."""
+    _uid, err = _require_app_user()
+    if err:
+        return err
     file = request.files.get('file')
     if not file or not (file.filename or "").strip():
         return jsonify({'error': 'Missing file'}), 400
@@ -1722,8 +1792,14 @@ def get_source_status(source_id: str):
     Lấy status của một source (processing | ready | error).
     UI sẽ polling endpoint này để cập nhật progress.
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
     status_info = _get_source_status(source_id)
     if not status_info:
+        return jsonify({'error': 'Source not found'}), 404
+    # Owner scope: a foreign source is indistinguishable from a missing one (404).
+    if _auth_protect_enabled() and status_info.get("user_id") != uid:
         return jsonify({'error': 'Source not found'}), 404
     
     status = status_info.get('status', 'processing')
@@ -1760,6 +1836,9 @@ def get_source_status(source_id: str):
 def upload_multiple():
     """Upload nhiều file — mỗi file đi CÙNG luồng async với /upload-file
     (tạo source_id + registry + background ingest) nên FE poll status được."""
+    _uid, err = _require_app_user()
+    if err:
+        return err
     files = request.files.getlist('files')
     if not files:
         return jsonify({'error': 'Missing files'}), 400
@@ -1784,6 +1863,9 @@ def list_indexed():
     Lấy danh sách tất cả sources đã được index.
     Trả về format mà frontend expect: { video: stem, chunks: [...], num_chunks: N }
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
     try:
         with open(INDEX_META_JSON_PATH, encoding='utf-8') as f:
             meta = json.load(f)
@@ -1825,6 +1907,12 @@ def list_indexed():
                 'can_query': True,
             })
 
+        # Owner scope (flag on): return only the caller's sources; legacy NULL-owner
+        # sources are hidden (owned_stems excludes them under enforcement).
+        if _auth_protect_enabled():
+            owned = owned_stems(uid)
+            sources = [s for s in sources if s.get('video_stem') in owned]
+
         return jsonify({'sources': sources})
     except Exception as e:
         import traceback
@@ -1837,6 +1925,16 @@ def list_indexed():
 # -------------------------
 @app.get('/videos/<name>')
 def serve_video(name):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    # Owner scope: derive the canonical stem from the (path-safe) basename and deny
+    # a foreign/missing video with 404 (no existence oracle, no path traversal —
+    # send_from_directory already confines to VIDEOS_DIR).
+    if _auth_protect_enabled():
+        stem = _normalize_video_stem(os.path.basename(name or ""))
+        if not _source_owner_ok(stem, uid):
+            return jsonify({'error': 'Not found'}), 404
     return send_from_directory(VIDEOS_DIR, name)
 
 
@@ -1861,8 +1959,18 @@ def query():
     f_category = (data.get('category') or '').strip() or None
     f_language = (data.get('language') or '').strip() or None
 
+    # Phase C: auth gate FIRST (before input validation) so a no-token request is
+    # 401, not 400. /query stays in-process. Then owner-scope the selected sources.
+    q_uid, q_err = _require_app_user()
+    if q_err:
+        return q_err
+
     if not (q or "").strip():
         return jsonify({'error': 'Missing query'}), 400
+
+    selected_sources, src_err = _resolve_owned_query_sources(selected_sources, q_uid)
+    if src_err:
+        return src_err
 
     # Phase 4: ingress rate limit (off by default; fail-open). Structured 429.
     allowed, retry_after = _rate_limit_check(_rl_scope_id(session_id))
@@ -1883,6 +1991,7 @@ def query():
     # and with no authenticated user we skip it entirely (no NULL-owned rows).
     req_user_id = _current_user_id()
     conv_enforce = _auth_protect_enabled()
+    auth_enforce = conv_enforce  # Phase C: same flag gates source/query protection
     # Conversation Context Layer: ensure the conversation row exists (flag-gated, fail-open).
     if _conversation_enabled() and not (conv_enforce and not req_user_id):
         try:
@@ -1902,6 +2011,7 @@ def query():
             "result": None,
             "error": None,
             "created_at": time.time(),
+            "user_id": req_user_id,  # Phase C: owner guard for status/stream/resume
         }
 
     def process_query_job(jid: str, question: str, sources: list, use_mem: bool, category: str | None = None, language: str | None = None) -> None:
@@ -1917,10 +2027,16 @@ def query():
 
             # Phase 3 single-flight: coalesce duplicate/equivalent concurrent queries.
             # Fail-open — leader runs the graph below; follower served from cache returns here.
-            try:
-                _sf = _single_flight_try(jid, question, sources, use_mem, category, language, session_id, user_id=req_user_id, enforce_owner=conv_enforce)
-            except Exception:
-                _sf = {"served": False, "lock": None}  # single-flight must never break the answer path
+            # Phase C: with the flag on, BYPASS single-flight (no cross-user coalescing)
+            # until Phase E adds user-scoped keys. Resolved per-user sources already
+            # scope the bucket; the bypass is belt-and-suspenders.
+            if auth_enforce:
+                _sf = {"served": False, "lock": None}
+            else:
+                try:
+                    _sf = _single_flight_try(jid, question, sources, use_mem, category, language, session_id, user_id=req_user_id, enforce_owner=conv_enforce)
+                except Exception:
+                    _sf = {"served": False, "lock": None}  # single-flight must never break the answer path
             if _sf.get("served"):
                 return  # follower finalized from the leader's cached answer
             sf_lock = _sf.get("lock")
@@ -1993,6 +2109,10 @@ def query():
                 "use_memory_tree": bool(use_mem),
                 "category": category,
                 "language": language,
+                # Phase C: with auth protection on, bypass the shared semantic answer
+                # cache (read + write) so no cross-user answer reuse (e.g. via stem
+                # recycling after delete/reupload). Proper user-scoped keys land in Phase E.
+                "auth_no_cache": auth_enforce,
                 "retrieved_chunks": [],
                 "retrieved_sources": [],
                 "context": "",
@@ -2053,6 +2173,11 @@ def query():
 
 @app.get('/query-status/<job_id>')
 def query_status(job_id: str):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    if _auth_protect_enabled() and _query_job_owner_ok(job_id, uid) is not True:
+        return jsonify({"error": "Job not found"}), 404  # foreign/unknown → no oracle
     _cleanup_old_query_jobs()
     # Ưu tiên SQLite jobs store nếu bật
     if (os.getenv("USE_SQLITE_JOBS", "1") or "").strip() not in ("0", "false", "False"):
@@ -2084,6 +2209,11 @@ def query_resume(job_id: str):
 
     Body: {"action": "approve"|"edit"|"reject", "answer": "..."}.
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
+    if _auth_protect_enabled() and _query_job_owner_ok(job_id, uid) is not True:
+        return jsonify({"error": "Job not found"}), 404  # cannot resume another user's job
     data = request.json or {}
     action = str(data.get("action") or "approve").strip().lower()
     if action not in ("approve", "edit", "reject"):
@@ -2149,6 +2279,11 @@ def query_stream(job_id: str):
     Dữ liệu đọc từ jobs_store (SQLite) nếu có.
     Phase 2C: header chuẩn proxy + timeout SSE_TIMEOUT_SEC.
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
+    if _auth_protect_enabled() and _query_job_owner_ok(job_id, uid) is not True:
+        return jsonify({"error": "Job not found"}), 404  # SSE token_buffer must not leak cross-user
     sse_timeout = int(os.getenv("SSE_TIMEOUT_SEC", "300"))
 
     def generate():
@@ -2421,12 +2556,18 @@ def delete_summary(summary_id: str):
 # -------------------------
 @app.post('/delete-source')
 def delete_source():
+    uid, err = _require_app_user()
+    if err:
+        return err
     data = request.json or {}
     video_name = data.get('video', '')
     if not video_name:
         return jsonify({'error': 'Missing video name'}), 400
 
     target_stem = _normalize_video_stem(video_name)
+    # Owner scope: cannot delete another user's source (404, no oracle).
+    if _auth_protect_enabled() and not _source_owner_ok(target_stem, uid):
+        return jsonify({'error': 'Source not found'}), 404
     meta_path = INDEX_META_JSON_PATH
     if not meta_path.exists():
         return jsonify({'error': 'No index metadata found'}), 404
@@ -2918,15 +3059,21 @@ def delete_source_v2(source_id: str):
     
     Đảm bảo atomicity và rebuild indexes sau khi xóa.
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
     source_id = (source_id or "").strip()
     if not source_id:
         return jsonify({"error": "Missing source_id"}), 400
-    
+
     source_stem = _normalize_video_stem(source_id)
-    
+
     # 1️⃣ VALIDATE: Kiểm tra source có tồn tại không
     exists, source_info = _validate_source_exists(source_id, source_stem)
     if not exists:
+        return jsonify({"error": "Source not found"}), 404
+    # Owner scope: a foreign source is treated as not found (no oracle, no cross-user delete).
+    if _auth_protect_enabled() and (not source_info or source_info.get("user_id") != uid):
         return jsonify({"error": "Source not found"}), 404
 
     # source_id là UUID, KHÔNG phải stem. Lấy stem THẬT từ registry entry để purge

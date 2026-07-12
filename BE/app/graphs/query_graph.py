@@ -142,6 +142,11 @@ def build_query_graph(
             _set_job(state["job_id"], progress=5, current_node="CacheLookup")
             if state.get("processing_message"):
                 return {**state, "cache_key": None, "progress": 5, "current_node": "CacheLookup", "error": None}
+            # Auth Hardening Phase C: bypass the shared semantic answer cache (read+write)
+            # when auth protection is on → no cross-user answer reuse. cache_key=None
+            # makes finalize skip the write too.
+            if state.get("auth_no_cache"):
+                return {**state, "cache_key": None, "progress": 5, "current_node": "CacheLookup", "error": None}
             # Multi-turn: chỉ bypass câu FOLLOW-UP (phụ thuộc history). Câu standalone
             # vẫn cache — generate_answer_node sẽ bỏ history khỏi prompt cho các câu
             # có cache_key để answer context-free (lookup/store nhất quán).

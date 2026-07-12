@@ -46,6 +46,7 @@ class QueryState(TypedDict):
     standalone_question: NotRequired[str]                # rewritten follow-up (retrieval)
     context_mode: NotRequired[str]                       # standalone | contextual | low_confidence_contextual
     context_signature: NotRequired[Optional[str]]        # hash of the turns used (cache safety)
+    auth_no_cache: NotRequired[bool]                     # Phase C: bypass shared answer cache under auth protection
     category: NotRequired[Optional[str]]
     language: NotRequired[Optional[str]]
     retrieved_chunks: list

@@ -67,12 +67,12 @@ except Exception:
     _jobs_migrate_from_dict = None
     _jobs_mark_interrupted = None
 
-# Auth MVP user store (idempotent). Bearer-token auth; existing app APIs stay open.
+# Conversation Context Layer store (idempotent; feature-flagged at the call sites).
 try:
-    from app.domains.auth.users_store import init_db as _users_init_db
-    _users_init_db()
+    from app.domains.conversation.store import init_db as _conv_init_db
+    _conv_init_db()
 except Exception:
-    _users_init_db = None
+    _conv_init_db = None
 
 # Debug log AI mode (không in ra API key thật)
 print("=== AI MODE ===")
@@ -326,7 +326,9 @@ def _sf_nonempty(cached: Optional[dict]) -> bool:
     return isinstance(p, dict) and bool(str(p.get("answer") or "").strip())
 
 
-def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict) -> None:
+def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict,
+                         *, source_ids: Optional[list] = None,
+                         source_context_hash: Optional[str] = None) -> None:
     """Mark a follower job done using the leader's cached result. Atomic done+result
     (mirrors _finalize_query_job) — never sets done without the payload."""
     payload = cached.get("payload") if isinstance(cached, dict) else None
@@ -350,6 +352,17 @@ def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict)
                 {"role": "user", "content": question},
                 {"role": "assistant", "content": str(payload.get("answer"))},
             ])
+    except Exception:
+        pass
+
+    # Conversation Context Layer: record the follower's turn in its own session (flag-gated).
+    try:
+        if payload.get("answer"):
+            cited = [c.get("chunk_id") for c in (payload.get("chunks") or []) if isinstance(c, dict) and c.get("chunk_id")]
+            _save_conversation_turns(
+                session_id, question, str(payload.get("answer")),
+                source_ids=source_ids, source_context_hash=source_context_hash, cited_chunk_ids=cited or None,
+            )
     except Exception:
         pass
 
@@ -394,6 +407,10 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
     if not sf_key:
         _SF_METRICS["bypass_unsafe"] += 1
         return {"served": False, "lock": None}
+    try:
+        _sf_sch = llm_cache.source_context_hash(sources, language, category, use_mem)
+    except Exception:
+        _sf_sch = None
     cache_key = _make_query_cache_key(question, sources, use_mem,
                                       {"category": category, "language": language})
 
@@ -403,7 +420,7 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
         _SF_METRICS["follower_hit"] += 1
         _SF_METRICS["dup_avoided"] += 1
         _sf_log("singleflight_follower_cache_hit", kind="warm")
-        _finalize_from_cache(jid, session_id, question, cached)
+        _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch)
         return {"served": True}
 
     token = uuid.uuid4().hex
@@ -432,7 +449,7 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
             _SF_METRICS["follower_hit"] += 1
             _SF_METRICS["dup_avoided"] += 1
             _sf_log("singleflight_follower_cache_hit", kind="leader")
-            _finalize_from_cache(jid, session_id, question, cached)
+            _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch)
             return {"served": True}
         # Leader vanished (errored/released) without a cached answer → fail open early,
         # but re-check cache once to close the write-then-release race.
@@ -447,7 +464,7 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
                 _SF_METRICS["follower_hit"] += 1
                 _SF_METRICS["dup_avoided"] += 1
                 _sf_log("singleflight_follower_cache_hit", kind="leader_race")
-                _finalize_from_cache(jid, session_id, question, cached)
+                _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch)
                 return {"served": True}
             break
 
@@ -1284,6 +1301,48 @@ def _attach_evidence(payload: dict, out: dict, max_chunks: int = 12) -> None:
             payload["chunks"] = ev
 
 
+def _conversation_enabled() -> bool:
+    """Feature gate for the Conversation Context Layer (default OFF)."""
+    try:
+        from shared.config import get_settings
+        return bool(get_settings().conversation_context_enabled)
+    except Exception:
+        return False
+
+
+def _save_conversation_turns(
+    session_id: str,
+    question: str,
+    answer: str,
+    *,
+    source_ids: Optional[list] = None,
+    source_context_hash: Optional[str] = None,
+    cited_chunk_ids: Optional[list] = None,
+    rewritten_query: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> None:
+    """Persist a user+assistant turn pair to the conversation store. Best-effort:
+    a DB failure must never break /query (fail-open). Gated on the feature flag."""
+    if not _conversation_enabled():
+        return
+    if not session_id or not (answer or "").strip():
+        return
+    try:
+        from app.domains.conversation import store as _conv
+        _conv.append_message(
+            session_id, "user", question,
+            selected_source_ids=source_ids, source_context_hash=source_context_hash,
+        )
+        _conv.append_message(
+            session_id, "assistant", str(answer),
+            selected_source_ids=source_ids, source_context_hash=source_context_hash,
+            cited_chunk_ids=cited_chunk_ids, rewritten_query=rewritten_query,
+            answer_summary=str(answer)[:300], metadata=metadata,
+        )
+    except Exception:
+        pass
+
+
 def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> None:
     """Trích payload/status từ kết quả graph → cập nhật query_jobs/jobs_store + persist history.
 
@@ -1322,6 +1381,27 @@ def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> 
         if isinstance(payload, dict) and payload.get("answer"):
             from app.domains.jobs.sessions_store import append_messages as _ss_append
             _ss_append(session_id, [{"role": "user", "content": question}, {"role": "assistant", "content": str(payload.get("answer"))}])
+    except Exception:
+        pass
+
+    # Conversation Context Layer: structured turn store with source scope (flag-gated).
+    try:
+        if isinstance(payload, dict) and payload.get("answer"):
+            src = out.get("selected_sources") or []
+            try:
+                import app.domains.cache.llm_cache as _lc
+                sch = _lc.source_context_hash(src, out.get("language"), out.get("category"), bool(out.get("use_memory_tree", True)))
+            except Exception:
+                sch = None
+            cited = [c.get("chunk_id") for c in (payload.get("chunks") or []) if isinstance(c, dict) and c.get("chunk_id")]
+            _rewritten = out.get("standalone_question")
+            _mode = out.get("context_mode") or "standalone"
+            _save_conversation_turns(
+                session_id, question, str(payload.get("answer")),
+                source_ids=src, source_context_hash=sch, cited_chunk_ids=cited or None,
+                rewritten_query=(_rewritten if _rewritten and _rewritten != question else None),
+                metadata={"context_mode": _mode, "context_signature": out.get("context_signature")},
+            )
     except Exception:
         pass
 
@@ -1712,6 +1792,13 @@ def query():
     job_id = str(uuid.uuid4())
     if not session_id:
         session_id = str(uuid.uuid4())
+    # Conversation Context Layer: ensure the conversation row exists (flag-gated, fail-open).
+    if _conversation_enabled():
+        try:
+            from app.domains.conversation import store as _conv
+            _conv.ensure_conversation(session_id, active_source_scope=selected_sources or [])
+        except Exception:
+            pass
     try:
         from app.domains.jobs.jobs_store import create_job as _js_create
         _js_create(job_id, job_type="query", status="pending", progress=0, current_node="Queued")
@@ -1757,10 +1844,57 @@ def query():
                 history = _ss_get(session_id, limit_messages=8)
             except Exception:
                 history = []
+
+            # Conversation Context Layer (flag-gated): replace the unscoped session
+            # history with source-scoped, reset-aware turns so context never leaks
+            # across documents and respects Clear-context. Fail-open to the legacy history.
+            conv_ctx = None
+            conv_sch = None
+            if _conversation_enabled():
+                try:
+                    conv_sch = llm_cache.source_context_hash(sources or [], language, category, bool(use_mem))
+                except Exception:
+                    conv_sch = None
+                try:
+                    from app.domains.conversation.context_builder import build_recent_conversation_context
+                    conv_ctx = build_recent_conversation_context(
+                        session_id, selected_sources=sources or [], source_context_hash=conv_sch,
+                    )
+                    if not conv_ctx.is_empty:
+                        history = [{"role": t["role"], "content": t["content"]} for t in conv_ctx.turns]
+                    else:
+                        history = []  # no same-scope context → treat as standalone (no leak)
+                except Exception:
+                    conv_ctx = None
+
+            # Phase C: rewrite the follow-up into a standalone question for retrieval.
+            # Original question is preserved for answer generation. Fail-open to original.
+            standalone_q = question
+            context_mode = "standalone"
+            context_sig = None
+            if _conversation_enabled() and conv_ctx is not None and not conv_ctx.is_empty:
+                context_sig = conv_ctx.context_signature
+                try:
+                    from app.domains.conversation.rewrite import rewrite_followup_question, decide_context_mode
+                    _rw = rewrite_followup_question(question, conv_ctx, sources or [])
+                    context_mode = decide_context_mode(_rw)
+                    if context_mode == "contextual":
+                        standalone_q = (_rw.get("standalone_question") or question)
+                        print(f"conversation_rewrite mode={context_mode} conf={_rw.get('confidence')} "
+                              f"q={question[:40]!r} -> {standalone_q[:60]!r}", flush=True)
+                except Exception:
+                    pass
+
             init_state = {
                 "job_id": jid,
                 "session_id": session_id,
                 "conversation_history": history,
+                "conversation_context": (conv_ctx.to_dict() if conv_ctx is not None else None),
+                "source_context_hash": conv_sch,
+                "original_question": question,
+                "standalone_question": standalone_q,
+                "context_mode": context_mode,
+                "context_signature": context_sig,
                 "q": question,
                 "selected_sources": sources or [],
                 "use_memory_tree": bool(use_mem),
@@ -2032,6 +2166,54 @@ def run_summary_job(job_id: str, source_names: list[str], mm_input: dict,
         from app.domains.jobs.jobs_store import update_job
         update_job(job_id, status="error", error_text=_job_error_text(e))
         print(f"summary_job_failed job_id={job_id} err={str(e)[:80]}", flush=True)
+
+
+# -------------------------
+# 💬 Conversation Context Layer — controls (Phase B)
+# Flag-gated; when disabled the routes report a clear disabled state so the FE can
+# degrade gracefully. All handlers fail open — a store error never 500s the chat.
+# -------------------------
+@app.post('/conversations/<conversation_id>/clear-context')
+def clear_conversation_context(conversation_id: str):
+    """Clear context: stop using older turns from now on. Keeps messages in the DB."""
+    if not _conversation_enabled():
+        return jsonify({"ok": False, "error": "conversation_context_disabled"}), 404
+    try:
+        from app.domains.conversation import store as _conv
+        reset_at = _conv.set_context_reset(conversation_id)
+        return jsonify({"ok": True, "conversation_id": conversation_id, "context_reset_at": reset_at})
+    except Exception as e:
+        logging.exception("[conversation] clear-context failed: %s", e)
+        return jsonify({"ok": False, "error": "clear_context_failed"}), 500
+
+
+@app.delete('/conversations/<conversation_id>')
+def delete_conversation(conversation_id: str):
+    """Delete chat history: hard-delete this conversation's messages (storage-saving)."""
+    if not _conversation_enabled():
+        return jsonify({"ok": False, "error": "conversation_context_disabled"}), 404
+    try:
+        from app.domains.conversation import store as _conv
+        removed = _conv.delete_messages(conversation_id)
+        _conv.soft_delete(conversation_id)
+        return jsonify({"ok": True, "conversation_id": conversation_id, "removed": removed})
+    except Exception as e:
+        logging.exception("[conversation] delete failed: %s", e)
+        return jsonify({"ok": False, "error": "delete_failed"}), 500
+
+
+@app.get('/conversations/<conversation_id>/messages')
+def get_conversation_messages(conversation_id: str):
+    """Return this conversation's messages (for restoring the chat UI)."""
+    if not _conversation_enabled():
+        return jsonify({"conversation_id": conversation_id, "messages": []}), 404
+    try:
+        from app.domains.conversation import store as _conv
+        msgs = _conv.get_messages(conversation_id)
+        return jsonify({"conversation_id": conversation_id, "messages": msgs})
+    except Exception as e:
+        logging.exception("[conversation] get-messages failed: %s", e)
+        return jsonify({"conversation_id": conversation_id, "messages": []}), 500
 
 
 @app.post("/generate-summary")

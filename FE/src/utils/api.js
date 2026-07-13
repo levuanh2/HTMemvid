@@ -17,17 +17,68 @@ export const apiUrl = (path) => {
 
 import { getToken, clearToken } from "../auth/tokenStore";
 
+// Auth endpoints own their own 401 semantics (login = bad creds, /auth/me = probe),
+// so a 401 from these must NOT trigger the global sign-out flow — otherwise the
+// restore probe would redirect-loop. Everything else is a protected app API.
+const AUTH_PATH_RE = /^\/auth\//;
+
+// Broadcast a global "you are signed out" signal exactly once per 401 so the
+// AuthProvider can clear the token/state and ProtectedRoute can redirect to
+// /login?next=<current>. Guarded for non-browser (SSR/test-without-window) envs.
+function _notifyUnauthorized(path) {
+  try {
+    if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+      window.dispatchEvent(new CustomEvent("auth:unauthorized", { detail: { path } }));
+    }
+  } catch {
+    /* dispatch unavailable — the caller still sees the 401 response */
+  }
+}
+
 // apiFetch — attaches `Authorization: Bearer <token>` when a token exists and the
 // caller hasn't already set one. Only the Authorization header is added; body,
 // method and any caller headers (incl. multipart Content-Type for uploads) are
 // left untouched, so existing query/upload/summary/mindmap calls are unchanged.
-export const apiFetch = (path, options = {}) => {
+// On a 401 from a protected app API it fires `auth:unauthorized` (not for /auth/*).
+export const apiFetch = async (path, options = {}) => {
   const token = getToken();
   const headers = { ...(options.headers || {}) };
   const hasAuth = Object.keys(headers).some((k) => k.toLowerCase() === "authorization");
   if (token && !hasAuth) headers["Authorization"] = `Bearer ${token}`;
-  return fetch(apiUrl(path), { ...options, headers });
+  const res = await fetch(apiUrl(path), { ...options, headers });
+  if (res.status === 401 && !AUTH_PATH_RE.test(String(path))) {
+    _notifyUnauthorized(String(path));
+  }
+  return res;
 };
+
+// ── Error helpers — permission-safe, no existence oracle ────────────────────
+// App API callers throw an Error with `.status` set (see `_appError`); these read
+// that to decide UX without exposing raw backend detail to the user.
+export const isUnauthorizedError = (e) => e?.status === 401;
+export const isForbiddenError = (e) => e?.status === 403;
+export const isNotFoundOrForbiddenError = (e) => e?.status === 403 || e?.status === 404;
+
+export function getUserFriendlyApiError(e) {
+  const s = e?.status;
+  if (s === 401) return "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
+  if (s === 403) return "Bạn không có quyền truy cập tài liệu này.";
+  if (s === 404) return "Tài nguyên không tồn tại hoặc bạn không có quyền truy cập.";
+  if (s === 0 || e?.name === "TypeError") return "Không kết nối được máy chủ.";
+  return "Đã có lỗi xảy ra. Vui lòng thử lại.";
+}
+
+// Build an Error carrying the HTTP status/code for a failed app response, so the
+// UI can branch on 401/403/404 without re-reading the body. The raw backend
+// `error` string is kept on `.code` (console/debug), never shown verbatim as the
+// primary message under permission failures.
+export async function _appError(res) {
+  const body = await res.json().catch(() => ({}));
+  const err = new Error(body?.error || `HTTP ${res.status}`);
+  err.status = res.status;
+  err.code = body?.error || `http_${res.status}`;
+  return err;
+}
 
 // ── Auth API helpers (Bearer token) ────────────────────
 async function _authJson(res) {
@@ -88,7 +139,7 @@ export const generateMindmap = async (sources, { force = false } = {}) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sources, q: "tóm tắt tài liệu", force: Boolean(force) }),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw await _appError(res);
   return res.json();
 };
 
@@ -97,7 +148,7 @@ export const generateMindmap = async (sources, { force = false } = {}) => {
 // its own polling immediately rather than waiting on this request.
 export const cancelMindmap = async (jobId) => {
   const res = await apiFetch(`/mindmap-cancel/${encodeURIComponent(jobId)}`, { method: "POST" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw await _appError(res);
   return res.json();
 };
 
@@ -112,10 +163,7 @@ export const updateMindmap = async (id, record) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(record),
   });
-  if (!res.ok) {
-    const d = await res.json().catch(() => ({}));
-    throw new Error(d.error || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw await _appError(res);
   return res.json();
 };
 
@@ -127,13 +175,13 @@ export const generateSummary = async (sources, { lengthMode = "medium", force = 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sources, length_mode: lengthMode, force: Boolean(force) }),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw await _appError(res);
   return res.json();
 };
 
 export const cancelSummary = async (jobId) => {
   const res = await apiFetch(`/summary-cancel/${encodeURIComponent(jobId)}`, { method: "POST" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw await _appError(res);
   return res.json();
 };
 

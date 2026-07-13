@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { apiFetch } from "../../utils/api";
+import { apiFetch, _appError, isUnauthorizedError, isNotFoundOrForbiddenError, getUserFriendlyApiError } from "../../utils/api";
 import { Icon } from "../ui/Icon";
 import Badge from "../ui/Badge";
 import Spinner from "../ui/Spinner";
@@ -98,7 +98,12 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
         const fd = new FormData();
         fd.append("file", file);
         const res = await apiFetch("/upload", { method: "POST", body: fd });
-        if (!res.ok) { const d = await res.json().catch(() => ({})); console.error("Upload failed:", d); continue; }
+        if (!res.ok) {
+          const err = await _appError(res);
+          console.error("Upload failed:", err.code);
+          if (isUnauthorizedError(err) || isNotFoundOrForbiddenError(err)) alert(getUserFriendlyApiError(err));
+          continue;
+        }
         const data = await res.json();
         const newSource = { source_id: data.source_id, filename: formatFileName(file.name), video_stem: data.video_stem, status: data.status || "processing", progress: 0, can_query: false };
         setSources((prev) => [newSource, ...prev]);
@@ -122,10 +127,15 @@ export default function SidebarLeft({ selectedSources, setSelectedSources, onSou
       } else {
         res = await apiFetch(`/delete-source`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ video: String(key || "") }) });
       }
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+      if (!res.ok) throw await _appError(res);
       setSources((prev) => prev.filter((s) => (s.video_stem || s.video) !== key));
       setSelectedSources((prev) => prev.filter((p) => p !== key));
-    } catch (err) { console.error("Delete source error:", err); alert("Không xóa được tài liệu, kiểm tra console!"); }
+    } catch (err) {
+      console.error("Delete source error:", err);
+      alert((isUnauthorizedError(err) || isNotFoundOrForbiddenError(err))
+        ? getUserFriendlyApiError(err)
+        : "Không xóa được tài liệu, kiểm tra console!");
+    }
     finally { setDeletingFile(null); }
   };
 

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
-import { apiFetch, apiUrl, clearConversationContext, deleteConversation } from "../../utils/api";
+import { apiFetch, apiUrl, clearConversationContext, deleteConversation, _appError, isNotFoundOrForbiddenError, isUnauthorizedError, getUserFriendlyApiError } from "../../utils/api";
 import { newConversationId } from "../../utils/conversation";
 import { Icon } from "../ui/Icon";
 import { nodeLabel, processCitations, parseCiteHref, normStem } from "../../utils/evidence";
@@ -267,7 +267,7 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
         body: JSON.stringify({ q: userMsg.content, sources: payloadSources?.length ? payloadSources : null, session_id: sessionId || undefined }),
         signal: abortControllerRef.current.signal,
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+      if (!res.ok) throw await _appError(res);  // carries .status for 401/403/404 UX
       const startData = await res.json();
       if (!startData.job_id) throw new Error("Không nhận được job_id từ server.");
       const jobOutcome = await streamQueryJob(startData.job_id);
@@ -286,7 +286,12 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
     } catch (err) {
       if (cancelledRef.current || err.name === "AbortError" || err.message === "CANCELLED") return;
       console.error("Query error:", err);
-      setMessages((prev) => [...prev, { role: "ai", content: ensureErrMsg(err?.message, "Loi khi goi AI. Vui long thu lai."), evidence: null }]);
+      // 401 also triggers a global redirect (apiFetch fired auth:unauthorized); show a
+      // permission-safe line meanwhile. 403/404 map to friendly text (no raw JSON/id).
+      const content = (isUnauthorizedError(err) || isNotFoundOrForbiddenError(err))
+        ? getUserFriendlyApiError(err)
+        : ensureErrMsg(err?.message, "Loi khi goi AI. Vui long thu lai.");
+      setMessages((prev) => [...prev, { role: "ai", content, evidence: null }]);
     } finally {
       if (!cancelledRef.current) setLoading(false);
     }

@@ -1,7 +1,14 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import MindMapModal from "./MindMapModal";
 import SummaryModal from "./SummaryModal";
-import { apiFetch, generateMindmap, cancelMindmap, generateSummary, cancelSummary } from "../../utils/api";
+import { apiFetch, generateMindmap, cancelMindmap, generateSummary, cancelSummary, isUnauthorizedError, isNotFoundOrForbiddenError, getUserFriendlyApiError } from "../../utils/api";
+
+// Permission-safe toast text: 401/403/404 → friendly line (no raw error/id); else
+// keep the existing detail message.
+function _errText(err, prefix, fallback) {
+  if (isUnauthorizedError(err) || isNotFoundOrForbiddenError(err)) return getUserFriendlyApiError(err);
+  return err?.message ? `${prefix}: ${err.message}` : fallback;
+}
 import { createMindmapPoller, stageLabel } from "../../utils/mindmapJob";
 import { createSummaryPoller, stageLabel as summaryStageLabel, LENGTH_MODES } from "../../utils/summaryJob";
 import { saveActiveMindmapJob, loadActiveMindmapJob, clearActiveMindmapJob } from "../../utils/activeMindmapJob";
@@ -283,7 +290,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
       startMindmapPoller(startData.job_id, sourceList, { resumed: false, isRegenerate: force });
     } catch (err) {
       console.error("Mind Map Error:", err);
-      toast(err?.message ? `Không tạo được sơ đồ: ${err.message}` : "Không tạo được sơ đồ, kiểm tra console!", { type: "error" });
+      toast(_errText(err, "Không tạo được sơ đồ", "Không tạo được sơ đồ, kiểm tra console!"), { type: "error" });
       if (force) setMindmapGenerating(false);
     }
     finally {
@@ -364,7 +371,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   const handleSummaryError = useCallback((err) => {
     clearActiveSummaryJob();
     console.error("Summary Error:", err);
-    toast(err?.message ? `Không tạo được tóm tắt: ${err.message}` : "Không tạo được tóm tắt, kiểm tra console!", { type: "error" });
+    toast(_errText(err, "Không tạo được tóm tắt", "Không tạo được tóm tắt, kiểm tra console!"), { type: "error" });
   }, []);
 
   const startSummaryPoller = useCallback((jobId, { resumed = false } = {}) => {

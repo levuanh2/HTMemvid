@@ -36,7 +36,7 @@ def build_query_graph(
     index_meta_path: Path,
     jobs_update: Callable[..., None] | None,
     # cache helpers
-    make_cache_key: Callable[[str, list, bool], str],
+    make_cache_key: Callable[..., str],
     get_cached: Callable[[str], Optional[dict]],
     set_cached: Callable[[str, dict], None],
     # source status helpers
@@ -142,6 +142,9 @@ def build_query_graph(
             _set_job(state["job_id"], progress=5, current_node="CacheLookup")
             if state.get("processing_message"):
                 return {**state, "cache_key": None, "progress": 5, "current_node": "CacheLookup", "error": None}
+            # Auth Hardening Phase E: no blanket bypass under the flag anymore — the cache is
+            # keyed by cache_scope (user id under enforcement) so cross-user reuse is
+            # impossible while a user still benefits from their own cache.
             # Multi-turn: chỉ bypass câu FOLLOW-UP (phụ thuộc history). Câu standalone
             # vẫn cache — generate_answer_node sẽ bỏ history khỏi prompt cho các câu
             # có cache_key để answer context-free (lookup/store nhất quán).
@@ -156,6 +159,7 @@ def build_query_graph(
                 state.get("selected_sources") or [],
                 bool(state.get("use_memory_tree")),
                 {"category": state.get("category"), "language": state.get("language")},
+                state.get("cache_scope") or "public",  # Phase E: user-scoped bucket
             )
             cached = get_cached(cache_key)
             payload = cached.get("payload") if isinstance(cached, dict) else None
@@ -226,12 +230,13 @@ def build_query_graph(
             # when present (resolves "nó"/"phần đó" for better recall); the original q is
             # kept in state for answer generation. Retrieval cache keys on this same query.
             retrieve_q = (state.get("standalone_question") or "").strip() or state["q"]
+            cache_scope = state.get("cache_scope") or "public"  # Phase E: user-scoped retrieval cache
 
             def _do_hybrid_retrieve():
                 # Tier 3: retrieval cache (Redis, fail-open) — key theo retrieve_q tại
                 # thời điểm gọi nên đúng cả khi CRAG/rewrite đổi câu hỏi. Xem docs/SEMANTIC_CACHE_SPEC.md.
                 cached = llm_cache.retrieval_get(
-                    retrieve_q, selected_sources, RETRIEVE_TOP_K, f_category, f_language
+                    retrieve_q, selected_sources, RETRIEVE_TOP_K, f_category, f_language, cache_scope
                 )
                 if cached is not None:
                     return cached
@@ -253,7 +258,7 @@ def build_query_graph(
                         language=f_language,
                     )
                 llm_cache.retrieval_put(
-                    retrieve_q, selected_sources, RETRIEVE_TOP_K, f_category, f_language, out
+                    retrieve_q, selected_sources, RETRIEVE_TOP_K, f_category, f_language, out, cache_scope
                 )
                 return out
 

@@ -2,8 +2,9 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
-import { apiFetch, apiUrl, clearConversationContext, deleteConversation } from "../../utils/api";
+import { apiFetch, apiUrl, clearConversationContext, deleteConversation, _appError, isNotFoundOrForbiddenError, isUnauthorizedError, getUserFriendlyApiError } from "../../utils/api";
 import { newConversationId } from "../../utils/conversation";
+import { pollQueryStatus, shouldPollFallback } from "../../utils/queryPolling";
 import { Icon } from "../ui/Icon";
 import { nodeLabel, processCitations, parseCiteHref, normStem } from "../../utils/evidence";
 
@@ -126,6 +127,13 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
 
   const mdComponents = useMemo(() => makeMdComponents({ highlight, onHighlight }), [highlight, onHighlight]);
 
+  // Stop any in-flight SSE stream / status-polling loop when the component unmounts
+  // (cancelledRef is what pollQueryStatus checks each iteration).
+  useEffect(() => () => {
+    cancelledRef.current = true;
+    try { eventSourceRef.current?.close(); } catch { /* already closed */ }
+  }, []);
+
   const QUERY_TIMEOUT_MS = (() => {
     const raw = import.meta.env.VITE_QUERY_TIMEOUT_MS;
     const n = Number(raw);
@@ -182,7 +190,11 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
       es.onerror = () => {
         clearInterval(tick); try { es.close(); } catch {}
         streamAccRef.current = ""; setStreamingPreview("");
-        reject(new Error("Mất kết nối realtime (SSE). Vui lòng thử lại."));
+        // EventSource gives no status here (opaque). Under protected mode this is the
+        // no-Authorization 401; mark it so handleSend can fall back to authed polling.
+        const e = new Error("Mất kết nối realtime (SSE). Vui lòng thử lại.");
+        e.sseConnectionLost = true;
+        reject(e);
       };
     });
 
@@ -267,10 +279,33 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
         body: JSON.stringify({ q: userMsg.content, sources: payloadSources?.length ? payloadSources : null, session_id: sessionId || undefined }),
         signal: abortControllerRef.current.signal,
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+      if (!res.ok) throw await _appError(res);  // carries .status for 401/403/404 UX
       const startData = await res.json();
       if (!startData.job_id) throw new Error("Không nhận được job_id từ server.");
-      const jobOutcome = await streamQueryJob(startData.job_id);
+      const jobId = startData.job_id;
+      let jobOutcome;
+      try {
+        jobOutcome = await streamQueryJob(jobId);
+      } catch (streamErr) {
+        // Phase F.1: EventSource can't send Bearer, so under protected mode the stream
+        // 401s. Fall back to polling /query-status (apiFetch → authed). Real job
+        // errors / timeouts / cancels propagate unchanged (no pointless polling).
+        if (!shouldPollFallback(streamErr, { cancelled: cancelledRef.current })) throw streamErr;
+        console.warn("SSE stream lost; falling back to /query-status polling");
+        const result = await pollQueryStatus(jobId, {
+          apiFetch,
+          isCancelled: () => cancelledRef.current,
+          onStatus: (d) => {
+            if (typeof d?.progress === "number") setJobProgress(Math.max(0, Math.min(100, d.progress)));
+            if (d?.current_node) {
+              const k = String(d.current_node);
+              setJobNode(k);
+              setSeenNodes((prev) => (prev.includes(k) ? prev : [...prev, k]));
+            }
+          },
+        });
+        jobOutcome = { result, streamed: "" };
+      }
       if (cancelledRef.current) return;
       const jobResult = jobOutcome?.result ?? jobOutcome;
       const streamedText = jobOutcome?.streamed ?? "";
@@ -286,7 +321,12 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
     } catch (err) {
       if (cancelledRef.current || err.name === "AbortError" || err.message === "CANCELLED") return;
       console.error("Query error:", err);
-      setMessages((prev) => [...prev, { role: "ai", content: ensureErrMsg(err?.message, "Loi khi goi AI. Vui long thu lai."), evidence: null }]);
+      // 401 also triggers a global redirect (apiFetch fired auth:unauthorized); show a
+      // permission-safe line meanwhile. 403/404 map to friendly text (no raw JSON/id).
+      const content = (isUnauthorizedError(err) || isNotFoundOrForbiddenError(err))
+        ? getUserFriendlyApiError(err)
+        : ensureErrMsg(err?.message, "Loi khi goi AI. Vui long thu lai.");
+      setMessages((prev) => [...prev, { role: "ai", content, evidence: null }]);
     } finally {
       if (!cancelledRef.current) setLoading(false);
     }

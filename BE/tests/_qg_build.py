@@ -50,7 +50,7 @@ def build(*, retriever_chunks=None, summarize=None, **overrides):
         data_dir=d,
         index_meta_path=d / "index.json",
         jobs_update=None,
-        make_cache_key=lambda q, s, m, f=None: f"ck::{q}",
+        make_cache_key=lambda q, s, m, f=None, cs="public": f"ck::{cs}::{q}",
         get_cached=lambda k: cache.get(k),
         set_cached=lambda k, v: cache.__setitem__(k, v),
         check_sources_status=lambda s: {},

@@ -227,11 +227,16 @@ def _cleanup_old_query_jobs() -> None:
         for jid in expired:
             query_jobs.pop(jid, None)
 
-def _make_query_cache_key(q: str, selected_sources: list, use_memory_tree: bool, filters: dict | None = None) -> str:
+def _make_query_cache_key(q: str, selected_sources: list, use_memory_tree: bool,
+                          filters: dict | None = None, cache_scope: str = "public") -> str:
     # Normalize list để key ổn định theo thứ tự chọn
     # LƯU Ý: llm_cache.semantic_lookup/store PARSE JSON này (keys: q/sources/
-    # use_memory_tree/category/language) — đổi format ở đây phải xem lại
+    # use_memory_tree/category/language/cache_scope) — đổi format ở đây phải xem lại
     # app/domains/cache/llm_cache.py::_parse_cache_key (lệch = miss im lặng).
+    # Phase E: cache_scope scopes the key per user under enforcement ("public" flag off /
+    # old keys). The `sources` here are ALREADY the Phase-C resolved owned stems (or the
+    # no-owned sentinel) — never the raw client selection — so a protected key can't be
+    # forged with someone else's document set.
     sources_norm = selected_sources or []
     sources_norm = [str(s) for s in sources_norm if s is not None]
     sources_norm = sorted(sources_norm)
@@ -243,6 +248,7 @@ def _make_query_cache_key(q: str, selected_sources: list, use_memory_tree: bool,
             "use_memory_tree": bool(use_memory_tree),
             "category": (f.get("category") or None),
             "language": (f.get("language") or None),
+            "cache_scope": str(cache_scope or "public"),
         },
         ensure_ascii=False,
         sort_keys=True
@@ -328,7 +334,8 @@ def _sf_nonempty(cached: Optional[dict]) -> bool:
 
 def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict,
                          *, source_ids: Optional[list] = None,
-                         source_context_hash: Optional[str] = None) -> None:
+                         source_context_hash: Optional[str] = None,
+                         user_id: Optional[str] = None, enforce_owner: bool = False) -> None:
     """Mark a follower job done using the leader's cached result. Atomic done+result
     (mirrors _finalize_query_job) — never sets done without the payload."""
     payload = cached.get("payload") if isinstance(cached, dict) else None
@@ -362,6 +369,7 @@ def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict,
             _save_conversation_turns(
                 session_id, question, str(payload.get("answer")),
                 source_ids=source_ids, source_context_hash=source_context_hash, cited_chunk_ids=cited or None,
+                user_id=user_id, enforce_owner=enforce_owner,
             )
     except Exception:
         pass
@@ -369,7 +377,8 @@ def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict,
 
 def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
                        category: Optional[str], language: Optional[str],
-                       session_id: str) -> dict:
+                       session_id: str, *, user_id: Optional[str] = None,
+                       enforce_owner: bool = False, cache_scope: str = "public") -> dict:
     """Decide leader/follower/bypass for one query job. Returns:
       {"served": True}                    -> follower finalized from cache (skip graph)
       {"served": False, "lock": (k, tok)} -> leader (run graph, release lock after)
@@ -403,16 +412,17 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
         _sf_log("singleflight_redis_error_fail_open", reason="unavailable")
         return {"served": False, "lock": None}
 
-    sf_key = llm_cache.single_flight_key(question, sources, language, category, use_mem)
+    # Phase E: user-scoped keys — A and B never coalesce or share a bucket under enforcement.
+    sf_key = llm_cache.single_flight_key(question, sources, language, category, use_mem, cache_scope)
     if not sf_key:
         _SF_METRICS["bypass_unsafe"] += 1
         return {"served": False, "lock": None}
     try:
-        _sf_sch = llm_cache.source_context_hash(sources, language, category, use_mem)
+        _sf_sch = llm_cache.source_context_hash(sources, language, category, use_mem, cache_scope)
     except Exception:
         _sf_sch = None
     cache_key = _make_query_cache_key(question, sources, use_mem,
-                                      {"category": category, "language": language})
+                                      {"category": category, "language": language}, cache_scope)
 
     # Warm cache already? Serve immediately, no lock needed.
     cached = _get_cached_query(cache_key)
@@ -420,7 +430,7 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
         _SF_METRICS["follower_hit"] += 1
         _SF_METRICS["dup_avoided"] += 1
         _sf_log("singleflight_follower_cache_hit", kind="warm")
-        _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch)
+        _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch, user_id=user_id, enforce_owner=enforce_owner)
         return {"served": True}
 
     token = uuid.uuid4().hex
@@ -449,7 +459,7 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
             _SF_METRICS["follower_hit"] += 1
             _SF_METRICS["dup_avoided"] += 1
             _sf_log("singleflight_follower_cache_hit", kind="leader")
-            _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch)
+            _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch, user_id=user_id, enforce_owner=enforce_owner)
             return {"served": True}
         # Leader vanished (errored/released) without a cached answer → fail open early,
         # but re-check cache once to close the write-then-release race.
@@ -464,7 +474,7 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
                 _SF_METRICS["follower_hit"] += 1
                 _SF_METRICS["dup_avoided"] += 1
                 _sf_log("singleflight_follower_cache_hit", kind="leader_race")
-                _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch)
+                _finalize_from_cache(jid, session_id, question, cached, source_ids=sources, source_context_hash=_sf_sch, user_id=user_id, enforce_owner=enforce_owner)
                 return {"served": True}
             break
 
@@ -770,6 +780,12 @@ def auth_me():
 
 @app.get('/stats')
 def stats():
+    # Phase D: /stats exposes GLOBAL, cross-user metrics (index size, cache/queue/
+    # single-flight counters) — internal/admin surface. No admin role exists yet, so the
+    # MVP rule is authenticated-only when protected; true admin-only gating is future work.
+    _uid, err = _require_app_user()
+    if err:
+        return err
     # index meta: key là chunk_id (số dạng string). Các key không phải số được coi là metadata nội bộ.
     num_chunks = 0
     video_stems: set[str] = set()
@@ -828,6 +844,12 @@ def rebuild_index_from_video():
     Rebuild FAISS index ONLY from QR videos asynchronously (video-as-source-of-truth).
     Returns immediately with a job_id for progress tracking.
     """
+    # Phase D: rebuild is a GLOBAL/system-wide operation (no per-user index yet). No admin
+    # role exists, so the MVP rule is authenticated-only when protected; true admin-only
+    # rebuild is future work. The job is stamped with the caller (create_job user_id).
+    _uid, err = _require_app_user()
+    if err:
+        return err
     _cleanup_old_jobs()
 
     # Only one rebuild at a time across gunicorn workers (file lock)
@@ -854,7 +876,7 @@ def rebuild_index_from_video():
     # separate process is visible to /rebuild-status (in-mem `jobs` dict is per-process).
     if _jobs_create_job is not None:
         try:
-            _jobs_create_job(job_id, job_type="rebuild", status="pending", progress=0, current_node="Queued")
+            _jobs_create_job(job_id, job_type="rebuild", status="pending", progress=0, current_node="Queued", user_id=_current_user_id())
         except Exception:
             pass
 
@@ -936,6 +958,13 @@ def run_rebuild_index_job(job_id: str) -> None:
 
 @app.get('/rebuild-status/<job_id>')
 def rebuild_status(job_id: str):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    # Owner gate: a foreign/unknown rebuild job is 404 (no oracle). Under enforcement
+    # create_job always mirrors into jobs.sqlite with the owner, so the store is authoritative.
+    if _auth_protect_enabled() and _derived_job_owner_ok(job_id, uid, ("rebuild", None)) is not True:
+        return jsonify({"error": "Job not found"}), 404
     _cleanup_old_jobs()
     # Prefer the shared jobs.sqlite (worker-visible); fall back to the in-mem dict (legacy).
     if _jobs_get_job is not None:
@@ -1016,10 +1045,189 @@ def _save_source_registry(registry: Dict[str, Dict]) -> None:
         print(f"⚠️ Không thể lưu source_registry.json: {exc}")
 
 
+# -------------------------
+# 🔐 Auth Hardening Phase A — ownership helpers (UNENFORCED this phase).
+# Flag default OFF; helpers are wired to storage (registry/jobs) but no route
+# changes its auth/scoping behavior yet. See the auth-hardening plan.
+# -------------------------
+def _auth_protect_enabled() -> bool:
+    return (os.getenv("AUTH_PROTECT_APP_APIS", "false") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _current_user_id() -> Optional[str]:
+    """Resolve the caller's user_id from the Bearer token, or None. Fail-safe:
+    any error → None (never raises into a route)."""
+    try:
+        from app.domains.auth import service as _auth
+        user = _auth.current_user_from_request()
+        return user.get("user_id") if user else None
+    except Exception:
+        return None
+
+
+def _require_app_user():
+    """Auth gate for protected app routes. Returns (user_id, error_response).
+
+    Flag OFF → (None, None): allow, open/backward-compatible.
+    Flag ON  → (user_id, None) for a valid token, else (None, 401 response).
+    The ownership resolution here is deliberately OUTSIDE any fail-open block —
+    an auth failure denies (fail-closed), it never downgrades to open."""
+    if not _auth_protect_enabled():
+        return None, None
+    uid = _current_user_id()
+    if not uid:
+        return None, (jsonify({"error": "unauthorized"}), 401)
+    return uid, None
+
+
+def owned_stems(user_id: Optional[str]) -> set:
+    """Canonical source stems owned by `user_id`, from the registry.
+
+    When AUTH_PROTECT_APP_APIS is OFF, legacy/None-owner rows are included (today's
+    open behavior). When ON, only rows whose user_id matches are returned (and, for
+    a None user_id, nothing) — the fail-closed base the later phases enforce."""
+    try:
+        registry = _load_source_registry()
+    except Exception:
+        return set()
+    protect = _auth_protect_enabled()
+    out: set = set()
+    for row in registry.values():
+        if not isinstance(row, dict):
+            continue
+        stem = row.get("source_stem")
+        if not stem:
+            continue
+        owner = row.get("user_id")
+        if protect:
+            if user_id is not None and owner == user_id:
+                out.add(stem)
+        else:
+            # open mode: everything visible (owner filter is a no-op)
+            out.add(stem)
+    return out
+
+
+def user_data_root(user_id: Optional[str]) -> "Path":
+    """Physical-ready seam. Returns the CURRENT global data root today; a future
+    physical-partition phase swaps this to DATA_DIR/users/<user_id>/ without
+    touching call sites."""
+    return Path(DATA_DIR_DEFAULT)
+
+
+# Phase C — source/query ownership.
+# Sentinel stem that matches NO chunk: used when an enforced query resolves to zero
+# owned sources, so retrieval returns [] instead of falling back to the global corpus.
+_NO_OWNED_SOURCES = ["\x00__no_owned_sources__"]
+
+
+def _source_owner_ok(stem_or_id: str, user_id: Optional[str]) -> bool:
+    """True when the source (matched by source_id key OR canonical stem) is owned by
+    user_id. Registry is the authoritative owner map; never trusts client-supplied
+    user_id."""
+    try:
+        registry = _load_source_registry()
+    except Exception:
+        return False
+    norm = _normalize_video_stem(stem_or_id)
+    for sid, row in registry.items():
+        if not isinstance(row, dict):
+            continue
+        row_stem = _normalize_video_stem(row.get("source_stem") or row.get("filename") or "")
+        if sid == stem_or_id or (norm and row_stem == norm):
+            return row.get("user_id") == user_id
+    return False
+
+
+def _resolve_owned_query_sources(raw_sources, user_id: Optional[str]):
+    """Return (resolved_sources, error_response|None).
+
+    Flag OFF → (raw, None): today's behavior (empty means global).
+    Flag ON  → owner-scoped:
+      * raw empty   → all owned stems (or the NO-OWNED sentinel → retrieval returns [])
+      * raw present → every requested stem must be owned, else 403; returns the
+        canonicalized owned subset. Never falls back to the global corpus."""
+    if not _auth_protect_enabled():
+        return (list(raw_sources) if raw_sources else []), None
+    owned = owned_stems(user_id)  # set of canonical stems
+    raw = [s for s in (raw_sources or []) if s]
+    if not raw:
+        return (sorted(owned) if owned else list(_NO_OWNED_SOURCES)), None
+    norm = [_normalize_video_stem(s) for s in raw]
+    if any(n not in owned for n in norm):
+        return None, (jsonify({"error": "forbidden_source"}), 403)
+    return norm, None
+
+
+def _ensure_owned_sources(source_names: list, user_id: Optional[str]):
+    """Phase D — derived-artifact generation (summary/mindmap) source gate.
+
+    Flag OFF → None (no-op, open behavior).
+    Flag ON  → every requested source must be an owned stem; a foreign source (or a
+    caller with zero owned sources) → 403. collect_mindmap_input already filters the
+    global index to this allowlist, so a validated subset never leaks another user's
+    chunks. Returns an error response, or None when allowed."""
+    if not _auth_protect_enabled():
+        return None
+    owned = owned_stems(user_id)
+    norm = [_normalize_video_stem(s) for s in (source_names or [])]
+    if not norm or any(n not in owned for n in norm):
+        return (jsonify({"error": "forbidden_source"}), 403)
+    return None
+
+
+def _chunk_owner_stem(chunk_id) -> str:
+    """Canonical source stem a chunk_id belongs to (from index.json), or '' if unknown.
+    Used to owner-check /chunk-text without trusting any client-supplied identity."""
+    try:
+        with open(INDEX_META_JSON_PATH, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return ""
+    m = meta.get(str(chunk_id))
+    if not isinstance(m, dict):
+        return ""
+    return _normalize_video_stem(m.get("source_stem") or m.get("video") or "")
+
+
+def _derived_job_owner_ok(job_id: str, user_id: Optional[str], allowed_types) -> Optional[bool]:
+    """Owner check for derived-artifact jobs (summary/mindmap/rebuild) that live in
+    jobs_store. None if the job is unknown or of a foreign type; True if owned; False
+    if owned by someone else. Both None and False map to 404 (no existence oracle)."""
+    try:
+        from app.domains.jobs.jobs_store import get_job as _js_get
+        row = _js_get(job_id)
+    except Exception:
+        row = None
+    if row is None or row.get("job_type") not in allowed_types:
+        return None
+    return row.get("user_id") == user_id
+
+
+def _query_job_owner_ok(job_id: str, user_id: Optional[str]) -> Optional[bool]:
+    """None if the job is unknown; True if owned by user_id; False if foreign.
+    Checks the in-memory query_jobs map first (carries user_id), then jobs_store —
+    so neither the sqlite nor the in-process fallback path can leak across users."""
+    with query_jobs_lock:
+        j = query_jobs.get(job_id)
+    if j is not None and "user_id" in j:
+        return j.get("user_id") == user_id
+    try:
+        from app.domains.jobs.jobs_store import get_job as _js_get
+        row = _js_get(job_id)
+    except Exception:
+        row = None
+    if row is not None:
+        return row.get("user_id") == user_id
+    if j is not None:
+        return False  # in-mem present without user_id (legacy) → deny under enforcement
+    return None
+
+
 def _update_source_status(
-    source_id: str, 
-    status: str, 
-    progress: float = None, 
+    source_id: str,
+    status: str,
+    progress: float = None,
     error: Optional[str] = None,
     substatus: Optional[str] = None,
     capabilities: Optional[Dict[str, bool]] = None
@@ -1320,33 +1528,42 @@ def _save_conversation_turns(
     cited_chunk_ids: Optional[list] = None,
     rewritten_query: Optional[str] = None,
     metadata: Optional[dict] = None,
+    user_id: Optional[str] = None,
+    enforce_owner: bool = False,
 ) -> None:
     """Persist a user+assistant turn pair to the conversation store. Best-effort:
-    a DB failure must never break /query (fail-open). Gated on the feature flag."""
+    a DB failure must never break /query (fail-open). Gated on the feature flag.
+    When owner-enforced without a user, skip (never write NULL-owned protected rows)."""
     if not _conversation_enabled():
         return
     if not session_id or not (answer or "").strip():
         return
+    if enforce_owner and not user_id:
+        return  # flag on + no authenticated user → do not persist
     try:
         from app.domains.conversation import store as _conv
         _conv.append_message(
             session_id, "user", question,
             selected_source_ids=source_ids, source_context_hash=source_context_hash,
+            user_id=user_id, enforce_owner=enforce_owner,
         )
         _conv.append_message(
             session_id, "assistant", str(answer),
             selected_source_ids=source_ids, source_context_hash=source_context_hash,
             cited_chunk_ids=cited_chunk_ids, rewritten_query=rewritten_query,
             answer_summary=str(answer)[:300], metadata=metadata,
+            user_id=user_id, enforce_owner=enforce_owner,
         )
     except Exception:
         pass
 
 
-def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> None:
+def _finalize_query_job(jid: str, session_id: str, question: str, out: dict,
+                        *, user_id: Optional[str] = None, enforce_owner: bool = False) -> None:
     """Trích payload/status từ kết quả graph → cập nhật query_jobs/jobs_store + persist history.
 
-    Dùng chung cho /query và /query-resume.
+    Dùng chung cho /query và /query-resume. user_id/enforce_owner scope the
+    conversation-turn persistence to the caller (Phase B).
     """
     raw_pl = out.get("payload")
     payload = dict(raw_pl) if isinstance(raw_pl, dict) else {}
@@ -1401,6 +1618,7 @@ def _finalize_query_job(jid: str, session_id: str, question: str, out: dict) -> 
                 source_ids=src, source_context_hash=sch, cited_chunk_ids=cited or None,
                 rewritten_query=(_rewritten if _rewritten and _rewritten != question else None),
                 metadata={"context_mode": _mode, "context_signature": out.get("context_signature")},
+                user_id=user_id, enforce_owner=enforce_owner,
             )
     except Exception:
         pass
@@ -1489,7 +1707,7 @@ def _trigger_background_ingest(source_id: str, file_path: str, filename: str):
 
     job_id = source_id  # re-use source_id làm job_id để FE polling đơn giản
     try:
-        _jobs_create_job(job_id, job_type="ingest", status="pending", progress=0, current_node="Queued")
+        _jobs_create_job(job_id, job_type="ingest", status="pending", progress=0, current_node="Queued", user_id=_current_user_id())
     except Exception:
         pass
 
@@ -1504,6 +1722,9 @@ def _trigger_background_ingest(source_id: str, file_path: str, filename: str):
 # -------------------------
 @app.post('/process-doc')
 def process_doc():
+    _uid, err = _require_app_user()
+    if err:
+        return err
     text = request.json.get('text', '')
     if not text:
         return jsonify({'error': 'Missing text'}), 400
@@ -1598,6 +1819,8 @@ def _ingest_uploaded_file(file) -> dict:
         "status": "processing",
         "progress": 0.0,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        # Auth Hardening Phase A: owner stamp (None when no token). Unenforced this phase.
+        "user_id": _current_user_id(),
     }
     _save_source_registry(registry)
     _trigger_background_ingest(source_id, save_path, filename)
@@ -1614,6 +1837,9 @@ def _ingest_uploaded_file(file) -> dict:
 @app.post('/upload-file')
 def upload_file():
     """Upload file và trả response ngay, xử lý ingest chạy background."""
+    _uid, err = _require_app_user()
+    if err:
+        return err
     file = request.files.get('file')
     if not file or not (file.filename or "").strip():
         return jsonify({'error': 'Missing file'}), 400
@@ -1637,8 +1863,14 @@ def get_source_status(source_id: str):
     Lấy status của một source (processing | ready | error).
     UI sẽ polling endpoint này để cập nhật progress.
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
     status_info = _get_source_status(source_id)
     if not status_info:
+        return jsonify({'error': 'Source not found'}), 404
+    # Owner scope: a foreign source is indistinguishable from a missing one (404).
+    if _auth_protect_enabled() and status_info.get("user_id") != uid:
         return jsonify({'error': 'Source not found'}), 404
     
     status = status_info.get('status', 'processing')
@@ -1675,6 +1907,9 @@ def get_source_status(source_id: str):
 def upload_multiple():
     """Upload nhiều file — mỗi file đi CÙNG luồng async với /upload-file
     (tạo source_id + registry + background ingest) nên FE poll status được."""
+    _uid, err = _require_app_user()
+    if err:
+        return err
     files = request.files.getlist('files')
     if not files:
         return jsonify({'error': 'Missing files'}), 400
@@ -1699,6 +1934,9 @@ def list_indexed():
     Lấy danh sách tất cả sources đã được index.
     Trả về format mà frontend expect: { video: stem, chunks: [...], num_chunks: N }
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
     try:
         with open(INDEX_META_JSON_PATH, encoding='utf-8') as f:
             meta = json.load(f)
@@ -1740,6 +1978,12 @@ def list_indexed():
                 'can_query': True,
             })
 
+        # Owner scope (flag on): return only the caller's sources; legacy NULL-owner
+        # sources are hidden (owned_stems excludes them under enforcement).
+        if _auth_protect_enabled():
+            owned = owned_stems(uid)
+            sources = [s for s in sources if s.get('video_stem') in owned]
+
         return jsonify({'sources': sources})
     except Exception as e:
         import traceback
@@ -1752,6 +1996,16 @@ def list_indexed():
 # -------------------------
 @app.get('/videos/<name>')
 def serve_video(name):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    # Owner scope: derive the canonical stem from the (path-safe) basename and deny
+    # a foreign/missing video with 404 (no existence oracle, no path traversal —
+    # send_from_directory already confines to VIDEOS_DIR).
+    if _auth_protect_enabled():
+        stem = _normalize_video_stem(os.path.basename(name or ""))
+        if not _source_owner_ok(stem, uid):
+            return jsonify({'error': 'Not found'}), 404
     return send_from_directory(VIDEOS_DIR, name)
 
 
@@ -1776,8 +2030,18 @@ def query():
     f_category = (data.get('category') or '').strip() or None
     f_language = (data.get('language') or '').strip() or None
 
+    # Phase C: auth gate FIRST (before input validation) so a no-token request is
+    # 401, not 400. /query stays in-process. Then owner-scope the selected sources.
+    q_uid, q_err = _require_app_user()
+    if q_err:
+        return q_err
+
     if not (q or "").strip():
         return jsonify({'error': 'Missing query'}), 400
+
+    selected_sources, src_err = _resolve_owned_query_sources(selected_sources, q_uid)
+    if src_err:
+        return src_err
 
     # Phase 4: ingress rate limit (off by default; fail-open). Structured 429.
     allowed, retry_after = _rate_limit_check(_rl_scope_id(session_id))
@@ -1792,16 +2056,29 @@ def query():
     job_id = str(uuid.uuid4())
     if not session_id:
         session_id = str(uuid.uuid4())
+    # Auth Hardening Phase B: capture the caller identity NOW (request context;
+    # the query runs in a thread with no request). /query itself is NOT gated in
+    # Phase B — but with the flag on, conversation persistence/read is owner-scoped,
+    # and with no authenticated user we skip it entirely (no NULL-owned rows).
+    req_user_id = _current_user_id()
+    conv_enforce = _auth_protect_enabled()
+    auth_enforce = conv_enforce  # Phase C: same flag gates source/query protection
+    # Phase E: cache scope. Flag off → "public" (shared cache, unchanged). Flag on → the
+    # authenticated user id (never a client-supplied value). The protected /query route
+    # already 401s without a user, so req_user_id is set here under enforcement; the
+    # sentinel is a fail-safe that still never collapses to "public".
+    cache_scope = (req_user_id or "\x00__no_user__") if auth_enforce else "public"
     # Conversation Context Layer: ensure the conversation row exists (flag-gated, fail-open).
-    if _conversation_enabled():
+    if _conversation_enabled() and not (conv_enforce and not req_user_id):
         try:
             from app.domains.conversation import store as _conv
-            _conv.ensure_conversation(session_id, active_source_scope=selected_sources or [])
+            _conv.ensure_conversation(session_id, active_source_scope=selected_sources or [],
+                                      user_id=req_user_id, enforce_owner=conv_enforce)
         except Exception:
             pass
     try:
         from app.domains.jobs.jobs_store import create_job as _js_create
-        _js_create(job_id, job_type="query", status="pending", progress=0, current_node="Queued")
+        _js_create(job_id, job_type="query", status="pending", progress=0, current_node="Queued", user_id=req_user_id)
     except Exception:
         pass
     with query_jobs_lock:
@@ -1810,6 +2087,7 @@ def query():
             "result": None,
             "error": None,
             "created_at": time.time(),
+            "user_id": req_user_id,  # Phase C: owner guard for status/stream/resume
         }
 
     def process_query_job(jid: str, question: str, sources: list, use_mem: bool, category: str | None = None, language: str | None = None) -> None:
@@ -1825,8 +2103,11 @@ def query():
 
             # Phase 3 single-flight: coalesce duplicate/equivalent concurrent queries.
             # Fail-open — leader runs the graph below; follower served from cache returns here.
+            # Phase E: user-scoped keys (cache_scope) — coalescing/cache are safe under the
+            # flag because A and B get different single-flight + bucket keys, so they never
+            # share a leader or an answer. Same user + same resolved sources still coalesce.
             try:
-                _sf = _single_flight_try(jid, question, sources, use_mem, category, language, session_id)
+                _sf = _single_flight_try(jid, question, sources, use_mem, category, language, session_id, user_id=req_user_id, enforce_owner=conv_enforce, cache_scope=cache_scope)
             except Exception:
                 _sf = {"served": False, "lock": None}  # single-flight must never break the answer path
             if _sf.get("served"):
@@ -1850,7 +2131,7 @@ def query():
             # across documents and respects Clear-context. Fail-open to the legacy history.
             conv_ctx = None
             conv_sch = None
-            if _conversation_enabled():
+            if _conversation_enabled() and not (conv_enforce and not req_user_id):
                 try:
                     conv_sch = llm_cache.source_context_hash(sources or [], language, category, bool(use_mem))
                 except Exception:
@@ -1859,6 +2140,7 @@ def query():
                     from app.domains.conversation.context_builder import build_recent_conversation_context
                     conv_ctx = build_recent_conversation_context(
                         session_id, selected_sources=sources or [], source_context_hash=conv_sch,
+                        user_id=req_user_id, enforce_owner=conv_enforce,
                     )
                     if not conv_ctx.is_empty:
                         history = [{"role": t["role"], "content": t["content"]} for t in conv_ctx.turns]
@@ -1900,6 +2182,11 @@ def query():
                 "use_memory_tree": bool(use_mem),
                 "category": category,
                 "language": language,
+                # Phase E: cache scope threaded to the graph so answer-cache read/write
+                # and the retrieval cache key on this user under enforcement ("public"
+                # when the flag is off → shared cache unchanged). Replaces the Phase C
+                # auth_no_cache bypass.
+                "cache_scope": cache_scope,
                 "retrieved_chunks": [],
                 "retrieved_sources": [],
                 "context": "",
@@ -1921,7 +2208,7 @@ def query():
             if review is not None:
                 _mark_query_interrupted(jid, review)
                 return
-            _finalize_query_job(jid, session_id, question, out)
+            _finalize_query_job(jid, session_id, question, out, user_id=req_user_id, enforce_owner=conv_enforce)
         except Exception as exc:
             err_txt = _job_error_text(exc)
             with query_jobs_lock:
@@ -1960,6 +2247,11 @@ def query():
 
 @app.get('/query-status/<job_id>')
 def query_status(job_id: str):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    if _auth_protect_enabled() and _query_job_owner_ok(job_id, uid) is not True:
+        return jsonify({"error": "Job not found"}), 404  # foreign/unknown → no oracle
     _cleanup_old_query_jobs()
     # Ưu tiên SQLite jobs store nếu bật
     if (os.getenv("USE_SQLITE_JOBS", "1") or "").strip() not in ("0", "false", "False"):
@@ -1991,6 +2283,11 @@ def query_resume(job_id: str):
 
     Body: {"action": "approve"|"edit"|"reject", "answer": "..."}.
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
+    if _auth_protect_enabled() and _query_job_owner_ok(job_id, uid) is not True:
+        return jsonify({"error": "Job not found"}), 404  # cannot resume another user's job
     data = request.json or {}
     action = str(data.get("action") or "approve").strip().lower()
     if action not in ("approve", "edit", "reject"):
@@ -2017,6 +2314,10 @@ def query_resume(job_id: str):
                 query_jobs[job_id]["status"] = "interrupted"
         return _admission_rejected_response()
 
+    # Capture caller identity in request context (resume_job runs in a thread).
+    resume_uid = _current_user_id()
+    resume_enforce = _auth_protect_enabled()
+
     def resume_job() -> None:
         try:
             from langgraph.types import Command
@@ -2025,7 +2326,7 @@ def query_resume(job_id: str):
             if review is not None:
                 _mark_query_interrupted(job_id, review)
                 return
-            _finalize_query_job(job_id, session_id, question, out)
+            _finalize_query_job(job_id, session_id, question, out, user_id=resume_uid, enforce_owner=resume_enforce)
         except Exception as exc:
             err_txt = _job_error_text(exc)
             with query_jobs_lock:
@@ -2052,6 +2353,11 @@ def query_stream(job_id: str):
     Dữ liệu đọc từ jobs_store (SQLite) nếu có.
     Phase 2C: header chuẩn proxy + timeout SSE_TIMEOUT_SEC.
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
+    if _auth_protect_enabled() and _query_job_owner_ok(job_id, uid) is not True:
+        return jsonify({"error": "Job not found"}), 404  # SSE token_buffer must not leak cross-user
     sse_timeout = int(os.getenv("SSE_TIMEOUT_SEC", "300"))
 
     def generate():
@@ -2127,11 +2433,12 @@ def _start_summary_job(source_names: list[str], mm_input: dict, content_hash: st
     QUEUE_ENABLED=false (default, unchanged), RQ 'summary' queue when true. FE polling
     (/summary-status) unchanged; result still in summary_store."""
     job_id = str(uuid.uuid4())
+    uid = _current_user_id()  # request context: stamp job + record owner (Phase D)
     from app.domains.jobs.jobs_store import create_job
-    create_job(job_id, job_type="summary", status="pending", progress=0, current_node="Queued")
+    create_job(job_id, job_type="summary", status="pending", progress=0, current_node="Queued", user_id=uid)
     from app.jobs.queue import enqueue_job
     res = enqueue_job(run_summary_job,
-                      args=(job_id, source_names, mm_input, content_hash, length_mode),
+                      args=(job_id, source_names, mm_input, content_hash, length_mode, uid),
                       queue="summary", job_id=job_id)
     _event = {"rq": "summary_enqueue_rq", "thread": "summary_enqueue_thread",
               "thread_fallback": "summary_queue_fallback_thread"}.get(res.get("mode"),
@@ -2141,7 +2448,7 @@ def _start_summary_job(source_names: list[str], mm_input: dict, content_hash: st
 
 
 def run_summary_job(job_id: str, source_names: list[str], mm_input: dict,
-                    content_hash: str, length_mode: str) -> None:
+                    content_hash: str, length_mode: str, user_id: Optional[str] = None) -> None:
     """Summary v2 execution body. Runs in a daemon thread (QUEUE_ENABLED=false) OR an RQ
     worker process (QUEUE_ENABLED=true) — identical behaviour, no Flask request context
     needed. Enqueued by dotted path `app.main.run_summary_job`. The graph owns the
@@ -2159,6 +2466,7 @@ def run_summary_job(job_id: str, source_names: list[str], mm_input: dict,
         _langgraph_invoke(SUMMARY_GRAPH, {
             "job_id": job_id, "source_names": source_names, "mm_input": mm_input,
             "content_hash": content_hash, "length_mode": length_mode,
+            "user_id": user_id,  # Phase D: persisted onto the summary record (owner)
             "progress": 0, "current_node": "", "error": None,
         }, thread_id=job_id)
         print(f"summary_job_done job_id={job_id}", flush=True)
@@ -2178,9 +2486,17 @@ def clear_conversation_context(conversation_id: str):
     """Clear context: stop using older turns from now on. Keeps messages in the DB."""
     if not _conversation_enabled():
         return jsonify({"ok": False, "error": "conversation_context_disabled"}), 404
+    uid, err = _require_app_user()
+    if err:
+        return err
+    enforce = _auth_protect_enabled()
     try:
         from app.domains.conversation import store as _conv
-        reset_at = _conv.set_context_reset(conversation_id)
+        if enforce and _conv.owner_check(conversation_id, uid) is False:
+            return jsonify({"ok": False, "error": "not_found"}), 404  # owner mismatch → no oracle
+        reset_at = _conv.set_context_reset(conversation_id, user_id=uid, enforce_owner=enforce)
+        if enforce and reset_at is None:
+            return jsonify({"ok": False, "error": "not_found"}), 404
         return jsonify({"ok": True, "conversation_id": conversation_id, "context_reset_at": reset_at})
     except Exception as e:
         logging.exception("[conversation] clear-context failed: %s", e)
@@ -2192,10 +2508,16 @@ def delete_conversation(conversation_id: str):
     """Delete chat history: hard-delete this conversation's messages (storage-saving)."""
     if not _conversation_enabled():
         return jsonify({"ok": False, "error": "conversation_context_disabled"}), 404
+    uid, err = _require_app_user()
+    if err:
+        return err
+    enforce = _auth_protect_enabled()
     try:
         from app.domains.conversation import store as _conv
-        removed = _conv.delete_messages(conversation_id)
-        _conv.soft_delete(conversation_id)
+        if enforce and _conv.owner_check(conversation_id, uid) is False:
+            return jsonify({"ok": False, "error": "not_found"}), 404  # owner mismatch → no oracle
+        removed = _conv.delete_messages(conversation_id, user_id=uid, enforce_owner=enforce)
+        _conv.soft_delete(conversation_id, user_id=uid, enforce_owner=enforce)
         return jsonify({"ok": True, "conversation_id": conversation_id, "removed": removed})
     except Exception as e:
         logging.exception("[conversation] delete failed: %s", e)
@@ -2207,9 +2529,15 @@ def get_conversation_messages(conversation_id: str):
     """Return this conversation's messages (for restoring the chat UI)."""
     if not _conversation_enabled():
         return jsonify({"conversation_id": conversation_id, "messages": []}), 404
+    uid, err = _require_app_user()
+    if err:
+        return err
+    enforce = _auth_protect_enabled()
     try:
         from app.domains.conversation import store as _conv
-        msgs = _conv.get_messages(conversation_id)
+        if enforce and _conv.owner_check(conversation_id, uid) is False:
+            return jsonify({"error": "not_found"}), 404  # owner mismatch → no oracle
+        msgs = _conv.get_messages(conversation_id, user_id=uid, enforce_owner=enforce)
         return jsonify({"conversation_id": conversation_id, "messages": msgs})
     except Exception as e:
         logging.exception("[conversation] get-messages failed: %s", e)
@@ -2218,6 +2546,9 @@ def get_conversation_messages(conversation_id: str):
 
 @app.post("/generate-summary")
 def generate_summary():
+    uid, err = _require_app_user()
+    if err:
+        return err
     data = request.json or {}
     raw_sources = data.get("sources") or []
     if not isinstance(raw_sources, list):
@@ -2240,6 +2571,11 @@ def generate_summary():
     if not source_names:
         return jsonify({"error": "No sources selected"}), 400
 
+    # Phase D: every requested source must be owned (foreign → 403, no global fallback).
+    src_err = _ensure_owned_sources(source_names, uid)
+    if src_err:
+        return src_err
+
     raw_mode = str(data.get("length_mode") or "").strip().lower()
     length_mode = raw_mode if raw_mode in summary_schema.LENGTH_MODES else "medium"
 
@@ -2251,7 +2587,10 @@ def generate_summary():
     if not mm_input.get("chunks"):
         return jsonify({"error": "Nguồn chưa có dữ liệu đã index"}), 400
     if not force:
-        cached = summary_store.get_by_hash(content_hash)
+        # Phase D: user-scoped cache lookup so User B can never reuse User A's summary
+        # record even on an identical content_hash. Flag off → today's global lookup.
+        cached = (summary_store.get_by_hash(content_hash, user_id=uid, enforce_owner=True)
+                  if _auth_protect_enabled() else summary_store.get_by_hash(content_hash))
         if cached:
             # Cache hit KHÔNG có job_id — FE phải branch theo status="done" trước (aec6017)
             return jsonify({"status": "done", "result": cached, "cached": True}), 200
@@ -2261,10 +2600,15 @@ def generate_summary():
 
 @app.get("/summary-status/<job_id>")
 def summary_status(job_id: str):
+    uid, err = _require_app_user()
+    if err:
+        return err
     from app.domains.jobs.jobs_store import get_job as _js_get
     j = _js_get(job_id)
     if not j or j.get("job_type") not in ("summary", None):
         return jsonify({"error": "Job not found"}), 404
+    if _auth_protect_enabled() and j.get("user_id") != uid:
+        return jsonify({"error": "Job not found"}), 404  # foreign job → no oracle
     return jsonify({
         "status": j.get("status"),
         "progress": j.get("progress", 0),
@@ -2276,6 +2620,12 @@ def summary_status(job_id: str):
 
 @app.post("/summary-cancel/<job_id>")
 def summary_cancel(job_id: str):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    # Owner check BEFORE cancel — never let User B cancel User A's job.
+    if _auth_protect_enabled() and _derived_job_owner_ok(job_id, uid, ("summary", None)) is not True:
+        return jsonify({"error": "Job not found"}), 404
     from app.domains.jobs.jobs_store import request_cancel
     request_cancel(job_id)
     return jsonify({"ok": True}), 200
@@ -2288,12 +2638,23 @@ def summaries_options():
 
 @app.get('/summaries')
 def list_summaries():
+    uid, err = _require_app_user()
+    if err:
+        return err
+    if _auth_protect_enabled():
+        return jsonify({"summaries": summary_store.list_records(user_id=uid, enforce_owner=True)})
     return jsonify({"summaries": summary_store.list_records()})
 
 
 @app.delete('/summaries/<string:summary_id>')
 def delete_summary(summary_id: str):
-    if not summary_store.delete_record(summary_id):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    # Owner-scoped delete: a foreign summary is indistinguishable from a missing one.
+    ok = (summary_store.delete_record(summary_id, user_id=uid, enforce_owner=True)
+          if _auth_protect_enabled() else summary_store.delete_record(summary_id))
+    if not ok:
         return jsonify({"error": "Summary not found"}), 404
     return jsonify({"message": "Deleted", "removed": 1})
 
@@ -2304,12 +2665,18 @@ def delete_summary(summary_id: str):
 # -------------------------
 @app.post('/delete-source')
 def delete_source():
+    uid, err = _require_app_user()
+    if err:
+        return err
     data = request.json or {}
     video_name = data.get('video', '')
     if not video_name:
         return jsonify({'error': 'Missing video name'}), 400
 
     target_stem = _normalize_video_stem(video_name)
+    # Owner scope: cannot delete another user's source (404, no oracle).
+    if _auth_protect_enabled() and not _source_owner_ok(target_stem, uid):
+        return jsonify({'error': 'Source not found'}), 404
     meta_path = INDEX_META_JSON_PATH
     if not meta_path.exists():
         return jsonify({'error': 'No index metadata found'}), 404
@@ -2404,11 +2771,12 @@ def _start_mindmap_job(source_names: list[str], mm_input: dict, content_hash: st
     QUEUE_ENABLED=false (default, unchanged), RQ 'mindmap' queue when true. FE polling
     (/mindmap-status) unchanged; result still in mindmap_store."""
     job_id = str(uuid.uuid4())
+    uid = _current_user_id()  # request context: stamp job + record owner (Phase D)
     from app.domains.jobs.jobs_store import create_job
-    create_job(job_id, job_type="mindmap", status="pending", progress=0, current_node="Queued")
+    create_job(job_id, job_type="mindmap", status="pending", progress=0, current_node="Queued", user_id=uid)
     from app.jobs.queue import enqueue_job
     res = enqueue_job(run_mindmap_job,
-                      args=(job_id, source_names, mm_input, content_hash),
+                      args=(job_id, source_names, mm_input, content_hash, uid),
                       queue="mindmap", job_id=job_id)
     _event = {"rq": "mindmap_enqueue_rq", "thread": "mindmap_enqueue_thread",
               "thread_fallback": "mindmap_queue_fallback_thread"}.get(res.get("mode"),
@@ -2417,7 +2785,7 @@ def _start_mindmap_job(source_names: list[str], mm_input: dict, content_hash: st
     return job_id
 
 
-def run_mindmap_job(job_id: str, source_names: list[str], mm_input: dict, content_hash: str) -> None:
+def run_mindmap_job(job_id: str, source_names: list[str], mm_input: dict, content_hash: str, user_id: Optional[str] = None) -> None:
     """Mindmap v3 execution body. Runs in a daemon thread (QUEUE_ENABLED=false) OR an RQ
     worker process (QUEUE_ENABLED=true) — identical behaviour, no Flask request context
     needed. Enqueued by dotted path `app.main.run_mindmap_job`. The graph owns the
@@ -2434,7 +2802,8 @@ def run_mindmap_job(job_id: str, source_names: list[str], mm_input: dict, conten
             raise RuntimeError("MINDMAP_GRAPH chưa khởi tạo — kiểm tra logs khởi động.")
         _langgraph_invoke(MINDMAP_GRAPH, {
             "job_id": job_id, "source_names": source_names, "mm_input": mm_input,
-            "content_hash": content_hash, "progress": 0, "current_node": "", "error": None,
+            "content_hash": content_hash, "user_id": user_id,  # Phase D: record owner
+            "progress": 0, "current_node": "", "error": None,
         }, thread_id=job_id)
         print(f"mindmap_job_done job_id={job_id}", flush=True)
     except Exception as e:
@@ -2446,6 +2815,9 @@ def run_mindmap_job(job_id: str, source_names: list[str], mm_input: dict, conten
 # -------------------------
 @app.post("/generate-mindmap")
 def generate_mindmap():
+    uid, err = _require_app_user()
+    if err:
+        return err
     data = request.json or {}
     raw_sources = data.get("sources") or []
     if not isinstance(raw_sources, list):
@@ -2469,6 +2841,11 @@ def generate_mindmap():
     if not source_names:
         return jsonify({"error": "No sources selected"}), 400
 
+    # Phase D: every requested source must be owned (foreign → 403, no global fallback).
+    src_err = _ensure_owned_sources(source_names, uid)
+    if src_err:
+        return src_err
+
     force = bool(data.get("force"))
     try:
         mm_input, content_hash = _mindmap_input_and_hash(source_names)
@@ -2477,7 +2854,9 @@ def generate_mindmap():
     if not mm_input.get("chunks"):
         return jsonify({"error": "Nguồn chưa có dữ liệu đã index"}), 400
     if not force:
-        cached = mindmap_store.get_by_hash(content_hash)
+        # Phase D: user-scoped cache lookup — no cross-user reuse on identical content_hash.
+        cached = (mindmap_store.get_by_hash(content_hash, user_id=uid, enforce_owner=True)
+                  if _auth_protect_enabled() else mindmap_store.get_by_hash(content_hash))
         if cached:
             return jsonify({"status": "done", "result": cached, "cached": True}), 200
     job_id = _start_mindmap_job(source_names, mm_input, content_hash)
@@ -2486,10 +2865,15 @@ def generate_mindmap():
 
 @app.get("/mindmap-status/<job_id>")
 def mindmap_status(job_id: str):
+    uid, err = _require_app_user()
+    if err:
+        return err
     from app.domains.jobs.jobs_store import get_job as _js_get
     j = _js_get(job_id)
     if not j or j.get("job_type") not in ("mindmap", None):
         return jsonify({"error": "Job not found"}), 404
+    if _auth_protect_enabled() and j.get("user_id") != uid:
+        return jsonify({"error": "Job not found"}), 404  # foreign job → no oracle
     result = j.get("result")
     payload: Dict[str, Any] = {
         "status": j.get("status"),
@@ -2508,6 +2892,12 @@ def mindmap_status(job_id: str):
 
 @app.post("/mindmap-cancel/<job_id>")
 def mindmap_cancel(job_id: str):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    # Owner check BEFORE cancel — never let User B cancel User A's job.
+    if _auth_protect_enabled() and _derived_job_owner_ok(job_id, uid, ("mindmap", None)) is not True:
+        return jsonify({"error": "Job not found"}), 404
     from app.domains.jobs.jobs_store import request_cancel
     request_cancel(job_id)
     print(f"mindmap_queue_cancel_requested job_id={job_id}", flush=True)
@@ -2516,22 +2906,40 @@ def mindmap_cancel(job_id: str):
 
 @app.get("/chunk-text/<int:chunk_id>")
 def get_chunk_text(chunk_id: int):
+    uid, err = _require_app_user()
+    if err:
+        return err
     from app.domains.vectorstore import chunk_text_store
     text = chunk_text_store.get_text(chunk_id)
     if text is None:
+        return jsonify({"error": "Chunk not found"}), 404
+    # Owner scope: resolve the chunk's source and deny raw-text exfiltration by global
+    # chunk id. A foreign chunk is indistinguishable from a missing one (404).
+    if _auth_protect_enabled() and not _source_owner_ok(_chunk_owner_stem(chunk_id), uid):
         return jsonify({"error": "Chunk not found"}), 404
     return jsonify({"chunk_id": chunk_id, "text": text}), 200
 
 
 @app.get('/mindmaps')
 def list_mindmaps():
+    uid, err = _require_app_user()
+    if err:
+        return err
+    if _auth_protect_enabled():
+        return jsonify({"mindmaps": mindmap_store.list_records(user_id=uid, enforce_owner=True)})
     return jsonify({"mindmaps": mindmap_store.list_records()})
 
 
 @app.route("/mindmaps/<mindmap_id>", methods=["PUT"])
 def update_mindmap(mindmap_id: str):
     """Lưu bản chỉnh sửa tay từ viewer. Bảo vệ id/hash/created_at/sources gốc."""
-    base = mindmap_store.get_record(mindmap_id)
+    uid, err = _require_app_user()
+    if err:
+        return err
+    # Owner-scoped read: a foreign mindmap reads as not-found, so PUT can never overwrite
+    # another user's record.
+    base = (mindmap_store.get_record(mindmap_id, user_id=uid, enforce_owner=True)
+            if _auth_protect_enabled() else mindmap_store.get_record(mindmap_id))
     if not base:
         return jsonify({"error": "Mind map not found"}), 404
 
@@ -2557,13 +2965,23 @@ def update_mindmap(mindmap_id: str):
     generator["edited"] = True
     record["generator"] = generator
 
-    mindmap_store.save_record(record)
+    # Preserve the owner explicitly (the caller passed the owner check above) so an edit
+    # never nulls the owner column. Flag off → today's call.
+    if _auth_protect_enabled():
+        mindmap_store.save_record(record, user_id=uid)
+    else:
+        mindmap_store.save_record(record)
     return jsonify(record)
 
 
 @app.delete('/mindmaps/<string:mindmap_id>')
 def delete_mindmap(mindmap_id: str):
-    if not mindmap_store.delete_record(mindmap_id):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    ok = (mindmap_store.delete_record(mindmap_id, user_id=uid, enforce_owner=True)
+          if _auth_protect_enabled() else mindmap_store.delete_record(mindmap_id))
+    if not ok:
         return jsonify({"error": "Mind map not found"}), 404
     return jsonify({"message": "Deleted"})
 
@@ -2577,8 +2995,11 @@ def memory_tree_status():
     Kiểm tra trạng thái Memory Tree cho các source.
     Trả về danh sách source với status chi tiết: "none" | "building" | "completed"
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
     try:
-        from app.domains.memory.tree import _load_memory_trees, _normalize_video_stem        
+        from app.domains.memory.tree import _load_memory_trees, _normalize_video_stem
         trees = _load_memory_trees()
         tree_map = {}
         for t in trees:
@@ -2601,7 +3022,13 @@ def memory_tree_status():
                 stem = _normalize_video_stem(video)
                 if stem:
                     all_sources.add(stem)
-        
+
+        # Owner scope: only the caller's stems; legacy NULL-owner sources are hidden
+        # (owned_stems excludes them under enforcement).
+        if _auth_protect_enabled():
+            owned = owned_stems(uid)
+            all_sources = {s for s in all_sources if s in owned}
+
         status_list = []
         for source in sorted(all_sources):
             tree_info = tree_map.get(source)
@@ -2801,15 +3228,21 @@ def delete_source_v2(source_id: str):
     
     Đảm bảo atomicity và rebuild indexes sau khi xóa.
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
     source_id = (source_id or "").strip()
     if not source_id:
         return jsonify({"error": "Missing source_id"}), 400
-    
+
     source_stem = _normalize_video_stem(source_id)
-    
+
     # 1️⃣ VALIDATE: Kiểm tra source có tồn tại không
     exists, source_info = _validate_source_exists(source_id, source_stem)
     if not exists:
+        return jsonify({"error": "Source not found"}), 404
+    # Owner scope: a foreign source is treated as not found (no oracle, no cross-user delete).
+    if _auth_protect_enabled() and (not source_info or source_info.get("user_id") != uid):
         return jsonify({"error": "Source not found"}), 404
 
     # source_id là UUID, KHÔNG phải stem. Lấy stem THẬT từ registry entry để purge
@@ -2912,9 +3345,15 @@ def get_memory_tree(source_stem: str):
     Lấy Memory Tree cho một source cụ thể.
     Trả về tree với nodes (có thể là partial nếu đang building).
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
     try:
-        from app.domains.memory.tree import _load_memory_trees, _normalize_video_stem        
+        from app.domains.memory.tree import _load_memory_trees, _normalize_video_stem
         norm_stem = _normalize_video_stem(source_stem)
+        # Owner scope: a foreign/unowned stem reads as not-found (404, no oracle).
+        if _auth_protect_enabled() and not _source_owner_ok(norm_stem, uid):
+            return jsonify({"error": "Memory tree not found"}), 404
         trees = _load_memory_trees()
         
         for tree in trees:

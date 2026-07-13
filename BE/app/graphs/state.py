@@ -46,6 +46,7 @@ class QueryState(TypedDict):
     standalone_question: NotRequired[str]                # rewritten follow-up (retrieval)
     context_mode: NotRequired[str]                       # standalone | contextual | low_confidence_contextual
     context_signature: NotRequired[Optional[str]]        # hash of the turns used (cache safety)
+    cache_scope: NotRequired[str]                        # Phase E: cache/single-flight scope ("public" flag off, else user_id)
     category: NotRequired[Optional[str]]
     language: NotRequired[Optional[str]]
     retrieved_chunks: list
@@ -79,6 +80,7 @@ class QueryState(TypedDict):
 class SummaryState(TypedDict):
     job_id: str
     source_names: list
+    user_id: NotRequired[Optional[str]]  # Phase D: record owner (bound at persist)
     length_mode: NotRequired[str]
     mm_input: NotRequired[dict]
     content_hash: NotRequired[str]
@@ -99,6 +101,7 @@ class SummaryState(TypedDict):
 class MindmapState(TypedDict):
     job_id: str
     source_names: list
+    user_id: NotRequired[Optional[str]]  # Phase D: record owner (bound at persist)
     mm_input: NotRequired[dict]
     content_hash: NotRequired[str]
     skeleton: NotRequired[list]

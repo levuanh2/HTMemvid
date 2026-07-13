@@ -43,14 +43,24 @@ def init_db() -> None:
                     content_hash TEXT,
                     sources_json TEXT,
                     created_at TEXT,
-                    record_json TEXT
+                    record_json TEXT,
+                    user_id TEXT
                 );
                 """
             )
+            _ensure_columns(conn)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_mm_hash ON mindmaps(content_hash)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mm_user ON mindmaps(user_id, content_hash)")
             conn.commit()
         finally:
             conn.close()
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    # Additive migration (Auth Hardening Phase A): owner column, nullable.
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(mindmaps)").fetchall()}
+    if "user_id" not in cols:
+        conn.execute("ALTER TABLE mindmaps ADD COLUMN user_id TEXT")
 
 
 def _canonical_sources(record: dict[str, Any]) -> list[str]:
@@ -87,7 +97,7 @@ def _decode_record(raw: str | None) -> Optional[dict]:
     return data if isinstance(data, dict) else None
 
 
-def save_record(record: dict) -> None:
+def save_record(record: dict, user_id: Optional[str] = None) -> None:
     init_db()
     normalized = _normalized_record(record)
     with _lock:
@@ -95,8 +105,8 @@ def save_record(record: dict) -> None:
         try:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO mindmaps(id, content_hash, sources_json, created_at, record_json)
-                VALUES(?,?,?,?,?)
+                INSERT OR REPLACE INTO mindmaps(id, content_hash, sources_json, created_at, record_json, user_id)
+                VALUES(?,?,?,?,?,?)
                 """,
                 (
                     str(normalized.get("id") or ""),
@@ -104,6 +114,7 @@ def save_record(record: dict) -> None:
                     json.dumps(normalized.get("sources") or [], ensure_ascii=False),
                     _created_at(normalized),
                     json.dumps(normalized, ensure_ascii=False),
+                    user_id,
                 ),
             )
             conn.commit()
@@ -111,7 +122,10 @@ def save_record(record: dict) -> None:
             conn.close()
 
 
-def get_by_hash(content_hash: str) -> dict | None:
+def get_by_hash(content_hash: str, user_id: Optional[str] = None, enforce_owner: bool = False) -> dict | None:
+    """Auth Hardening Phase D: enforce_owner=True binds the lookup to user_id so User B
+    can never reuse User A's record on an identical content_hash. A legacy NULL owner is
+    excluded under enforcement (user_id=? never matches NULL). Flag off → global lookup."""
     target = str(content_hash or "").strip()
     if not target:
         return None
@@ -119,28 +133,37 @@ def get_by_hash(content_hash: str) -> dict | None:
     with _lock:
         conn = get_conn()
         try:
-            cur = conn.execute(
-                """
-                SELECT record_json
-                FROM mindmaps
-                WHERE content_hash=?
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                (target,),
-            )
+            if enforce_owner:
+                cur = conn.execute(
+                    "SELECT record_json FROM mindmaps WHERE content_hash=? AND user_id=? "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (target, user_id),
+                )
+            else:
+                cur = conn.execute(
+                    "SELECT record_json FROM mindmaps WHERE content_hash=? "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (target,),
+                )
             row = cur.fetchone()
             return _decode_record(row[0]) if row else None
         finally:
             conn.close()
 
 
-def list_records() -> list[dict]:
+def list_records(user_id: Optional[str] = None, enforce_owner: bool = False) -> list[dict]:
+    """enforce_owner=True → only the caller's records (legacy NULL-owner hidden)."""
     init_db()
     with _lock:
         conn = get_conn()
         try:
-            cur = conn.execute("SELECT record_json FROM mindmaps ORDER BY created_at DESC")
+            if enforce_owner:
+                cur = conn.execute(
+                    "SELECT record_json FROM mindmaps WHERE user_id=? ORDER BY created_at DESC",
+                    (user_id,),
+                )
+            else:
+                cur = conn.execute("SELECT record_json FROM mindmaps ORDER BY created_at DESC")
             rows = cur.fetchall()
             records: list[dict] = []
             for row in rows:
@@ -152,26 +175,40 @@ def list_records() -> list[dict]:
             conn.close()
 
 
-def get_record(mindmap_id: str) -> Optional[dict]:
+def get_record(mindmap_id: str, user_id: Optional[str] = None, enforce_owner: bool = False) -> Optional[dict]:
+    """enforce_owner=True → None for another user's (or legacy NULL-owner) record."""
     init_db()
     with _lock:
         conn = get_conn()
         try:
-            row = conn.execute(
-                "SELECT record_json FROM mindmaps WHERE id = ?",
-                (str(mindmap_id),),
-            ).fetchone()
+            if enforce_owner:
+                row = conn.execute(
+                    "SELECT record_json FROM mindmaps WHERE id = ? AND user_id = ?",
+                    (str(mindmap_id), user_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT record_json FROM mindmaps WHERE id = ?",
+                    (str(mindmap_id),),
+                ).fetchone()
         finally:
             conn.close()
     return _decode_record(row[0]) if row else None
 
 
-def delete_record(mindmap_id: str) -> bool:
+def delete_record(mindmap_id: str, user_id: Optional[str] = None, enforce_owner: bool = False) -> bool:
+    """enforce_owner=True → deletes only if owned by user_id (foreign → no-op → False)."""
     init_db()
     with _lock:
         conn = get_conn()
         try:
-            cur = conn.execute("DELETE FROM mindmaps WHERE id=?", (str(mindmap_id or ""),))
+            if enforce_owner:
+                cur = conn.execute(
+                    "DELETE FROM mindmaps WHERE id=? AND user_id=?",
+                    (str(mindmap_id or ""), user_id),
+                )
+            else:
+                cur = conn.execute("DELETE FROM mindmaps WHERE id=?", (str(mindmap_id or ""),))
             conn.commit()
             return cur.rowcount > 0
         finally:

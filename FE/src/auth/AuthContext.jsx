@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { registerUser, loginUser, logoutUser, getCurrentUser } from "../utils/api";
 import { getToken, setToken, clearToken } from "./tokenStore";
+import { installUnauthorizedHandler } from "./authEvents";
 import { AuthContext } from "./context";
 
 // Map backend error codes → friendly Vietnamese messages for the forms.
@@ -40,6 +41,11 @@ export function AuthProvider({ children }) {
     })();
     return () => { alive = false; };
   }, []);
+
+  // Global sign-out signal: apiFetch fires `auth:unauthorized` when a protected app
+  // API returns 401 (expired/invalid token) → clear the token and drop the user so
+  // ProtectedRoute redirects to /login?next=<current>.
+  useEffect(() => installUnauthorizedHandler(() => setUser(null)), []);
 
   const login = useCallback(async (email, password) => {
     setError("");

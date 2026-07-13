@@ -17,7 +17,7 @@ def build_mindmap_graph(*, data_dir: Path, index_meta_path: Path,
                         jobs_update: Callable[..., None] | None,
                         collect_input: Callable[..., dict],
                         pipeline: Any,
-                        persist_record: Callable[[dict], None]) -> Any:
+                        persist_record: Callable[..., None]) -> Any:
     def _set_job(job_id: str, **kw: Any) -> None:
         if jobs_update is None:
             return
@@ -115,7 +115,8 @@ def build_mindmap_graph(*, data_dir: Path, index_meta_path: Path,
             model=resolve_mindmap_model(),
             elapsed_sec=elapsed, degraded_missing=state.get("degraded_missing") or [],
             skeleton_method=state.get("skeleton_method") or "")
-        persist_record(record)
+        # Phase D: bind the record owner (None when unprotected → today's behavior).
+        persist_record(record, user_id=state.get("user_id"))
         _set_job(state["job_id"], status="done", progress=100,
                  current_node="AssemblePersist", result=record)
         return {**state, "result": record, "progress": 100, "current_node": "AssemblePersist"}

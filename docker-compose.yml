@@ -63,6 +63,15 @@ services:
       # Conversation Context Layer (default OFF; conversation DB on the shared memory volume).
       CONVERSATION_CONTEXT_ENABLED: "${CONVERSATION_CONTEXT_ENABLED:-false}"
       CONVERSATIONS_DB_PATH: "${CONVERSATIONS_DB_PATH:-/app/memory/conversations.sqlite}"
+      # Auth (Bearer token). Do NOT hardcode a real secret — pass AUTH_SECRET from the
+      # host/deploy env. Empty in dev → ephemeral per-process secret. Restored here:
+      # this block was dropped during the landing/auth ↔ conversation merge.
+      AUTH_SECRET: "${AUTH_SECRET:-}"
+      AUTH_REQUIRE_SECRET: "${AUTH_REQUIRE_SECRET:-false}"
+      AUTH_TOKEN_TTL_SEC: "${AUTH_TOKEN_TTL_SEC:-604800}"
+      USERS_DB_PATH: "${USERS_DB_PATH:-/app/memory/users.sqlite}"
+      # Multi-user API protection (Auth Hardening). Default OFF = app APIs stay open.
+      AUTH_PROTECT_APP_APIS: "${AUTH_PROTECT_APP_APIS:-false}"
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -27,10 +27,13 @@ def _build(tmp_path, pipeline=None, persist=None, jobs_updates=None):
     def _jobs_update(job_id, **kw):
         (jobs_updates if jobs_updates is not None else []).append(kw)
 
+    _persist = persist or (lambda r: None)
     return build_mindmap_graph(
         data_dir=tmp_path, index_meta_path=meta_path,
         jobs_update=_jobs_update, collect_input=collect_input,
-        pipeline=pipeline or StubPipeline(), persist_record=persist or (lambda r: None),
+        pipeline=pipeline or StubPipeline(),
+        # Phase D: persist_record now takes a user_id kwarg; absorb it for the stub.
+        persist_record=lambda r, **_k: _persist(r),
     )
 
 def test_real_graph_compiles_and_produces_v2_record(tmp_path):

@@ -773,6 +773,12 @@ def auth_me():
 
 @app.get('/stats')
 def stats():
+    # Phase D: /stats exposes GLOBAL, cross-user metrics (index size, cache/queue/
+    # single-flight counters) — internal/admin surface. No admin role exists yet, so the
+    # MVP rule is authenticated-only when protected; true admin-only gating is future work.
+    _uid, err = _require_app_user()
+    if err:
+        return err
     # index meta: key là chunk_id (số dạng string). Các key không phải số được coi là metadata nội bộ.
     num_chunks = 0
     video_stems: set[str] = set()
@@ -831,6 +837,12 @@ def rebuild_index_from_video():
     Rebuild FAISS index ONLY from QR videos asynchronously (video-as-source-of-truth).
     Returns immediately with a job_id for progress tracking.
     """
+    # Phase D: rebuild is a GLOBAL/system-wide operation (no per-user index yet). No admin
+    # role exists, so the MVP rule is authenticated-only when protected; true admin-only
+    # rebuild is future work. The job is stamped with the caller (create_job user_id).
+    _uid, err = _require_app_user()
+    if err:
+        return err
     _cleanup_old_jobs()
 
     # Only one rebuild at a time across gunicorn workers (file lock)
@@ -939,6 +951,13 @@ def run_rebuild_index_job(job_id: str) -> None:
 
 @app.get('/rebuild-status/<job_id>')
 def rebuild_status(job_id: str):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    # Owner gate: a foreign/unknown rebuild job is 404 (no oracle). Under enforcement
+    # create_job always mirrors into jobs.sqlite with the owner, so the store is authoritative.
+    if _auth_protect_enabled() and _derived_job_owner_ok(job_id, uid, ("rebuild", None)) is not True:
+        return jsonify({"error": "Job not found"}), 404
     _cleanup_old_jobs()
     # Prefer the shared jobs.sqlite (worker-visible); fall back to the in-mem dict (legacy).
     if _jobs_get_job is not None:
@@ -1131,6 +1150,51 @@ def _resolve_owned_query_sources(raw_sources, user_id: Optional[str]):
     if any(n not in owned for n in norm):
         return None, (jsonify({"error": "forbidden_source"}), 403)
     return norm, None
+
+
+def _ensure_owned_sources(source_names: list, user_id: Optional[str]):
+    """Phase D — derived-artifact generation (summary/mindmap) source gate.
+
+    Flag OFF → None (no-op, open behavior).
+    Flag ON  → every requested source must be an owned stem; a foreign source (or a
+    caller with zero owned sources) → 403. collect_mindmap_input already filters the
+    global index to this allowlist, so a validated subset never leaks another user's
+    chunks. Returns an error response, or None when allowed."""
+    if not _auth_protect_enabled():
+        return None
+    owned = owned_stems(user_id)
+    norm = [_normalize_video_stem(s) for s in (source_names or [])]
+    if not norm or any(n not in owned for n in norm):
+        return (jsonify({"error": "forbidden_source"}), 403)
+    return None
+
+
+def _chunk_owner_stem(chunk_id) -> str:
+    """Canonical source stem a chunk_id belongs to (from index.json), or '' if unknown.
+    Used to owner-check /chunk-text without trusting any client-supplied identity."""
+    try:
+        with open(INDEX_META_JSON_PATH, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return ""
+    m = meta.get(str(chunk_id))
+    if not isinstance(m, dict):
+        return ""
+    return _normalize_video_stem(m.get("source_stem") or m.get("video") or "")
+
+
+def _derived_job_owner_ok(job_id: str, user_id: Optional[str], allowed_types) -> Optional[bool]:
+    """Owner check for derived-artifact jobs (summary/mindmap/rebuild) that live in
+    jobs_store. None if the job is unknown or of a foreign type; True if owned; False
+    if owned by someone else. Both None and False map to 404 (no existence oracle)."""
+    try:
+        from app.domains.jobs.jobs_store import get_job as _js_get
+        row = _js_get(job_id)
+    except Exception:
+        row = None
+    if row is None or row.get("job_type") not in allowed_types:
+        return None
+    return row.get("user_id") == user_id
 
 
 def _query_job_owner_ok(job_id: str, user_id: Optional[str]) -> Optional[bool]:
@@ -2359,11 +2423,12 @@ def _start_summary_job(source_names: list[str], mm_input: dict, content_hash: st
     QUEUE_ENABLED=false (default, unchanged), RQ 'summary' queue when true. FE polling
     (/summary-status) unchanged; result still in summary_store."""
     job_id = str(uuid.uuid4())
+    uid = _current_user_id()  # request context: stamp job + record owner (Phase D)
     from app.domains.jobs.jobs_store import create_job
-    create_job(job_id, job_type="summary", status="pending", progress=0, current_node="Queued", user_id=_current_user_id())
+    create_job(job_id, job_type="summary", status="pending", progress=0, current_node="Queued", user_id=uid)
     from app.jobs.queue import enqueue_job
     res = enqueue_job(run_summary_job,
-                      args=(job_id, source_names, mm_input, content_hash, length_mode),
+                      args=(job_id, source_names, mm_input, content_hash, length_mode, uid),
                       queue="summary", job_id=job_id)
     _event = {"rq": "summary_enqueue_rq", "thread": "summary_enqueue_thread",
               "thread_fallback": "summary_queue_fallback_thread"}.get(res.get("mode"),
@@ -2373,7 +2438,7 @@ def _start_summary_job(source_names: list[str], mm_input: dict, content_hash: st
 
 
 def run_summary_job(job_id: str, source_names: list[str], mm_input: dict,
-                    content_hash: str, length_mode: str) -> None:
+                    content_hash: str, length_mode: str, user_id: Optional[str] = None) -> None:
     """Summary v2 execution body. Runs in a daemon thread (QUEUE_ENABLED=false) OR an RQ
     worker process (QUEUE_ENABLED=true) — identical behaviour, no Flask request context
     needed. Enqueued by dotted path `app.main.run_summary_job`. The graph owns the
@@ -2391,6 +2456,7 @@ def run_summary_job(job_id: str, source_names: list[str], mm_input: dict,
         _langgraph_invoke(SUMMARY_GRAPH, {
             "job_id": job_id, "source_names": source_names, "mm_input": mm_input,
             "content_hash": content_hash, "length_mode": length_mode,
+            "user_id": user_id,  # Phase D: persisted onto the summary record (owner)
             "progress": 0, "current_node": "", "error": None,
         }, thread_id=job_id)
         print(f"summary_job_done job_id={job_id}", flush=True)
@@ -2470,6 +2536,9 @@ def get_conversation_messages(conversation_id: str):
 
 @app.post("/generate-summary")
 def generate_summary():
+    uid, err = _require_app_user()
+    if err:
+        return err
     data = request.json or {}
     raw_sources = data.get("sources") or []
     if not isinstance(raw_sources, list):
@@ -2492,6 +2561,11 @@ def generate_summary():
     if not source_names:
         return jsonify({"error": "No sources selected"}), 400
 
+    # Phase D: every requested source must be owned (foreign → 403, no global fallback).
+    src_err = _ensure_owned_sources(source_names, uid)
+    if src_err:
+        return src_err
+
     raw_mode = str(data.get("length_mode") or "").strip().lower()
     length_mode = raw_mode if raw_mode in summary_schema.LENGTH_MODES else "medium"
 
@@ -2503,7 +2577,10 @@ def generate_summary():
     if not mm_input.get("chunks"):
         return jsonify({"error": "Nguồn chưa có dữ liệu đã index"}), 400
     if not force:
-        cached = summary_store.get_by_hash(content_hash)
+        # Phase D: user-scoped cache lookup so User B can never reuse User A's summary
+        # record even on an identical content_hash. Flag off → today's global lookup.
+        cached = (summary_store.get_by_hash(content_hash, user_id=uid, enforce_owner=True)
+                  if _auth_protect_enabled() else summary_store.get_by_hash(content_hash))
         if cached:
             # Cache hit KHÔNG có job_id — FE phải branch theo status="done" trước (aec6017)
             return jsonify({"status": "done", "result": cached, "cached": True}), 200
@@ -2513,10 +2590,15 @@ def generate_summary():
 
 @app.get("/summary-status/<job_id>")
 def summary_status(job_id: str):
+    uid, err = _require_app_user()
+    if err:
+        return err
     from app.domains.jobs.jobs_store import get_job as _js_get
     j = _js_get(job_id)
     if not j or j.get("job_type") not in ("summary", None):
         return jsonify({"error": "Job not found"}), 404
+    if _auth_protect_enabled() and j.get("user_id") != uid:
+        return jsonify({"error": "Job not found"}), 404  # foreign job → no oracle
     return jsonify({
         "status": j.get("status"),
         "progress": j.get("progress", 0),
@@ -2528,6 +2610,12 @@ def summary_status(job_id: str):
 
 @app.post("/summary-cancel/<job_id>")
 def summary_cancel(job_id: str):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    # Owner check BEFORE cancel — never let User B cancel User A's job.
+    if _auth_protect_enabled() and _derived_job_owner_ok(job_id, uid, ("summary", None)) is not True:
+        return jsonify({"error": "Job not found"}), 404
     from app.domains.jobs.jobs_store import request_cancel
     request_cancel(job_id)
     return jsonify({"ok": True}), 200
@@ -2540,12 +2628,23 @@ def summaries_options():
 
 @app.get('/summaries')
 def list_summaries():
+    uid, err = _require_app_user()
+    if err:
+        return err
+    if _auth_protect_enabled():
+        return jsonify({"summaries": summary_store.list_records(user_id=uid, enforce_owner=True)})
     return jsonify({"summaries": summary_store.list_records()})
 
 
 @app.delete('/summaries/<string:summary_id>')
 def delete_summary(summary_id: str):
-    if not summary_store.delete_record(summary_id):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    # Owner-scoped delete: a foreign summary is indistinguishable from a missing one.
+    ok = (summary_store.delete_record(summary_id, user_id=uid, enforce_owner=True)
+          if _auth_protect_enabled() else summary_store.delete_record(summary_id))
+    if not ok:
         return jsonify({"error": "Summary not found"}), 404
     return jsonify({"message": "Deleted", "removed": 1})
 
@@ -2662,11 +2761,12 @@ def _start_mindmap_job(source_names: list[str], mm_input: dict, content_hash: st
     QUEUE_ENABLED=false (default, unchanged), RQ 'mindmap' queue when true. FE polling
     (/mindmap-status) unchanged; result still in mindmap_store."""
     job_id = str(uuid.uuid4())
+    uid = _current_user_id()  # request context: stamp job + record owner (Phase D)
     from app.domains.jobs.jobs_store import create_job
-    create_job(job_id, job_type="mindmap", status="pending", progress=0, current_node="Queued", user_id=_current_user_id())
+    create_job(job_id, job_type="mindmap", status="pending", progress=0, current_node="Queued", user_id=uid)
     from app.jobs.queue import enqueue_job
     res = enqueue_job(run_mindmap_job,
-                      args=(job_id, source_names, mm_input, content_hash),
+                      args=(job_id, source_names, mm_input, content_hash, uid),
                       queue="mindmap", job_id=job_id)
     _event = {"rq": "mindmap_enqueue_rq", "thread": "mindmap_enqueue_thread",
               "thread_fallback": "mindmap_queue_fallback_thread"}.get(res.get("mode"),
@@ -2675,7 +2775,7 @@ def _start_mindmap_job(source_names: list[str], mm_input: dict, content_hash: st
     return job_id
 
 
-def run_mindmap_job(job_id: str, source_names: list[str], mm_input: dict, content_hash: str) -> None:
+def run_mindmap_job(job_id: str, source_names: list[str], mm_input: dict, content_hash: str, user_id: Optional[str] = None) -> None:
     """Mindmap v3 execution body. Runs in a daemon thread (QUEUE_ENABLED=false) OR an RQ
     worker process (QUEUE_ENABLED=true) — identical behaviour, no Flask request context
     needed. Enqueued by dotted path `app.main.run_mindmap_job`. The graph owns the
@@ -2692,7 +2792,8 @@ def run_mindmap_job(job_id: str, source_names: list[str], mm_input: dict, conten
             raise RuntimeError("MINDMAP_GRAPH chưa khởi tạo — kiểm tra logs khởi động.")
         _langgraph_invoke(MINDMAP_GRAPH, {
             "job_id": job_id, "source_names": source_names, "mm_input": mm_input,
-            "content_hash": content_hash, "progress": 0, "current_node": "", "error": None,
+            "content_hash": content_hash, "user_id": user_id,  # Phase D: record owner
+            "progress": 0, "current_node": "", "error": None,
         }, thread_id=job_id)
         print(f"mindmap_job_done job_id={job_id}", flush=True)
     except Exception as e:
@@ -2704,6 +2805,9 @@ def run_mindmap_job(job_id: str, source_names: list[str], mm_input: dict, conten
 # -------------------------
 @app.post("/generate-mindmap")
 def generate_mindmap():
+    uid, err = _require_app_user()
+    if err:
+        return err
     data = request.json or {}
     raw_sources = data.get("sources") or []
     if not isinstance(raw_sources, list):
@@ -2727,6 +2831,11 @@ def generate_mindmap():
     if not source_names:
         return jsonify({"error": "No sources selected"}), 400
 
+    # Phase D: every requested source must be owned (foreign → 403, no global fallback).
+    src_err = _ensure_owned_sources(source_names, uid)
+    if src_err:
+        return src_err
+
     force = bool(data.get("force"))
     try:
         mm_input, content_hash = _mindmap_input_and_hash(source_names)
@@ -2735,7 +2844,9 @@ def generate_mindmap():
     if not mm_input.get("chunks"):
         return jsonify({"error": "Nguồn chưa có dữ liệu đã index"}), 400
     if not force:
-        cached = mindmap_store.get_by_hash(content_hash)
+        # Phase D: user-scoped cache lookup — no cross-user reuse on identical content_hash.
+        cached = (mindmap_store.get_by_hash(content_hash, user_id=uid, enforce_owner=True)
+                  if _auth_protect_enabled() else mindmap_store.get_by_hash(content_hash))
         if cached:
             return jsonify({"status": "done", "result": cached, "cached": True}), 200
     job_id = _start_mindmap_job(source_names, mm_input, content_hash)
@@ -2744,10 +2855,15 @@ def generate_mindmap():
 
 @app.get("/mindmap-status/<job_id>")
 def mindmap_status(job_id: str):
+    uid, err = _require_app_user()
+    if err:
+        return err
     from app.domains.jobs.jobs_store import get_job as _js_get
     j = _js_get(job_id)
     if not j or j.get("job_type") not in ("mindmap", None):
         return jsonify({"error": "Job not found"}), 404
+    if _auth_protect_enabled() and j.get("user_id") != uid:
+        return jsonify({"error": "Job not found"}), 404  # foreign job → no oracle
     result = j.get("result")
     payload: Dict[str, Any] = {
         "status": j.get("status"),
@@ -2766,6 +2882,12 @@ def mindmap_status(job_id: str):
 
 @app.post("/mindmap-cancel/<job_id>")
 def mindmap_cancel(job_id: str):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    # Owner check BEFORE cancel — never let User B cancel User A's job.
+    if _auth_protect_enabled() and _derived_job_owner_ok(job_id, uid, ("mindmap", None)) is not True:
+        return jsonify({"error": "Job not found"}), 404
     from app.domains.jobs.jobs_store import request_cancel
     request_cancel(job_id)
     print(f"mindmap_queue_cancel_requested job_id={job_id}", flush=True)
@@ -2774,22 +2896,40 @@ def mindmap_cancel(job_id: str):
 
 @app.get("/chunk-text/<int:chunk_id>")
 def get_chunk_text(chunk_id: int):
+    uid, err = _require_app_user()
+    if err:
+        return err
     from app.domains.vectorstore import chunk_text_store
     text = chunk_text_store.get_text(chunk_id)
     if text is None:
+        return jsonify({"error": "Chunk not found"}), 404
+    # Owner scope: resolve the chunk's source and deny raw-text exfiltration by global
+    # chunk id. A foreign chunk is indistinguishable from a missing one (404).
+    if _auth_protect_enabled() and not _source_owner_ok(_chunk_owner_stem(chunk_id), uid):
         return jsonify({"error": "Chunk not found"}), 404
     return jsonify({"chunk_id": chunk_id, "text": text}), 200
 
 
 @app.get('/mindmaps')
 def list_mindmaps():
+    uid, err = _require_app_user()
+    if err:
+        return err
+    if _auth_protect_enabled():
+        return jsonify({"mindmaps": mindmap_store.list_records(user_id=uid, enforce_owner=True)})
     return jsonify({"mindmaps": mindmap_store.list_records()})
 
 
 @app.route("/mindmaps/<mindmap_id>", methods=["PUT"])
 def update_mindmap(mindmap_id: str):
     """Lưu bản chỉnh sửa tay từ viewer. Bảo vệ id/hash/created_at/sources gốc."""
-    base = mindmap_store.get_record(mindmap_id)
+    uid, err = _require_app_user()
+    if err:
+        return err
+    # Owner-scoped read: a foreign mindmap reads as not-found, so PUT can never overwrite
+    # another user's record.
+    base = (mindmap_store.get_record(mindmap_id, user_id=uid, enforce_owner=True)
+            if _auth_protect_enabled() else mindmap_store.get_record(mindmap_id))
     if not base:
         return jsonify({"error": "Mind map not found"}), 404
 
@@ -2815,13 +2955,23 @@ def update_mindmap(mindmap_id: str):
     generator["edited"] = True
     record["generator"] = generator
 
-    mindmap_store.save_record(record)
+    # Preserve the owner explicitly (the caller passed the owner check above) so an edit
+    # never nulls the owner column. Flag off → today's call.
+    if _auth_protect_enabled():
+        mindmap_store.save_record(record, user_id=uid)
+    else:
+        mindmap_store.save_record(record)
     return jsonify(record)
 
 
 @app.delete('/mindmaps/<string:mindmap_id>')
 def delete_mindmap(mindmap_id: str):
-    if not mindmap_store.delete_record(mindmap_id):
+    uid, err = _require_app_user()
+    if err:
+        return err
+    ok = (mindmap_store.delete_record(mindmap_id, user_id=uid, enforce_owner=True)
+          if _auth_protect_enabled() else mindmap_store.delete_record(mindmap_id))
+    if not ok:
         return jsonify({"error": "Mind map not found"}), 404
     return jsonify({"message": "Deleted"})
 
@@ -2835,8 +2985,11 @@ def memory_tree_status():
     Kiểm tra trạng thái Memory Tree cho các source.
     Trả về danh sách source với status chi tiết: "none" | "building" | "completed"
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
     try:
-        from app.domains.memory.tree import _load_memory_trees, _normalize_video_stem        
+        from app.domains.memory.tree import _load_memory_trees, _normalize_video_stem
         trees = _load_memory_trees()
         tree_map = {}
         for t in trees:
@@ -2859,7 +3012,13 @@ def memory_tree_status():
                 stem = _normalize_video_stem(video)
                 if stem:
                     all_sources.add(stem)
-        
+
+        # Owner scope: only the caller's stems; legacy NULL-owner sources are hidden
+        # (owned_stems excludes them under enforcement).
+        if _auth_protect_enabled():
+            owned = owned_stems(uid)
+            all_sources = {s for s in all_sources if s in owned}
+
         status_list = []
         for source in sorted(all_sources):
             tree_info = tree_map.get(source)
@@ -3176,9 +3335,15 @@ def get_memory_tree(source_stem: str):
     Lấy Memory Tree cho một source cụ thể.
     Trả về tree với nodes (có thể là partial nếu đang building).
     """
+    uid, err = _require_app_user()
+    if err:
+        return err
     try:
-        from app.domains.memory.tree import _load_memory_trees, _normalize_video_stem        
+        from app.domains.memory.tree import _load_memory_trees, _normalize_video_stem
         norm_stem = _normalize_video_stem(source_stem)
+        # Owner scope: a foreign/unowned stem reads as not-found (404, no oracle).
+        if _auth_protect_enabled() and not _source_owner_ok(norm_stem, uid):
+            return jsonify({"error": "Memory tree not found"}), 404
         trees = _load_memory_trees()
         
         for tree in trees:

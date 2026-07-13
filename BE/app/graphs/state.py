@@ -80,6 +80,7 @@ class QueryState(TypedDict):
 class SummaryState(TypedDict):
     job_id: str
     source_names: list
+    user_id: NotRequired[Optional[str]]  # Phase D: record owner (bound at persist)
     length_mode: NotRequired[str]
     mm_input: NotRequired[dict]
     content_hash: NotRequired[str]
@@ -100,6 +101,7 @@ class SummaryState(TypedDict):
 class MindmapState(TypedDict):
     job_id: str
     source_names: list
+    user_id: NotRequired[Optional[str]]  # Phase D: record owner (bound at persist)
     mm_input: NotRequired[dict]
     content_hash: NotRequired[str]
     skeleton: NotRequired[list]

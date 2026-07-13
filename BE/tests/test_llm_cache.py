@@ -641,7 +641,7 @@ def test_standalone_question_with_history_uses_cache(monkeypatch):
     q = "phishing là gì trong an ninh mạng"
 
     out1 = run(graph, init_state(q, conversation_history=list(hist)), thread_id="standalone-1")
-    assert out1["cache_key"] == f"ck::{q}"
+    assert out1["cache_key"] == f"ck::public::{q}"  # Phase E: stub key carries cache_scope
     assert len(seen_qs) == 1
     assert "Lịch sử trò chuyện" not in seen_qs[0]  # history bị bỏ khỏi prompt
     assert cache  # Finalize đã ghi cache

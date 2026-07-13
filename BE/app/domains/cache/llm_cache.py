@@ -217,10 +217,16 @@ def _norm_q(q: str) -> str:
     return normalize_question(q)
 
 
-def _bucket_id(sources: List[str], language: Optional[str], category: Optional[str], use_memory_tree: bool) -> str:
+def _bucket_id(sources: List[str], language: Optional[str], category: Optional[str],
+               use_memory_tree: bool, cache_scope: str = "public") -> str:
+    """Auth Hardening Phase E: cache_scope is the FIRST stable key component so User A's
+    bucket can never equal User B's under enforcement. "public" (flag off) reproduces the
+    pre-Phase-E shared bucket exactly (same hash as before — cache_scope prefixed, but the
+    flag-off path always passes "public")."""
     emb_model = os.getenv("EMBEDDING_MODEL_NAME", "") or ""
     late = os.getenv("LATE_CHUNKING", "1") or ""
     parts = [
+        str(cache_scope or "public"),
         _NS, _ENV, PROMPT_VERSION, emb_model, late, index_version(),
         "|".join(sorted(str(s) for s in (sources or []))),
         str(language or ""), str(category or ""), "1" if use_memory_tree else "0",
@@ -233,12 +239,14 @@ def source_context_hash(
     language: Optional[str] = None,
     category: Optional[str] = None,
     use_memory_tree: bool = True,
+    cache_scope: str = "public",
 ) -> str:
     """Public alias for the cache bucket — the source-scope signature that already
     encodes prompt_version + embedding model + index_version + sources + filters.
     Reused by the Conversation Context Layer to scope turns to a document set so
-    context never leaks across unrelated sources."""
-    return _bucket_id(list(sources or []), language, category, use_memory_tree)
+    context never leaks across unrelated sources. cache_scope (Phase E) scopes it per
+    user under enforcement so a follow-up cannot match another user's turns."""
+    return _bucket_id(list(sources or []), language, category, use_memory_tree, cache_scope)
 
 
 def _entry_key(bucket: str, eid: str) -> str:
@@ -264,6 +272,7 @@ def single_flight_key(
     language: Optional[str] = None,
     category: Optional[str] = None,
     use_memory_tree: bool = True,
+    cache_scope: str = "public",
 ) -> Optional[str]:
     """Redis lock key for request coalescing (Phase 3 single-flight).
 
@@ -281,7 +290,8 @@ def single_flight_key(
     cacheable, _risk = classify_risk(question)
     if not cacheable:
         return None
-    bucket = _bucket_id(list(sources or []), language, category, use_memory_tree)
+    # bucket already folds cache_scope in (Phase E) → A and B never share a leader.
+    bucket = _bucket_id(list(sources or []), language, category, use_memory_tree, cache_scope)
     eid_nd = _eid(strip_diacritics(_norm_q(question)))
     return f"{_NS}:{_ENV}:sf:{bucket}:{eid_nd}"
 
@@ -403,7 +413,9 @@ def semantic_lookup(cache_key: str) -> Optional[dict]:
     q_norm = _norm_q(q)
     if not q_norm:
         return None
-    bucket = _bucket_id(d.get("sources") or [], d.get("language"), d.get("category"), bool(d.get("use_memory_tree")))
+    # Phase E: old keys without cache_scope parse as "public" (backward compatible).
+    scope = d.get("cache_scope") or "public"
+    bucket = _bucket_id(d.get("sources") or [], d.get("language"), d.get("category"), bool(d.get("use_memory_tree")), scope)
 
     try:
         # 1) exact repeat: O(1), không cần embed
@@ -544,7 +556,9 @@ def semantic_store(cache_key: str, value: dict) -> None:
         return
     qv = np.asarray(vec, dtype=np.float32).reshape(-1)
 
-    bucket = _bucket_id(d.get("sources") or [], d.get("language"), d.get("category"), bool(d.get("use_memory_tree")))
+    # Phase E: bucket is scoped by cache_scope (public when flag off / old keys).
+    scope = d.get("cache_scope") or "public"
+    bucket = _bucket_id(d.get("sources") or [], d.get("language"), d.get("category"), bool(d.get("use_memory_tree")), scope)
     q_nd = strip_diacritics(q_norm)
     now = time.time()
     entry = {
@@ -585,9 +599,11 @@ def semantic_store(cache_key: str, value: dict) -> None:
 # --- Tier 3: retrieval result cache ------------------------------------------
 
 def _retrieval_key(query: str, sources: List[str], top_k: int,
-                   category: Optional[str], language: Optional[str]) -> str:
+                   category: Optional[str], language: Optional[str],
+                   cache_scope: str = "public") -> str:
     emb_model = os.getenv("EMBEDDING_MODEL_NAME", "") or ""
     parts = [
+        str(cache_scope or "public"),
         _norm_q(query), "|".join(sorted(str(s) for s in (sources or []))),
         str(top_k), index_version(), emb_model, str(category or ""), str(language or ""),
     ]
@@ -596,7 +612,8 @@ def _retrieval_key(query: str, sources: List[str], top_k: int,
 
 
 def retrieval_get(query: str, sources: List[str], top_k: int,
-                  category: Optional[str] = None, language: Optional[str] = None) -> Optional[list]:
+                  category: Optional[str] = None, language: Optional[str] = None,
+                  cache_scope: str = "public") -> Optional[list]:
     """Trả list[RetrievedChunk] nếu hit, None nếu miss/lỗi."""
     if not _RETRIEVAL_ENABLED:
         return None
@@ -604,7 +621,7 @@ def retrieval_get(query: str, sources: List[str], top_k: int,
     if r is None:
         return None
     try:
-        raw = r.get(_retrieval_key(query, sources, top_k, category, language))
+        raw = r.get(_retrieval_key(query, sources, top_k, category, language, cache_scope))
         if not raw:
             METRICS["ret_misses"] += 1
             return None
@@ -620,7 +637,8 @@ def retrieval_get(query: str, sources: List[str], top_k: int,
 
 
 def retrieval_put(query: str, sources: List[str], top_k: int,
-                  category: Optional[str], language: Optional[str], chunks: list) -> None:
+                  category: Optional[str], language: Optional[str], chunks: list,
+                  cache_scope: str = "public") -> None:
     if not _RETRIEVAL_ENABLED or not chunks:
         return
     r = redis_client.get_redis()
@@ -628,7 +646,7 @@ def retrieval_put(query: str, sources: List[str], top_k: int,
         return
     try:
         payload = json.dumps([dataclasses.asdict(c) for c in chunks], ensure_ascii=False)
-        r.setex(_retrieval_key(query, sources, top_k, category, language), _RETRIEVAL_TTL, payload)
+        r.setex(_retrieval_key(query, sources, top_k, category, language, cache_scope), _RETRIEVAL_TTL, payload)
     except Exception as e:
         redis_client.mark_unavailable()
         METRICS["errors"] += 1

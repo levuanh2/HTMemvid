@@ -97,21 +97,7 @@ def test_filter_by_sources_excludes_non_owned(monkeypatch):
     assert r._filter_by_sources([]) == [0]                   # open (None/empty) → all
 
 
-# ---- cache bypass under auth protection (real graph) -----------------------
-
-def test_auth_no_cache_bypasses_answer_cache(monkeypatch):
-    from tests import _qg_build as qb
-    qb.base_env(monkeypatch)
-    g, cache = qb.build()
-    # standalone question WOULD normally cache; auth_no_cache=True must skip write
-    state = qb.init_state("MemVid dùng cơ sở dữ liệu nào?", auth_no_cache=True)
-    qb.run(g, state, thread_id="tnocache")
-    assert cache == {}  # nothing written when protected
-
-    # control: without the flag, it caches as before
-    g2, cache2 = qb.build()
-    qb.run(g2, qb.init_state("MemVid dùng cơ sở dữ liệu nào?"), thread_id="tcache")
-    assert cache2  # cached normally
+# ---- cache scope under auth protection: see test_cache_ownership.py (Phase E) ----------
 
 
 class _RecordingRetriever:
@@ -153,15 +139,3 @@ def test_user_a_and_b_empty_sources_scoped(monkeypatch):
         ra, _ = be._resolve_owned_query_sources([], "A")
         rb, _ = be._resolve_owned_query_sources([], "B")
     assert ra == ["doc_a"] and rb == ["doc_b"]  # disjoint, no cross-user, no global
-
-
-def test_cross_user_no_shared_cache_under_flag(monkeypatch):
-    """A and B, same question, different owned sources → neither writes a shared
-    answer-cache entry (bypass), so no cross-user reuse."""
-    from tests import _qg_build as qb
-    qb.base_env(monkeypatch)
-    gA, cacheA = qb.build()
-    qb.run(gA, qb.init_state("cùng câu hỏi", selected_sources=["doc_a"], auth_no_cache=True), thread_id="ta")
-    gB, cacheB = qb.build()
-    qb.run(gB, qb.init_state("cùng câu hỏi", selected_sources=["doc_b"], auth_no_cache=True), thread_id="tb")
-    assert cacheA == {} and cacheB == {}  # nothing cached for either → no shared answer

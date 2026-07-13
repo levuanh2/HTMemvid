@@ -227,11 +227,16 @@ def _cleanup_old_query_jobs() -> None:
         for jid in expired:
             query_jobs.pop(jid, None)
 
-def _make_query_cache_key(q: str, selected_sources: list, use_memory_tree: bool, filters: dict | None = None) -> str:
+def _make_query_cache_key(q: str, selected_sources: list, use_memory_tree: bool,
+                          filters: dict | None = None, cache_scope: str = "public") -> str:
     # Normalize list để key ổn định theo thứ tự chọn
     # LƯU Ý: llm_cache.semantic_lookup/store PARSE JSON này (keys: q/sources/
-    # use_memory_tree/category/language) — đổi format ở đây phải xem lại
+    # use_memory_tree/category/language/cache_scope) — đổi format ở đây phải xem lại
     # app/domains/cache/llm_cache.py::_parse_cache_key (lệch = miss im lặng).
+    # Phase E: cache_scope scopes the key per user under enforcement ("public" flag off /
+    # old keys). The `sources` here are ALREADY the Phase-C resolved owned stems (or the
+    # no-owned sentinel) — never the raw client selection — so a protected key can't be
+    # forged with someone else's document set.
     sources_norm = selected_sources or []
     sources_norm = [str(s) for s in sources_norm if s is not None]
     sources_norm = sorted(sources_norm)
@@ -243,6 +248,7 @@ def _make_query_cache_key(q: str, selected_sources: list, use_memory_tree: bool,
             "use_memory_tree": bool(use_memory_tree),
             "category": (f.get("category") or None),
             "language": (f.get("language") or None),
+            "cache_scope": str(cache_scope or "public"),
         },
         ensure_ascii=False,
         sort_keys=True
@@ -372,7 +378,7 @@ def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict,
 def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
                        category: Optional[str], language: Optional[str],
                        session_id: str, *, user_id: Optional[str] = None,
-                       enforce_owner: bool = False) -> dict:
+                       enforce_owner: bool = False, cache_scope: str = "public") -> dict:
     """Decide leader/follower/bypass for one query job. Returns:
       {"served": True}                    -> follower finalized from cache (skip graph)
       {"served": False, "lock": (k, tok)} -> leader (run graph, release lock after)
@@ -406,16 +412,17 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
         _sf_log("singleflight_redis_error_fail_open", reason="unavailable")
         return {"served": False, "lock": None}
 
-    sf_key = llm_cache.single_flight_key(question, sources, language, category, use_mem)
+    # Phase E: user-scoped keys — A and B never coalesce or share a bucket under enforcement.
+    sf_key = llm_cache.single_flight_key(question, sources, language, category, use_mem, cache_scope)
     if not sf_key:
         _SF_METRICS["bypass_unsafe"] += 1
         return {"served": False, "lock": None}
     try:
-        _sf_sch = llm_cache.source_context_hash(sources, language, category, use_mem)
+        _sf_sch = llm_cache.source_context_hash(sources, language, category, use_mem, cache_scope)
     except Exception:
         _sf_sch = None
     cache_key = _make_query_cache_key(question, sources, use_mem,
-                                      {"category": category, "language": language})
+                                      {"category": category, "language": language}, cache_scope)
 
     # Warm cache already? Serve immediately, no lock needed.
     cached = _get_cached_query(cache_key)
@@ -2056,6 +2063,11 @@ def query():
     req_user_id = _current_user_id()
     conv_enforce = _auth_protect_enabled()
     auth_enforce = conv_enforce  # Phase C: same flag gates source/query protection
+    # Phase E: cache scope. Flag off → "public" (shared cache, unchanged). Flag on → the
+    # authenticated user id (never a client-supplied value). The protected /query route
+    # already 401s without a user, so req_user_id is set here under enforcement; the
+    # sentinel is a fail-safe that still never collapses to "public".
+    cache_scope = (req_user_id or "\x00__no_user__") if auth_enforce else "public"
     # Conversation Context Layer: ensure the conversation row exists (flag-gated, fail-open).
     if _conversation_enabled() and not (conv_enforce and not req_user_id):
         try:
@@ -2091,16 +2103,13 @@ def query():
 
             # Phase 3 single-flight: coalesce duplicate/equivalent concurrent queries.
             # Fail-open — leader runs the graph below; follower served from cache returns here.
-            # Phase C: with the flag on, BYPASS single-flight (no cross-user coalescing)
-            # until Phase E adds user-scoped keys. Resolved per-user sources already
-            # scope the bucket; the bypass is belt-and-suspenders.
-            if auth_enforce:
-                _sf = {"served": False, "lock": None}
-            else:
-                try:
-                    _sf = _single_flight_try(jid, question, sources, use_mem, category, language, session_id, user_id=req_user_id, enforce_owner=conv_enforce)
-                except Exception:
-                    _sf = {"served": False, "lock": None}  # single-flight must never break the answer path
+            # Phase E: user-scoped keys (cache_scope) — coalescing/cache are safe under the
+            # flag because A and B get different single-flight + bucket keys, so they never
+            # share a leader or an answer. Same user + same resolved sources still coalesce.
+            try:
+                _sf = _single_flight_try(jid, question, sources, use_mem, category, language, session_id, user_id=req_user_id, enforce_owner=conv_enforce, cache_scope=cache_scope)
+            except Exception:
+                _sf = {"served": False, "lock": None}  # single-flight must never break the answer path
             if _sf.get("served"):
                 return  # follower finalized from the leader's cached answer
             sf_lock = _sf.get("lock")
@@ -2173,10 +2182,11 @@ def query():
                 "use_memory_tree": bool(use_mem),
                 "category": category,
                 "language": language,
-                # Phase C: with auth protection on, bypass the shared semantic answer
-                # cache (read + write) so no cross-user answer reuse (e.g. via stem
-                # recycling after delete/reupload). Proper user-scoped keys land in Phase E.
-                "auth_no_cache": auth_enforce,
+                # Phase E: cache scope threaded to the graph so answer-cache read/write
+                # and the retrieval cache key on this user under enforcement ("public"
+                # when the flag is off → shared cache unchanged). Replaces the Phase C
+                # auth_no_cache bypass.
+                "cache_scope": cache_scope,
                 "retrieved_chunks": [],
                 "retrieved_sources": [],
                 "context": "",

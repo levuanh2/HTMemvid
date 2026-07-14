@@ -15,13 +15,13 @@ services:
       DATA_DIR: /app
       PORT: "8080"
       WEB_CONCURRENCY: "2"
-      OLLAMA_HOST: http://host.docker.internal:11434
-      SLM_MODEL_CHAT: qwen3.5:9b
-      SLM_MODEL: qwen3.5:9b
-      MINDMAP_MODEL: qwen3.5:9b
-      OLLAMA_REASONING: "0"
-      LLM_MAX_TOKENS: "8192"
-      HYBRID_TOP_K: "6"
+      OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
+      SLM_MODEL_CHAT: "${SLM_MODEL_CHAT:-qwen2.5:7b-instruct}"
+      SLM_MODEL: "${SLM_MODEL:-qwen2.5:7b-instruct}"
+      MINDMAP_MODEL: "${MINDMAP_MODEL:-qwen2.5:7b-instruct}"
+      OLLAMA_REASONING: "${OLLAMA_REASONING:-0}"
+      LLM_MAX_TOKENS: "${LLM_MAX_TOKENS:-8192}"
+      HYBRID_TOP_K: "${HYBRID_TOP_K:-6}"
       SESSION_TTL_HOURS: "24"
       SSE_TIMEOUT_SEC: "300"
       ENABLE_QUERY_CITATION_PROMPT: "1"
@@ -30,14 +30,14 @@ services:
       USE_LC_ENSEMBLE: "1"
       USE_LC_INGEST: "1"
       # Late chunking (mặc định ON): bge-m3 long-context, mean-pool query+chunk cùng encoder.
-      EMBEDDING_MODEL_NAME: BAAI/bge-m3
-      LATE_CHUNKING: "1"
+      EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-BAAI/bge-m3}"
+      LATE_CHUNKING: "${LATE_CHUNKING:-1}"
       HF_HOME: /root/.cache/huggingface
       LLM_GATEWAY_ADDR: llm-gateway:50051
       MINDMAP_SERVICE_ADDR: mindmap-service:50052
-      MINDMAP_LLM_TIMEOUT_SEC: "240"   # mirror mindmap-service (dùng khi chạy Local pipeline)
-      SUMMARY_LLM_TIMEOUT_SEC: "240"   # summary v2 chạy trong backend (monolith) — cùng lý do CPU chậm
-      SUMMARY_PARALLEL: "2"
+      MINDMAP_LLM_TIMEOUT_SEC: "${MINDMAP_LLM_TIMEOUT_SEC:-300}"   # mirror mindmap-service (dùng khi chạy Local pipeline)
+      SUMMARY_LLM_TIMEOUT_SEC: "${SUMMARY_LLM_TIMEOUT_SEC:-300}"   # summary v2 chạy trong backend (monolith) — cùng lý do CPU chậm
+      SUMMARY_PARALLEL: "${SUMMARY_PARALLEL:-2}"
       # Cache Redis (semantic + retrieval) — fail-open: redis chết thì backend vẫn chạy.
       REDIS_URL: redis://redis:6379/0
       CACHE_ENV: prod
@@ -100,12 +100,12 @@ services:
       - hf_cache:/root/.cache/huggingface
     environment:
       DATA_DIR: /app
-      OLLAMA_HOST: http://host.docker.internal:11434
-      SLM_MODEL_CHAT: qwen3.5:9b
-      SLM_MODEL: qwen3.5:9b
-      OLLAMA_REASONING: "0"
-      LLM_MAX_TOKENS: "8192"
-      HYBRID_TOP_K: "6"
+      OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
+      SLM_MODEL_CHAT: "${SLM_MODEL_CHAT:-qwen2.5:7b-instruct}"
+      SLM_MODEL: "${SLM_MODEL:-qwen2.5:7b-instruct}"
+      OLLAMA_REASONING: "${OLLAMA_REASONING:-0}"
+      LLM_MAX_TOKENS: "${LLM_MAX_TOKENS:-8192}"
+      HYBRID_TOP_K: "${HYBRID_TOP_K:-6}"
       SESSION_TTL_HOURS: "24"
       SSE_TIMEOUT_SEC: "300"
       ENABLE_QUERY_CITATION_PROMPT: "1"
@@ -113,14 +113,14 @@ services:
       USE_LC_QA_CHAIN: "1"
       USE_LC_ENSEMBLE: "1"
       USE_LC_INGEST: "1"
-      EMBEDDING_MODEL_NAME: BAAI/bge-m3
-      LATE_CHUNKING: "1"
+      EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-BAAI/bge-m3}"
+      LATE_CHUNKING: "${LATE_CHUNKING:-1}"
       HF_HOME: /root/.cache/huggingface
       LLM_GATEWAY_PORT: "50051"
       # Phase 2: global LLM concurrency cap (DR-3 D2). Host env overrides for tuning:
       #   MAX_CONCURRENT_LLM_CALLS=1 docker compose up -d llm-gateway
-      MAX_CONCURRENT_LLM_CALLS: "${MAX_CONCURRENT_LLM_CALLS:-2}"
-      LLM_QUEUE_WAIT_TIMEOUT_SECONDS: "${LLM_QUEUE_WAIT_TIMEOUT_SECONDS:-30}"
+      MAX_CONCURRENT_LLM_CALLS: "${MAX_CONCURRENT_LLM_CALLS:-1}"
+      LLM_QUEUE_WAIT_TIMEOUT_SECONDS: "${LLM_QUEUE_WAIT_TIMEOUT_SECONDS:-180}"
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -136,13 +136,13 @@ services:
       - hf_cache:/root/.cache/huggingface
     environment:
       DATA_DIR: /app
-      OLLAMA_HOST: http://host.docker.internal:11434
-      SLM_MODEL_CHAT: qwen3.5:9b
-      SLM_MODEL: qwen3.5:9b
-      MINDMAP_MODEL: qwen3.5:9b
-      OLLAMA_REASONING: "0"
-      LLM_MAX_TOKENS: "8192"
-      HYBRID_TOP_K: "6"
+      OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
+      SLM_MODEL_CHAT: "${SLM_MODEL_CHAT:-qwen2.5:7b-instruct}"
+      SLM_MODEL: "${SLM_MODEL:-qwen2.5:7b-instruct}"
+      MINDMAP_MODEL: "${MINDMAP_MODEL:-qwen2.5:7b-instruct}"
+      OLLAMA_REASONING: "${OLLAMA_REASONING:-0}"
+      LLM_MAX_TOKENS: "${LLM_MAX_TOKENS:-8192}"
+      HYBRID_TOP_K: "${HYBRID_TOP_K:-6}"
       SESSION_TTL_HOURS: "24"
       SSE_TIMEOUT_SEC: "300"
       ENABLE_QUERY_CITATION_PROMPT: "1"
@@ -150,13 +150,13 @@ services:
       USE_LC_QA_CHAIN: "1"
       USE_LC_ENSEMBLE: "1"
       USE_LC_INGEST: "1"
-      EMBEDDING_MODEL_NAME: BAAI/bge-m3
-      LATE_CHUNKING: "1"
+      EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-BAAI/bge-m3}"
+      LATE_CHUNKING: "${LATE_CHUNKING:-1}"
       HF_HOME: /root/.cache/huggingface
       MINDMAP_SERVICE_PORT: "50052"
       # Đo thật 2026-07-05 (qwen3.5:9b, Ollama CPU host): enrich 1 nhánh với prompt
       # nested-detail ~120-160s → default 120s làm 3/4 nhánh degraded. 240s có đệm.
-      MINDMAP_LLM_TIMEOUT_SEC: "240"
+      MINDMAP_LLM_TIMEOUT_SEC: "${MINDMAP_LLM_TIMEOUT_SEC:-300}"
       # mindmap-service cũng là client của llm-gateway (dùng chung 1 model embedding + policy provider)
       LLM_GATEWAY_ADDR: llm-gateway:50051
     restart: always
@@ -182,18 +182,18 @@ services:
       - hf_cache:/root/.cache/huggingface
     environment:
       DATA_DIR: /app
-      OLLAMA_HOST: http://host.docker.internal:11434
-      SLM_MODEL_CHAT: qwen3.5:9b
-      SLM_MODEL: qwen3.5:9b
-      OLLAMA_REASONING: "0"
-      LLM_MAX_TOKENS: "8192"
-      HYBRID_TOP_K: "6"
+      OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
+      SLM_MODEL_CHAT: "${SLM_MODEL_CHAT:-qwen2.5:7b-instruct}"
+      SLM_MODEL: "${SLM_MODEL:-qwen2.5:7b-instruct}"
+      OLLAMA_REASONING: "${OLLAMA_REASONING:-0}"
+      LLM_MAX_TOKENS: "${LLM_MAX_TOKENS:-8192}"
+      HYBRID_TOP_K: "${HYBRID_TOP_K:-6}"
       USE_LC_VECTOR_STORE: "1"
       USE_LC_QA_CHAIN: "1"
       USE_LC_ENSEMBLE: "1"
       USE_LC_INGEST: "1"
-      EMBEDDING_MODEL_NAME: BAAI/bge-m3
-      LATE_CHUNKING: "1"
+      EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-BAAI/bge-m3}"
+      LATE_CHUNKING: "${LATE_CHUNKING:-1}"
       HF_HOME: /root/.cache/huggingface
       LLM_GATEWAY_ADDR: llm-gateway:50051
       MINDMAP_SERVICE_ADDR: mindmap-service:50052

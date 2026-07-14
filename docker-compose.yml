@@ -38,6 +38,7 @@ services:
       MINDMAP_LLM_TIMEOUT_SEC: "${MINDMAP_LLM_TIMEOUT_SEC:-300}"   # mirror mindmap-service (dùng khi chạy Local pipeline)
       SUMMARY_LLM_TIMEOUT_SEC: "${SUMMARY_LLM_TIMEOUT_SEC:-300}"   # summary v2 chạy trong backend (monolith) — cùng lý do CPU chậm
       SUMMARY_PARALLEL: "${SUMMARY_PARALLEL:-2}"
+      SLM_MODEL_SUMMARY: "${SLM_MODEL_SUMMARY:-qwen2.5:7b-instruct}"
       # Cache Redis (semantic + retrieval) — fail-open: redis chết thì backend vẫn chạy.
       REDIS_URL: redis://redis:6379/0
       CACHE_ENV: prod
@@ -188,6 +189,7 @@ services:
       OLLAMA_REASONING: "${OLLAMA_REASONING:-0}"
       LLM_MAX_TOKENS: "${LLM_MAX_TOKENS:-8192}"
       HYBRID_TOP_K: "${HYBRID_TOP_K:-6}"
+      SLM_MODEL_SUMMARY: "${SLM_MODEL_SUMMARY:-qwen2.5:7b-instruct}"
       USE_LC_VECTOR_STORE: "1"
       USE_LC_QA_CHAIN: "1"
       USE_LC_ENSEMBLE: "1"

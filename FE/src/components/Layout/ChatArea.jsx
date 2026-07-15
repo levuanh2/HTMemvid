@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import { apiFetch, apiUrl, clearConversationContext, deleteConversation, _appError, isNotFoundOrForbiddenError, isUnauthorizedError, getUserFriendlyApiError } from "../../utils/api";
 import { newConversationId } from "../../utils/conversation";
 import { pollQueryStatus, shouldPollFallback } from "../../utils/queryPolling";
-import { shouldFocusComposer, shouldRefocusComposer } from "../../utils/chatFocus";
+import { shouldFocusComposer, shouldRefocusComposer, shouldFocusOnSlash } from "../../utils/chatFocus";
 import { Icon } from "../ui/Icon";
 import { nodeLabel, processCitations, parseCiteHref, normStem } from "../../utils/evidence";
 
@@ -400,6 +400,25 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
     })) return;
     ta.focus();
   }, [loading]);
+
+  // `/` nhảy vào ô nhập. Chat vẫn mount PHÍA DƯỚI mọi overlay nên không guard là gõ `/`
+  // lúc đang mở sơ đồ/hộp thoại sẽ rơi xuống ô nhập bị che.
+  // `[aria-modal="true"]` bắt Modal.jsx (SummaryModal); `.me-container` bắt overlay sơ đồ
+  // (MindElixirView dựng overlay tay, không có role dialog).
+  const focusFromSlash = useCallback((e) => {
+    if (!shouldFocusOnSlash(e, {
+      activeElement: document.activeElement,
+      overlayOpen: Boolean(document.querySelector('[aria-modal="true"], .me-container')),
+    })) return;
+    const ta = textareaRef.current;
+    if (!ta || ta.disabled) return;
+    e.preventDefault();   // nếu không, ký tự "/" lọt vào ô ngay sau khi focus
+    ta.focus();
+  }, []);
+  useEffect(() => {
+    window.addEventListener("keydown", focusFromSlash);
+    return () => window.removeEventListener("keydown", focusFromSlash);
+  }, [focusFromSlash]);
 
   // Task 16 — "Hỏi về đoạn này" (mindmap EvidenceDrawer) prefills the composer.
   // Keyed on the whole draft object (not just `.text`) so asking about the

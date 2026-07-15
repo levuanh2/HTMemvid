@@ -52,3 +52,18 @@ export function shouldRefocusComposer({ activeElement, body, composer, coarsePoi
   if (!activeElement) return true;
   return activeElement === body || activeElement === composer;
 }
+
+/**
+ * `/` để nhảy vào ô nhập (khi không gõ ở đâu khác).
+ * `overlayOpen`: sơ đồ tư duy / hộp thoại đang mở đè lên thì gõ `/` không được rơi xuống
+ * chat nằm dưới overlay.
+ */
+export function shouldFocusOnSlash(event, { activeElement, overlayOpen = false } = {}) {
+  if (!event || event.key !== "/") return false;
+  if (event.ctrlKey || event.metaKey || event.altKey) return false;
+  if (overlayOpen) return false;
+  const ae = activeElement;
+  if (!ae) return true;
+  if (ae.isContentEditable) return false;
+  return !["INPUT", "TEXTAREA", "SELECT"].includes(String(ae.tagName || "").toUpperCase());
+}

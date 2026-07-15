@@ -3,6 +3,7 @@ import {
   isInteractiveTarget,
   shouldFocusComposer,
   shouldRefocusComposer,
+  shouldFocusOnSlash,
   INTERACTIVE_SELECTOR,
 } from "./chatFocus";
 
@@ -96,5 +97,31 @@ describe("shouldRefocusComposer", () => {
   it("cảm ứng / disabled → false", () => {
     expect(shouldRefocusComposer({ activeElement: body, body, composer, coarsePointer: true })).toBe(false);
     expect(shouldRefocusComposer({ activeElement: body, body, composer, disabled: true })).toBe(false);
+  });
+});
+
+describe("shouldFocusOnSlash", () => {
+  it("`/` khi không gõ ở đâu → focus", () => {
+    expect(shouldFocusOnSlash({ key: "/" }, { activeElement: { tagName: "BODY" } })).toBe(true);
+  });
+
+  it("phím khác → false", () => {
+    expect(shouldFocusOnSlash({ key: "a" }, { activeElement: { tagName: "BODY" } })).toBe(false);
+    expect(shouldFocusOnSlash(null, {})).toBe(false);
+  });
+
+  it("đang gõ trong input/textarea/select → false (để gõ được ký tự `/`)", () => {
+    expect(shouldFocusOnSlash({ key: "/" }, { activeElement: { tagName: "TEXTAREA" } })).toBe(false);
+    expect(shouldFocusOnSlash({ key: "/" }, { activeElement: { tagName: "INPUT" } })).toBe(false);
+    expect(shouldFocusOnSlash({ key: "/" }, { activeElement: { tagName: "DIV", isContentEditable: true } })).toBe(false);
+  });
+
+  it("có modifier → false (nhường Ctrl+/ của trình duyệt)", () => {
+    expect(shouldFocusOnSlash({ key: "/", ctrlKey: true }, { activeElement: { tagName: "BODY" } })).toBe(false);
+    expect(shouldFocusOnSlash({ key: "/", metaKey: true }, { activeElement: { tagName: "BODY" } })).toBe(false);
+  });
+
+  it("overlay sơ đồ/hộp thoại đang mở → false (không rơi xuống chat dưới overlay)", () => {
+    expect(shouldFocusOnSlash({ key: "/" }, { activeElement: { tagName: "BODY" }, overlayOpen: true })).toBe(false);
   });
 });

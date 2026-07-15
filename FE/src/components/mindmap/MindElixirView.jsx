@@ -6,6 +6,7 @@ import MindElixir from "mind-elixir";
 import "mind-elixir/style";
 import { snapdom } from "@zumer/snapdom";
 import { recordToMindElixir, mindElixirToRecord } from "../../utils/mindElixirAdapter";
+import { nextScale, formatZoom, viewportKeyAction, ZOOM_STEP } from "../../utils/mindmapViewport";
 import { updateMindmap } from "../../utils/api";
 import { toast } from "../ui/Toaster";
 import EvidenceDrawer from "./EvidenceDrawer";
@@ -63,6 +64,7 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
   const [showRelations, setShowRelations] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [zoom, setZoom] = useState(1);              // readout — nguồn sự thật là bus "scale"
 
   const degraded = Boolean(data?.generator?.degraded);
   const missing = data?.generator?.missing || [];
@@ -79,6 +81,7 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
     setDirty(false);
     setSaving(false);
     setSelected(null);
+    setZoom(1);
     const { mindData, sidecar } = recordToMindElixir(data);
     sidecarRef.current = sidecar;
     const mind = new MindElixir({
@@ -96,7 +99,14 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
     });
     mind.init(mindData);
     mindRef.current = mind;
+    setZoom(mind.scaleVal || 1);
 
+    // Readout thu phóng. Thư viện fire "scale" (number) ở MỌI đường đổi scale —
+    // nút bấm, ctrl+wheel, VÀ scaleFit() (verified dist/MindElixir.js: `fn` kết thúc
+    // bằng `this.bus.fire("scale", n)`) — nên chỉ cần nghe một chỗ này.
+    // KHÔNG kẹp giá trị ở đây: scaleFit() không đọc scaleMin nên map rất lớn có thể
+    // xuống dưới 0.2; kẹp readout sẽ hiện số SAI so với map đang vẽ.
+    mind.bus.addListener("scale", (v) => setZoom(v));
     mind.bus.addListener("selectNodes", (nodes) => {
       const n = nodes?.[0];
       if (!n) return;
@@ -139,12 +149,36 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
     }
   };
 
-  const zoomBy = (delta) => {
+  // Đọc trần/sàn từ CHÍNH instance (mind-elixir 5.13 set `this.scaleMin = 0.2`,
+  // `this.scaleMax = 1.4` trong constructor) thay vì hardcode: guard trong `scale()` của
+  // thư viện là REJECT chứ không phải clamp —
+  //   `if (e < this.scaleMin && e < this.scaleVal || e > this.scaleMax && e > this.scaleVal) return`
+  // — nên clamp cũ 0.4–2 vượt trần thật 1.4: nút "Phóng to" im lặng chết ở 1.4 mà không
+  // báo gì. Kẹp theo số của instance thì scale() luôn nhận và readout luôn khớp map.
+  const zoomBy = useCallback((delta) => {
     const mind = mindRef.current;
     if (!mind) return;
-    const next = Math.min(2, Math.max(0.4, (mind.scaleVal || 1) + delta));
-    mind.scale(next);
-  };
+    mind.scale(nextScale(mind.scaleVal, delta, { min: mind.scaleMin, max: mind.scaleMax }));
+  }, []);
+
+  // scaleFit() tự căn theo bounding box của nodes (dist: `Ce(this, !0)` — tham số `true`
+  // ÉP nhánh căn-theo-nodes bất kể option `alignment`), nên KHÔNG cần truyền
+  // `alignment: "nodes"` vào constructor và không đụng gì tới `toCenter()` mặc định.
+  // Nó chỉ thu nhỏ, không phóng to quá 100% (`1 / Math.max(1, ...)`).
+  // `?.()` phòng version drift: thiếu method thì no-op, không ném trong onClick.
+  const fitView = useCallback(() => { mindRef.current?.scaleFit?.(); }, []);
+
+  // toCenter() GIỮ NGUYÊN scaleVal (dist: `pn` vẽ lại transform với `scale(${this.scaleVal})`)
+  // → "về khung nhìn gốc" phải gọi CẢ HAI, scale trước rồi mới căn giữa.
+  const resetView = useCallback(() => {
+    const mind = mindRef.current;
+    if (!mind) return;
+    mind.scale(1);
+    mind.toCenter();
+  }, []);
+
+  // Click vào readout = chỉ trả thu phóng về 100%, giữ nguyên vị trí đang xem.
+  const resetZoom = useCallback(() => { mindRef.current?.scale(1); }, []);
 
   const handleExportPng = async () => {
     const mind = mindRef.current;
@@ -173,15 +207,31 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
     onClose?.();
   }, [dirty, onClose]);
   useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") requestClose(); };
+    const onKey = (e) => {
+      if (e.key === "Escape") { requestClose(); return; }
+      // Đang gõ tên node thì editor của mind-elixir đã stopPropagation() mọi keydown
+      // (verified dist) nên listener window này vốn không nhận được — guard vẫn giữ để
+      // chặn các ô nhập khác (drawer/form) và không phụ thuộc chi tiết nội bộ thư viện.
+      const ae = document.activeElement;
+      const isEditing = Boolean(
+        ae && (ae.isContentEditable || ae.closest?.("me-tpc") || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))
+      );
+      const action = viewportKeyAction(e, { isEditing });
+      if (!action) return;   // gồm cả Ctrl/Cmd +/-/0 — nhường keymap sẵn có của mind-elixir
+      e.preventDefault();
+      if (action === "in") zoomBy(ZOOM_STEP);
+      else if (action === "out") zoomBy(-ZOOM_STEP);
+      else if (action === "reset") resetView();
+      else if (action === "fit") fitView();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [requestClose]);
+  }, [requestClose, zoomBy, resetView, fitView]);
 
   return (
     <div className="fixed inset-0 z-[1000] flex flex-col" style={{ background: "var(--bg-base)" }}>
       {/* Toolbar — chrome Phòng đọc: kicker mono + tiêu đề Spectral, control là icon-btn */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b flex-shrink-0"
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b flex-shrink-0"
         style={{ borderColor: "var(--border-color)", background: "var(--bg-sidebar)" }}>
         <div className="min-w-0">
           <div className="font-mono text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--text-secondary)" }}>
@@ -193,13 +243,27 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
         </div>
         {dirty && <span className="text-[11px] px-1.5 rounded" style={{ color: "var(--warn)" }}>● chưa lưu</span>}
         <div className="flex-1" />
-        <button onClick={() => zoomBy(-0.2)} aria-label="Thu nhỏ" title="Thu nhỏ"
+        <button onClick={() => zoomBy(-ZOOM_STEP)} aria-label="Thu nhỏ" title="Thu nhỏ (−)"
           className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-text-secondary">
           <Icon name="ZoomOut" size={16} />
         </button>
-        <button onClick={() => zoomBy(+0.2)} aria-label="Phóng to" title="Phóng to"
+        {/* Readout — vừa là mức thu phóng hiện tại, vừa là affordance dạy user rằng
+            canvas là một khung nhìn di chuyển được (không phải ảnh tĩnh). */}
+        <button onClick={resetZoom} aria-label="Đặt lại thu phóng" title="Đặt lại thu phóng (100%)"
+          className="px-1.5 py-1 rounded hover:bg-[var(--bg-hover)] font-mono text-[11px] tabular-nums text-text-secondary min-w-[46px]">
+          {formatZoom(zoom)}
+        </button>
+        <button onClick={() => zoomBy(+ZOOM_STEP)} aria-label="Phóng to" title="Phóng to (+)"
           className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-text-secondary">
           <Icon name="ZoomIn" size={16} />
+        </button>
+        <button onClick={fitView} aria-label="Vừa khung" title="Vừa khung (F)"
+          className="flex items-center gap-1 px-2 py-1.5 rounded hover:bg-[var(--bg-hover)] text-[12px] text-text-secondary">
+          <Icon name="Scan" size={14} /> Vừa khung
+        </button>
+        <button onClick={resetView} aria-label="Đặt lại khung nhìn" title="Đặt lại khung nhìn (0)"
+          className="flex items-center gap-1 px-2 py-1.5 rounded hover:bg-[var(--bg-hover)] text-[12px] text-text-secondary">
+          <Icon name="RotateCcw" size={14} /> Đặt lại
         </button>
         <button onClick={() => mindRef.current?.toCenter()} aria-label="Căn giữa" title="Căn giữa"
           className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-text-secondary">
@@ -211,14 +275,14 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
           style={{ color: showRelations ? "var(--text-primary)" : "var(--text-secondary)", opacity: showRelations ? 1 : 0.5 }}>
           <Icon name="Spline" size={16} />
         </button>
-        <button onClick={handleExportPng} title="Xuất PNG"
+        <button onClick={handleExportPng} aria-label="Xuất PNG" title="Xuất PNG"
           className="flex items-center gap-1 px-2 py-1.5 rounded hover:bg-[var(--bg-hover)] text-[12px] text-text-secondary">
           <Icon name="Download" size={14} /> Xuất PNG
         </button>
         {/* Nút Lưu — chỉ hiện khi record đã có id thật trong sqlite (không phải
             "preview" transient) và không đang generating, tránh PUT 404. */}
         {data?.id && data.id !== "preview" && !data.generating && (
-          <button onClick={handleSave} disabled={!dirty || saving}
+          <button onClick={handleSave} disabled={!dirty || saving} aria-label="Lưu sơ đồ"
             className="btn-primary text-[12px] disabled:opacity-40">
             {saving ? "Đang lưu…" : "Lưu"}
           </button>

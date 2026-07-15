@@ -5,6 +5,7 @@ import remarkBreaks from "remark-breaks";
 import { apiFetch, apiUrl, clearConversationContext, deleteConversation, _appError, isNotFoundOrForbiddenError, isUnauthorizedError, getUserFriendlyApiError } from "../../utils/api";
 import { newConversationId } from "../../utils/conversation";
 import { pollQueryStatus, shouldPollFallback } from "../../utils/queryPolling";
+import { shouldFocusComposer, shouldRefocusComposer } from "../../utils/chatFocus";
 import { Icon } from "../ui/Icon";
 import { nodeLabel, processCitations, parseCiteHref, normStem } from "../../utils/evidence";
 
@@ -226,6 +227,14 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
   // Guarded while a query streams so we never rotate/clear mid-answer.
   const showNotice = (msg) => { setNotice(msg); setTimeout(() => setNotice(""), 4000); };
 
+  // Sau khi đổi/xoá hội thoại, focus đang nằm trên nút vừa bấm (hoặc nút đó đã biến mất
+  // cùng menu kebab) → trả về ô nhập để gõ câu tiếp theo ngay. Cảm ứng thì bỏ qua.
+  const refocusComposer = () => {
+    const ta = textareaRef.current;
+    if (!ta || ta.disabled || isCoarsePointer()) return;
+    ta.focus();
+  };
+
   const handleNewChat = () => {
     if (loading) return;
     setMenuOpen(false);
@@ -234,12 +243,14 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
     setContextCleared(false);
     onEvidence?.(null); onHighlight?.(null);
     showNotice("Đã mở cuộc trò chuyện mới.");
+    refocusComposer();
   };
 
   const handleClearContext = async () => {
     if (loading) return;
     setMenuOpen(false);
     setContextCleared(true);            // messages stay visible; AI stops using old turns
+    refocusComposer();                  // trước await: nút vừa bấm đã biến mất cùng menu
     try { await clearConversationContext(sessionId); } catch {}
     showNotice("Đã xóa ngữ cảnh. Câu hỏi tiếp theo sẽ được xử lý như chủ đề mới.");
   };
@@ -253,6 +264,7 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
     setContextCleared(false);
     onEvidence?.(null); onHighlight?.(null);
     showNotice("Đã xóa lịch sử chat.");
+    refocusComposer();
   };
 
   const usingContext = !contextCleared && messages.some((m) => m.role === "ai");
@@ -332,7 +344,12 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
     }
   };
 
-  const handleKeyDown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } };
+  // `isComposing`: đang gõ tiếng Việt qua IME thì Enter là để CHỐT chữ đang soạn, không
+  // phải để gửi — thiếu guard này là câu bị gửi giữa chừng lúc chưa xong từ.
+  const handleKeyDown = (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  };
   const handleInput = (e) => {
     setInput(e.target.value);
     const ta = e.target;
@@ -340,6 +357,49 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
     ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
   };
   const useSuggestion = (q) => { setInput(q); textareaRef.current?.focus(); };
+
+  // ── Focus UX ────────────────────────────────────────
+  // Đọc sự thật DOM ở đây, quyết định để utils/chatFocus.js (thuần, test được).
+  // matchMedia có thể vắng ở môi trường lạ → optional chain, mặc định false = coi như
+  // chuột (an toàn hơn: sai hướng này chỉ là focus thừa, sai hướng kia là bàn phím ảo nhảy).
+  const isCoarsePointer = () => window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
+  const hasTextSelection = () => {
+    const sel = window.getSelection?.();
+    return Boolean(sel && !sel.isCollapsed);
+  };
+
+  // Click vào vùng trống của khung chat → nhảy vào ô nhập.
+  // mouseUP chứ không phải click: bôi đen text rồi nhả chuột cũng phát sinh click, chỉ ở
+  // mouseup mới đọc được selection đã hoàn tất để biết mà tránh cướp.
+  const handlePanelMouseUp = (e) => {
+    if (e.button !== 0) return;         // chuột phải mở context menu, không phải ý định gõ
+    if (!shouldFocusComposer(e.target, {
+      hasSelection: hasTextSelection(),
+      coarsePointer: isCoarsePointer(),
+      disabled: loading,
+    })) return;
+    textareaRef.current?.focus();
+  };
+
+  // Trả focus về ô nhập khi `loading` chuyển true → false: bao trọn CẢ 3 đường kết thúc
+  // (stream done, polling fallback done, lỗi) vì tất cả đều đổ về `finally` của handleSend,
+  // và cả huỷ (handleCancel). Không cần cắm hook riêng vào từng đường.
+  // Phải là hiệu ứng theo TRANSITION, không phải `!loading`, nếu không mỗi lần render lại
+  // lúc rảnh cũng giật focus.
+  const prevLoadingRef = useRef(loading);
+  useEffect(() => {
+    const was = prevLoadingRef.current;
+    prevLoadingRef.current = loading;
+    if (!was || loading) return;
+    const ta = textareaRef.current;
+    if (!shouldRefocusComposer({
+      activeElement: document.activeElement,
+      body: document.body,
+      composer: ta,
+      coarsePointer: isCoarsePointer(),
+    })) return;
+    ta.focus();
+  }, [loading]);
 
   // Task 16 — "Hỏi về đoạn này" (mindmap EvidenceDrawer) prefills the composer.
   // Keyed on the whole draft object (not just `.text`) so asking about the
@@ -421,8 +481,9 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
         </div>
       )}
 
-      {/* Reading session */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-8 py-7 flex flex-col gap-6">
+      {/* Reading session — click vùng trống bất kỳ là vào thẳng ô nhập (xem handlePanelMouseUp) */}
+      <div onMouseUp={handlePanelMouseUp}
+        className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-8 py-7 flex flex-col gap-6">
 
         {/* Empty state — the reading-room thesis */}
         {messages.length === 0 && !loading && (
@@ -509,7 +570,8 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
       </div>
 
       {/* ── COMPOSER ── */}
-      <div className="flex-shrink-0 border-t border-border transition-theme" style={{ background: "var(--bg-sidebar)" }}>
+      <div onMouseUp={handlePanelMouseUp}
+        className="flex-shrink-0 border-t border-border transition-theme" style={{ background: "var(--bg-sidebar)" }}>
         {/* Follow-up suggestions */}
         {messages.length > 0 && !loading && (
           <div className="px-4 sm:px-8 pt-3 pb-1 flex gap-2 overflow-x-auto scrollbar-none">

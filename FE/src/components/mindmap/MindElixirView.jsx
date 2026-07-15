@@ -65,6 +65,10 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [zoom, setZoom] = useState(1);              // readout — nguồn sự thật là bus "scale"
+  // Lỗi Lưu/Xuất PNG. Trước đây CHỈ có toast — toast tự tắt sau vài giây, mà lỗi lưu thì
+  // map vẫn đang dirty: user quay đi quay lại là mất luôn lý do hỏng, tưởng đã lưu xong.
+  // Banner ở lại tới khi tự đóng hoặc tới lần thao tác sau.
+  const [errorMsg, setErrorMsg] = useState(null);
 
   const degraded = Boolean(data?.generator?.degraded);
   const missing = data?.generator?.missing || [];
@@ -82,6 +86,7 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
     setSaving(false);
     setSelected(null);
     setZoom(1);
+    setErrorMsg(null);   // record mới → lỗi của phiên cũ không được sống sót qua re-init
     const { mindData, sidecar } = recordToMindElixir(data);
     sidecarRef.current = sidecar;
     const mind = new MindElixir({
@@ -136,6 +141,7 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
     // against double invocation (e.g. a queued second click before re-render).
     if (!mind || !dirty || saving) return;
     setSaving(true);
+    setErrorMsg(null);   // thử lại → bỏ lỗi lần trước, đừng để banner cũ gây hiểu nhầm
     try {
       const record = mindElixirToRecord(mind.getData(), sidecarRef.current, data);
       const saved = await updateMindmap(data.id, record);
@@ -143,7 +149,8 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
       toast("Đã lưu sơ đồ", { type: "success" });
       data.onSaved?.(saved); // SidebarRight bơm callback để cập nhật list + showModalMap
     } catch (err) {
-      toast(`Không lưu được: ${err.message}`, { type: "error" });
+      // Banner (không phải toast): map còn dirty, lý do hỏng phải ở lại trước mắt user.
+      setErrorMsg(`Không lưu được: ${err.message}`);
     } finally {
       setSaving(false);
     }
@@ -188,6 +195,7 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
     const target = mind?.map;
     if (!target) return;
 
+    setErrorMsg(null);
     try {
       const backgroundColor =
         getComputedStyle(document.documentElement).getPropertyValue("--bg-base").trim() || "#ECE7DB";
@@ -197,7 +205,7 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
       await result.download({ format: "png", filename: `mindmap-${safeTitle}-${date}` });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast(`Không xuất được PNG: ${message}`, { type: "error" });
+      setErrorMsg(`Không xuất được PNG: ${message}`);
     }
   };
 
@@ -291,6 +299,20 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
           <Icon name="X" size={16} />
         </button>
       </div>
+      {/* Error banner — Lưu/Xuất PNG hỏng. role="alert" để screen reader đọc ngay, không
+          phải chờ user mò tới. Đứng trên banner generating/degraded vì đây là thứ user
+          vừa bấm và đang chờ kết quả. */}
+      {errorMsg && (
+        <div role="alert" className="px-3 py-1.5 text-[12px] flex items-center gap-2 border-b flex-shrink-0"
+          style={{ color: "var(--err)", borderColor: "var(--border-color)", background: "var(--bg-elevated)" }}>
+          <Icon name="TriangleAlert" size={14} />
+          <span className="min-w-0 flex-1">{errorMsg}</span>
+          <button onClick={() => setErrorMsg(null)} aria-label="Đóng thông báo lỗi"
+            className="p-0.5 rounded hover:bg-[var(--bg-hover)]">
+            <Icon name="X" size={13} />
+          </button>
+        </div>
+      )}
       {/* Generating banner — overlay che chip tiến độ ở sidebar nên Huỷ phải ở đây */}
       {generating && (
         <div className="px-3 py-1.5 text-[12px] flex items-center gap-2 border-b"

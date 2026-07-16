@@ -121,6 +121,75 @@ def test_dedup_removes_repeated_keypoints_and_facts_in_record(tmp_path):
     assert rec["study"]["key_concepts"] == ["A"]
 
 
+class _BasePipeline:
+    """Minimal stub with sections/summarize/synthesize; coverage added per-test."""
+    def sections(self, mm):
+        return [{"id": "s1", "title": "A", "chunk_refs": ["0"], "order": 0}], "headings"
+
+    def summarize(self, mm, sections, length_mode="medium", progress_cb=None, cancel_cb=None):
+        return ([{**s, "summary": "tóm tắt", "key_points": ["ý"]} for s in sections], [])
+
+    def synthesize(self, sections, doc_title="", length_mode="medium"):
+        return {"title": doc_title, "overview": "tổng quan", "entities": []}, False
+
+
+def test_graph_skips_coverage_when_pipeline_returns_none(tmp_path):
+    # flag OFF is modelled by pipeline.coverage() -> None (real adapter returns None when off)
+    class Pipe(_BasePipeline):
+        def coverage(self, record):
+            return None
+
+    g = _build(tmp_path, pipeline=Pipe())
+    out = g.invoke({"job_id": "sjc0", "source_names": ["a_docx"], "length_mode": "medium",
+                    "progress": 0, "current_node": "", "error": None},
+                   config={"configurable": {"thread_id": "sjc0"}})
+    assert "coverage" not in out["result"]
+
+
+def test_graph_includes_coverage_when_judge_returns_diagnostics(tmp_path):
+    diag = {"covered": ["A"], "missing": ["B"], "unsupported": [], "vague": False, "notes": []}
+    seen = {}
+
+    class Pipe(_BasePipeline):
+        def coverage(self, record):
+            # judge runs on the final deduped draft; capture it to prove it isn't mutated
+            seen["overview"] = record.get("overview")
+            seen["section_summary"] = record["sections"][0]["summary"]
+            return diag
+
+    saved = []
+    updates = []
+    g = _build(tmp_path, pipeline=Pipe(), persist=saved.append, jobs_updates=updates)
+    out = g.invoke({"job_id": "sjc1", "source_names": ["a_docx"], "length_mode": "medium",
+                    "mode": "study", "progress": 0, "current_node": "", "error": None},
+                   config={"configurable": {"thread_id": "sjc1"}})
+    rec = out["result"]
+    assert rec["coverage"] == diag
+    # overview/sections/study text unchanged by the judge (judge-only, no rewrite)
+    assert rec["overview"] == "tổng quan" == seen["overview"]
+    assert rec["sections"][0]["summary"] == "tóm tắt" == seen["section_summary"]
+    assert "study" in rec
+    # persisted + done atomic with result (unchanged behaviour)
+    assert saved and saved[0]["coverage"] == diag
+    done = [u for u in updates if u.get("status") == "done"]
+    assert len(done) == 1 and done[0]["result"]["coverage"] == diag
+
+
+def test_graph_coverage_judge_failure_does_not_fail_summary(tmp_path):
+    class Pipe(_BasePipeline):
+        def coverage(self, record):
+            raise RuntimeError("judge blew up")
+
+    saved = []
+    g = _build(tmp_path, pipeline=Pipe(), persist=saved.append)
+    out = g.invoke({"job_id": "sjc2", "source_names": ["a_docx"], "length_mode": "medium",
+                    "progress": 0, "current_node": "", "error": None},
+                   config={"configurable": {"thread_id": "sjc2"}})
+    assert out.get("error") is None            # judge fault absorbed
+    assert "coverage" not in out["result"]     # no diagnostics, but summary still done
+    assert saved and saved[0]["id"] == out["result"]["id"]
+
+
 def test_cancel_before_summarize_stops_without_persist(tmp_path, monkeypatch):
     from app.domains.jobs import jobs_store as js
     monkeypatch.setenv("DATA_DIR", str(tmp_path))

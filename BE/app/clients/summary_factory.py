@@ -34,6 +34,29 @@ class LocalSummaryPipeline:
         return synthesize(sections, doc_title=doc_title, model=None,
                           length_mode=length_mode, timeout_sec=self._timeout())
 
+    def coverage(self, record):
+        """Phase 5 judge-only. Tắt (SUMMARY_COVERAGE=0) → None (không judge, không LLM).
+        Bật → 1 LLM judge chấm coverage → dict chẩn đoán; lỗi/JSON hỏng → None (không
+        làm hỏng job). KHÔNG viết lại summary, KHÔNG auto-repair."""
+        from shared.config import get_settings
+        if not get_settings().summary_coverage:
+            return None
+        from concurrent.futures import ThreadPoolExecutor
+        from app.clients.llm_factory import ask_ai
+        from services.summary.pipeline.coverage import COVERAGE_SYSTEM, judge_coverage
+        timeout = self._timeout()
+
+        def _ask(prompt):
+            ex = ThreadPoolExecutor(max_workers=1)
+            try:
+                fut = ex.submit(ask_ai, prompt, system_prompt=COVERAGE_SYSTEM,
+                                model=None, feature="summary", options={"temperature": 0})
+                return fut.result(timeout=timeout)
+            finally:
+                ex.shutdown(wait=False)     # timeout phải trả ngay (bài học warmup)
+
+        return judge_coverage(record, ask_fn=_ask, enabled=True)
+
 
 def get_summary_pipeline():
     return LocalSummaryPipeline()

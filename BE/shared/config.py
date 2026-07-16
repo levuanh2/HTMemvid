@@ -151,6 +151,10 @@ class Settings:
     # Mặc định OFF → tóm tắt hành xử y hệt Summary v2 (không có facts). Khi bật:
     # mỗi section trả thêm "facts" ledger (canonical IR), summary suy từ facts.
     summary_facts: bool = False
+    # Phase 5: coverage judge (JUDGE-ONLY, mặc định OFF). Bật → sau khi record đã build/dedup,
+    # 1 LLM judge chấm coverage/faithfulness → record["coverage"]. KHÔNG viết lại summary,
+    # KHÔNG auto-repair. Judge lỗi/JSON hỏng → bỏ qua, không làm hỏng job tóm tắt.
+    summary_coverage: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -210,6 +214,7 @@ class Settings:
             hypo_qa=_flag("HYPO_QA", "0"),
             doc_category=os.getenv("DOC_CATEGORY", "general"),
             summary_facts=_flag("SUMMARY_FACTS", "0"),
+            summary_coverage=_flag("SUMMARY_COVERAGE", "0"),
         )
 
 

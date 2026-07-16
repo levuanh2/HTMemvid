@@ -55,8 +55,8 @@ def test_build_record_invalid_mode_falls_back_medium():
 
 # --- Summary v3 facts ledger ---
 
-def test_pipeline_version_bumped_to_v5():
-    assert sm.PIPELINE_VERSION == "summary_sections_v5"
+def test_pipeline_version_bumped_to_v6():
+    assert sm.PIPELINE_VERSION == "summary_sections_v6"
 
 
 def test_sanitize_facts_coerces_strings_and_drops_empty_and_unknown():
@@ -195,3 +195,26 @@ def test_build_record_study_none_omits_block_even_in_study_mode():
                           mode="study", study=None)
     assert rec["mode"] == "study"
     assert "study" not in rec
+
+
+# --- Summary v3 Phase 5: coverage judge (cache key + additive record field) ---
+
+def test_content_hash_includes_coverage_flag():
+    base = sm.content_hash(["a"], ["t"], ["h"], "medium", "standard")   # coverage default False
+    assert sm.content_hash(["a"], ["t"], ["h"], "medium", "standard", False) == base
+    assert sm.content_hash(["a"], ["t"], ["h"], "medium", "standard", True) != base
+
+
+def test_build_record_omits_coverage_by_default():
+    rec = sm.build_record(title="T", sources=[], length_mode="medium", overview="",
+                          sections=[], entities=[], content_hash_value="h",
+                          model="m", elapsed_sec=0, degraded_missing=[])
+    assert "coverage" not in rec
+
+
+def test_build_record_includes_coverage_when_provided():
+    diag = {"covered": ["A"], "missing": [], "unsupported": [], "vague": False, "notes": []}
+    rec = sm.build_record(title="T", sources=[], length_mode="medium", overview="",
+                          sections=[], entities=[], content_hash_value="h",
+                          model="m", elapsed_sec=0, degraded_missing=[], coverage=diag)
+    assert rec["coverage"] == diag

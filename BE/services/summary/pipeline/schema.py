@@ -5,9 +5,10 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 
-# v5: pass dedup/polish (Phase 4) đổi NỘI DUNG output (bỏ ý lặp) → bump để cache cũ
-# (v4, chưa dedup) miss + tái sinh bản đã dedup. Dedup thuần, 0 LLM.
-PIPELINE_VERSION = "summary_sections_v5"
+# v6: Phase 5 coverage judge — bật SUMMARY_COVERAGE thêm field `coverage` vào output.
+# Bump để cache v5 (không coverage) miss + tái sinh; RIÊNG cờ coverage còn đi vào
+# content_hash (dưới) nên bật/tắt coverage cũng ra hash khác — không phục vụ bản cũ khác chế độ.
+PIPELINE_VERSION = "summary_sections_v6"
 LENGTH_MODES = ("short", "medium", "detailed")
 # mode = MỤC ĐÍCH/định dạng (trực giao length_mode = độ dài). Mặc định "standard".
 SUMMARY_MODES = ("standard", "study")
@@ -75,17 +76,22 @@ def sanitize_facts(raw: object) -> dict:
 
 def content_hash(source_stems: list[str], chunk_texts: list[str],
                  chunk_headings: list[str] | None, length_mode: str,
-                 mode: str = "standard") -> str:
+                 mode: str = "standard", coverage: bool = False) -> str:
     """Cache key: hash MỌI input ảnh hưởng output (bài học mindmap content_hash).
 
     length_mode + mode nằm trong hash — đổi độ dài HAY đổi mục đích (standard/study)
     là bản tóm tắt khác, không trả cache của combo khác. mode mặc định "standard" giữ
     hash tương thích cho caller cũ chưa truyền mode. Đổi PIPELINE_VERSION vô hiệu cache cũ.
+
+    coverage (Phase 5): bật SUMMARY_COVERAGE thêm field `coverage` vào output → phải là
+    hash khác, nếu không bản ĐÃ cache lúc coverage OFF sẽ bị trả về khi bật coverage
+    (stale no-coverage output). coverage=False giữ hash tương thích caller cũ.
     """
     h = hashlib.sha256()
     h.update(PIPELINE_VERSION.encode("utf-8"))
     h.update(b"\x03" + (length_mode or "medium").encode("utf-8"))
     h.update(b"\x04" + (mode or "standard").encode("utf-8"))
+    h.update(b"\x05" + (b"1" if coverage else b"0"))
     for s in sorted(source_stems or []):
         h.update(b"\x00" + s.encode("utf-8"))
     for t in chunk_texts or []:
@@ -139,7 +145,7 @@ def build_record(*, title: str, sources: list[str], length_mode: str, overview: 
                  sections: list[dict], entities: list[str], content_hash_value: str,
                  model: str, elapsed_sec: float, degraded_missing: list[str],
                  skeleton_method: str = "", mode: str = "standard",
-                 study: dict | None = None) -> dict:
+                 study: dict | None = None, coverage: dict | None = None) -> dict:
     rec = {
         "id": str(uuid.uuid4()),
         "schema_version": 2,
@@ -165,4 +171,8 @@ def build_record(*, title: str, sources: list[str], length_mode: str, overview: 
     # Block study CHỈ khi mode=study + có nội dung → additive, standard record y hệt cũ.
     if study:
         rec["study"] = study
+    # Coverage (Phase 5): ADDITIVE — chỉ khi SUMMARY_COVERAGE bật + judge trả chẩn đoán.
+    # Tắt/lỗi → omit key hẳn (record y hệt cũ, không có "coverage").
+    if coverage:
+        rec["coverage"] = coverage
     return rec

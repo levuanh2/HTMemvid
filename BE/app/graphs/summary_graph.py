@@ -55,9 +55,11 @@ def build_summary_graph(*, data_dir: Path, index_meta_path: Path,
         mm = state.get("mm_input") or collect_input(index_meta_path, state.get("source_names") or [])
         lmode = state.get("length_mode") or "medium"
         smode = state.get("mode") or "standard"
+        from shared.config import get_settings
+        cov_on = get_settings().summary_coverage
         ch = state.get("content_hash") or sm_schema.content_hash(
             mm.get("sources") or [], [c["text"] for c in mm.get("chunks") or []],
-            [c.get("heading_path", "") for c in mm.get("chunks") or []], lmode, smode)
+            [c.get("heading_path", "") for c in mm.get("chunks") or []], lmode, smode, cov_on)
         if not mm.get("chunks"):
             raise ValueError("Không có chunk nào cho các nguồn đã chọn.")
         return {**state, "mm_input": mm, "content_hash": ch, "length_mode": lmode,
@@ -138,6 +140,18 @@ def build_summary_graph(*, data_dir: Path, index_meta_path: Path,
         # Không đổi cancel/error/done-atomic; chỉ tỉa nội dung record đã build.
         from services.summary.pipeline.dedup import dedupe_record
         record = dedupe_record(record)
+        # Phase 5: coverage judge (flag-gated, JUDGE-ONLY) on the final deduped draft, before
+        # persist. pipeline.coverage returns None when SUMMARY_COVERAGE=0 or the judge fails —
+        # never rewrites the summary, never repairs. Double-guarded: judge already swallows its
+        # own errors, and this try keeps a judge fault from failing the summary job.
+        cov_fn = getattr(pipeline, "coverage", None)
+        if cov_fn is not None:
+            try:
+                cov = cov_fn(record)
+            except Exception:
+                cov = None
+            if cov:
+                record["coverage"] = cov
         # Phase D: bind the record owner (None when unprotected → today's behavior).
         persist_record(record, user_id=state.get("user_id"))
         # done PHẢI đi cùng result trong MỘT update (bài học race 2026-07-06)

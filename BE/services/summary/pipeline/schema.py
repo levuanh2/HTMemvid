@@ -5,9 +5,9 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 
-# v4: thêm trục "mode" (standard|study, Phase 3) — study record thêm block "study".
-# Output standard/study khác nhau → bump để cache không lẫn giữa hai mode.
-PIPELINE_VERSION = "summary_sections_v4"
+# v5: pass dedup/polish (Phase 4) đổi NỘI DUNG output (bỏ ý lặp) → bump để cache cũ
+# (v4, chưa dedup) miss + tái sinh bản đã dedup. Dedup thuần, 0 LLM.
+PIPELINE_VERSION = "summary_sections_v5"
 LENGTH_MODES = ("short", "medium", "detailed")
 # mode = MỤC ĐÍCH/định dạng (trực giao length_mode = độ dài). Mặc định "standard".
 SUMMARY_MODES = ("standard", "study")

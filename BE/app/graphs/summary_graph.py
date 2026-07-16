@@ -104,15 +104,19 @@ def build_summary_graph(*, data_dir: Path, index_meta_path: Path,
     def assemble_node(state: dict) -> dict:
         import os
         elapsed = time.time() - (state.get("_t0") or time.time())
+        from services.summary.pipeline.pointers import attach_pointers
         mm = state["mm_input"]
         meta = state.get("overview_meta") or {}
         valid_ids = {str(k) for c in mm.get("chunks") or [] for k in (c.get("chunk_keys") or [])}
+        # Gắn source pointers (Phase 2) trước sanitize; build_pointers tự lọc id thật nên
+        # pointers khớp đúng chunk_refs hợp lệ, rồi sanitize chuẩn hoá thêm một lần.
+        summaries = attach_pointers(state.get("section_summaries") or [], mm)
         record = sm_schema.build_record(
             title=(meta.get("title") or mm["title"]),
             sources=mm["sources"],
             length_mode=state.get("length_mode") or "medium",
             overview=meta.get("overview") or "",
-            sections=sm_schema.sanitize_sections(state.get("section_summaries") or [], valid_ids),
+            sections=sm_schema.sanitize_sections(summaries, valid_ids),
             entities=meta.get("entities") or [],
             content_hash_value=state["content_hash"],
             model=os.getenv("SLM_MODEL_SUMMARY", "qwen2.5:14b"),

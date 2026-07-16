@@ -2418,17 +2418,18 @@ def query_stream(job_id: str):
 # -------------------------
 # 📝 Summary v2 — section-first, job async (mirror mindmap; spec docs/SUMMARY_V2_SPEC.md)
 # -------------------------
-def _summary_input_and_hash(source_names: list[str], length_mode: str) -> tuple[dict, str]:
+def _summary_input_and_hash(source_names: list[str], length_mode: str,
+                            mode: str = "standard") -> tuple[dict, str]:
     mm = collect_mindmap_input(INDEX_META_JSON_PATH, source_names)
     h = summary_schema.content_hash(mm.get("sources") or [],
                                     [c["text"] for c in mm.get("chunks") or []],
                                     [c.get("heading_path", "") for c in mm.get("chunks") or []],
-                                    length_mode)
+                                    length_mode, mode)
     return mm, h
 
 
 def _start_summary_job(source_names: list[str], mm_input: dict, content_hash: str,
-                       length_mode: str) -> str:
+                       length_mode: str, mode: str = "standard") -> str:
     """Phase 5 Step 2: dispatch Summary v2 via enqueue_job — daemon thread when
     QUEUE_ENABLED=false (default, unchanged), RQ 'summary' queue when true. FE polling
     (/summary-status) unchanged; result still in summary_store."""
@@ -2438,7 +2439,7 @@ def _start_summary_job(source_names: list[str], mm_input: dict, content_hash: st
     create_job(job_id, job_type="summary", status="pending", progress=0, current_node="Queued", user_id=uid)
     from app.jobs.queue import enqueue_job
     res = enqueue_job(run_summary_job,
-                      args=(job_id, source_names, mm_input, content_hash, length_mode, uid),
+                      args=(job_id, source_names, mm_input, content_hash, length_mode, uid, mode),
                       queue="summary", job_id=job_id)
     _event = {"rq": "summary_enqueue_rq", "thread": "summary_enqueue_thread",
               "thread_fallback": "summary_queue_fallback_thread"}.get(res.get("mode"),
@@ -2448,7 +2449,8 @@ def _start_summary_job(source_names: list[str], mm_input: dict, content_hash: st
 
 
 def run_summary_job(job_id: str, source_names: list[str], mm_input: dict,
-                    content_hash: str, length_mode: str, user_id: Optional[str] = None) -> None:
+                    content_hash: str, length_mode: str, user_id: Optional[str] = None,
+                    mode: str = "standard") -> None:
     """Summary v2 execution body. Runs in a daemon thread (QUEUE_ENABLED=false) OR an RQ
     worker process (QUEUE_ENABLED=true) — identical behaviour, no Flask request context
     needed. Enqueued by dotted path `app.main.run_summary_job`. The graph owns the
@@ -2465,7 +2467,7 @@ def run_summary_job(job_id: str, source_names: list[str], mm_input: dict,
             raise RuntimeError("SUMMARY_GRAPH chưa khởi tạo — kiểm tra logs khởi động.")
         _langgraph_invoke(SUMMARY_GRAPH, {
             "job_id": job_id, "source_names": source_names, "mm_input": mm_input,
-            "content_hash": content_hash, "length_mode": length_mode,
+            "content_hash": content_hash, "length_mode": length_mode, "mode": mode,
             "user_id": user_id,  # Phase D: persisted onto the summary record (owner)
             "progress": 0, "current_node": "", "error": None,
         }, thread_id=job_id)
@@ -2576,12 +2578,19 @@ def generate_summary():
     if src_err:
         return src_err
 
-    raw_mode = str(data.get("length_mode") or "").strip().lower()
-    length_mode = raw_mode if raw_mode in summary_schema.LENGTH_MODES else "medium"
+    raw_length = str(data.get("length_mode") or "").strip().lower()
+    length_mode = raw_length if raw_length in summary_schema.LENGTH_MODES else "medium"
+
+    # mode = mục đích/định dạng (standard|study), trực giao length_mode. Thiếu → standard.
+    # Có gửi nhưng sai → 400 rõ ràng (không âm thầm rơi về standard như length_mode).
+    raw_smode = str(data.get("mode") or "standard").strip().lower()
+    if raw_smode not in summary_schema.SUMMARY_MODES:
+        return jsonify({"error": f"mode không hợp lệ (chọn: {', '.join(summary_schema.SUMMARY_MODES)})"}), 400
+    mode = raw_smode
 
     force = bool(data.get("force"))
     try:
-        mm_input, content_hash = _summary_input_and_hash(source_names, length_mode)
+        mm_input, content_hash = _summary_input_and_hash(source_names, length_mode, mode)
     except Exception as e:
         return jsonify({"error": f"Không đọc được dữ liệu nguồn: {e}"}), 500
     if not mm_input.get("chunks"):
@@ -2594,7 +2603,7 @@ def generate_summary():
         if cached:
             # Cache hit KHÔNG có job_id — FE phải branch theo status="done" trước (aec6017)
             return jsonify({"status": "done", "result": cached, "cached": True}), 200
-    job_id = _start_summary_job(source_names, mm_input, content_hash, length_mode)
+    job_id = _start_summary_job(source_names, mm_input, content_hash, length_mode, mode)
     return jsonify({"job_id": job_id, "status": "started"}), 202
 
 

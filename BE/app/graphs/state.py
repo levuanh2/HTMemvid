@@ -82,6 +82,7 @@ class SummaryState(TypedDict):
     source_names: list
     user_id: NotRequired[Optional[str]]  # Phase D: record owner (bound at persist)
     length_mode: NotRequired[str]
+    mode: NotRequired[str]               # Phase 3: standard | study (trực giao length_mode)
     mm_input: NotRequired[dict]
     content_hash: NotRequired[str]
     sections: NotRequired[list]

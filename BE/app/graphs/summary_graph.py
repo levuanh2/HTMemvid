@@ -53,15 +53,16 @@ def build_summary_graph(*, data_dir: Path, index_meta_path: Path,
     def collect_node(state: dict) -> dict:
         _set_job(state["job_id"], status="running", progress=5, current_node="CollectInput")
         mm = state.get("mm_input") or collect_input(index_meta_path, state.get("source_names") or [])
-        mode = state.get("length_mode") or "medium"
+        lmode = state.get("length_mode") or "medium"
+        smode = state.get("mode") or "standard"
         ch = state.get("content_hash") or sm_schema.content_hash(
             mm.get("sources") or [], [c["text"] for c in mm.get("chunks") or []],
-            [c.get("heading_path", "") for c in mm.get("chunks") or []], mode)
+            [c.get("heading_path", "") for c in mm.get("chunks") or []], lmode, smode)
         if not mm.get("chunks"):
             raise ValueError("Không có chunk nào cho các nguồn đã chọn.")
-        return {**state, "mm_input": mm, "content_hash": ch, "length_mode": mode,
-                "progress": 10, "current_node": "CollectInput", "_t0": time.time(),
-                "error": None}
+        return {**state, "mm_input": mm, "content_hash": ch, "length_mode": lmode,
+                "mode": smode, "progress": 10, "current_node": "CollectInput",
+                "_t0": time.time(), "error": None}
 
     @_guard("Sections")
     def sections_node(state: dict) -> dict:
@@ -107,22 +108,32 @@ def build_summary_graph(*, data_dir: Path, index_meta_path: Path,
         from services.summary.pipeline.pointers import attach_pointers
         mm = state["mm_input"]
         meta = state.get("overview_meta") or {}
+        smode = state.get("mode") or "standard"
         valid_ids = {str(k) for c in mm.get("chunks") or [] for k in (c.get("chunk_keys") or [])}
         # Gắn source pointers (Phase 2) trước sanitize; build_pointers tự lọc id thật nên
         # pointers khớp đúng chunk_refs hợp lệ, rồi sanitize chuẩn hoá thêm một lần.
         summaries = attach_pointers(state.get("section_summaries") or [], mm)
+        sections = sm_schema.sanitize_sections(summaries, valid_ids)
+        # Study block (Phase 3): CHỈ khi mode=study — gom facts/pointers đã sanitize.
+        # Deterministic (0 LLM); facts vắng (SUMMARY_FACTS=0) → block degrade an toàn.
+        study = None
+        if smode == "study":
+            from services.summary.pipeline.study import build_study
+            study = build_study(sections)
         record = sm_schema.build_record(
             title=(meta.get("title") or mm["title"]),
             sources=mm["sources"],
             length_mode=state.get("length_mode") or "medium",
+            mode=smode,
             overview=meta.get("overview") or "",
-            sections=sm_schema.sanitize_sections(summaries, valid_ids),
+            sections=sections,
             entities=meta.get("entities") or [],
             content_hash_value=state["content_hash"],
             model=os.getenv("SLM_MODEL_SUMMARY", "qwen2.5:14b"),
             elapsed_sec=elapsed,
             degraded_missing=state.get("degraded_missing") or [],
-            skeleton_method=state.get("skeleton_method") or "")
+            skeleton_method=state.get("skeleton_method") or "",
+            study=study)
         # Phase D: bind the record owner (None when unprotected → today's behavior).
         persist_record(record, user_id=state.get("user_id"))
         # done PHẢI đi cùng result trong MỘT update (bài học race 2026-07-06)

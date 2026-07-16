@@ -10,7 +10,7 @@ function _errText(err, prefix, fallback) {
   return err?.message ? `${prefix}: ${err.message}` : fallback;
 }
 import { createMindmapPoller, stageLabel } from "../../utils/mindmapJob";
-import { createSummaryPoller, stageLabel as summaryStageLabel, LENGTH_MODES } from "../../utils/summaryJob";
+import { createSummaryPoller, stageLabel as summaryStageLabel, LENGTH_MODES, SUMMARY_MODES } from "../../utils/summaryJob";
 import { saveActiveMindmapJob, loadActiveMindmapJob, clearActiveMindmapJob } from "../../utils/activeMindmapJob";
 import { saveActiveSummaryJob, loadActiveSummaryJob, clearActiveSummaryJob } from "../../utils/activeSummaryJob";
 import { toast } from "../ui/Toaster";
@@ -78,6 +78,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   const [loading, setLoading]             = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false); // POST round-trip của /generate-summary
   const [summaryLength, setSummaryLength] = useState("medium");
+  const [summaryMode, setSummaryMode] = useState("standard");  // Phase 3: standard | study
   const [summaryCancelNotice, setSummaryCancelNotice] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [summaries, setSummaries]         = useState([]);
@@ -427,7 +428,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     setSummaryLoading(true);
     setSummaryCancelNotice(false);
     try {
-      const startData = await generateSummary(selectedSources, { lengthMode: summaryLength });
+      const startData = await generateSummary(selectedSources, { lengthMode: summaryLength, mode: summaryMode });
       if (startData.error) throw new Error(startData.error);
 
       if (startData.status === "done" && startData.result) {
@@ -437,7 +438,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
       }
 
       if (!startData.job_id) throw new Error("Server không trả job_id.");
-      saveActiveSummaryJob({ jobId: startData.job_id, sources: selectedSources, startedAt: Date.now(), extra: { lengthMode: summaryLength } });
+      saveActiveSummaryJob({ jobId: startData.job_id, sources: selectedSources, startedAt: Date.now(), extra: { lengthMode: summaryLength, mode: summaryMode } });
       startSummaryPoller(startData.job_id, { resumed: false });
     } catch (err) {
       handleSummaryError(err);
@@ -609,6 +610,25 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
                 className={`pill-tab flex-1 !px-2 !py-1.5 justify-center ${summaryLength === m.value ? "pill-tab-active" : ""}`}
                 role="radio"
                 aria-checked={summaryLength === m.value}
+                disabled={isGenerating}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Kiểu tóm tắt — standard (thường) vs study (ôn tập). Trực giao độ dài; cũng nằm
+            trong content_hash BE nên đổi kiểu = bản tóm tắt khác. */}
+        {artifactTab === "summary" && (
+          <div className="flex gap-1 mb-2.5" role="radiogroup" aria-label="Kiểu tóm tắt">
+            {SUMMARY_MODES.map((m) => (
+              <button
+                key={m.value}
+                onClick={() => setSummaryMode(m.value)}
+                className={`pill-tab flex-1 !px-2 !py-1.5 justify-center ${summaryMode === m.value ? "pill-tab-active" : ""}`}
+                role="radio"
+                aria-checked={summaryMode === m.value}
                 disabled={isGenerating}
               >
                 {m.label}

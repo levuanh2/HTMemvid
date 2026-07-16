@@ -5,11 +5,12 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 
-# v3: record thêm section "pointers" (source pointer, Phase 2) → đổi SHAPE output →
-# bump để cache cũ (v2, thiếu pointers) miss + tái sinh có pointers (bài học: cache key
-# phản ánh mọi thay đổi output, dù pointers là suy diễn deterministic).
-PIPELINE_VERSION = "summary_sections_v3"
+# v4: thêm trục "mode" (standard|study, Phase 3) — study record thêm block "study".
+# Output standard/study khác nhau → bump để cache không lẫn giữa hai mode.
+PIPELINE_VERSION = "summary_sections_v4"
 LENGTH_MODES = ("short", "medium", "detailed")
+# mode = MỤC ĐÍCH/định dạng (trực giao length_mode = độ dài). Mặc định "standard".
+SUMMARY_MODES = ("standard", "study")
 MAX_SECTIONS = 30
 MAX_KEY_POINTS = 8
 
@@ -73,15 +74,18 @@ def sanitize_facts(raw: object) -> dict:
 
 
 def content_hash(source_stems: list[str], chunk_texts: list[str],
-                 chunk_headings: list[str] | None, length_mode: str) -> str:
+                 chunk_headings: list[str] | None, length_mode: str,
+                 mode: str = "standard") -> str:
     """Cache key: hash MỌI input ảnh hưởng output (bài học mindmap content_hash).
 
-    length_mode nằm trong hash — đổi độ dài là bản tóm tắt khác, không được
-    trả cache của mode khác. Đổi PIPELINE_VERSION tự vô hiệu cache cũ.
+    length_mode + mode nằm trong hash — đổi độ dài HAY đổi mục đích (standard/study)
+    là bản tóm tắt khác, không trả cache của combo khác. mode mặc định "standard" giữ
+    hash tương thích cho caller cũ chưa truyền mode. Đổi PIPELINE_VERSION vô hiệu cache cũ.
     """
     h = hashlib.sha256()
     h.update(PIPELINE_VERSION.encode("utf-8"))
     h.update(b"\x03" + (length_mode or "medium").encode("utf-8"))
+    h.update(b"\x04" + (mode or "standard").encode("utf-8"))
     for s in sorted(source_stems or []):
         h.update(b"\x00" + s.encode("utf-8"))
     for t in chunk_texts or []:
@@ -134,8 +138,9 @@ def sanitize_sections(sections: list[dict], valid_chunk_ids: set[str]) -> list[d
 def build_record(*, title: str, sources: list[str], length_mode: str, overview: str,
                  sections: list[dict], entities: list[str], content_hash_value: str,
                  model: str, elapsed_sec: float, degraded_missing: list[str],
-                 skeleton_method: str = "") -> dict:
-    return {
+                 skeleton_method: str = "", mode: str = "standard",
+                 study: dict | None = None) -> dict:
+    rec = {
         "id": str(uuid.uuid4()),
         "schema_version": 2,
         "title": title,
@@ -143,6 +148,8 @@ def build_record(*, title: str, sources: list[str], length_mode: str, overview: 
         "content_hash": content_hash_value,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "length_mode": length_mode if length_mode in LENGTH_MODES else "medium",
+        # mode trực giao length_mode; record cũ thiếu key → FE default "standard".
+        "mode": mode if mode in SUMMARY_MODES else "standard",
         "overview": overview or "",
         "sections": sections,
         "entities": [str(e).strip() for e in (entities or []) if str(e).strip()][:20],
@@ -155,3 +162,7 @@ def build_record(*, title: str, sources: list[str], length_mode: str, overview: 
             "skeleton_method": skeleton_method or "",
         },
     }
+    # Block study CHỈ khi mode=study + có nội dung → additive, standard record y hệt cũ.
+    if study:
+        rec["study"] = study
+    return rec

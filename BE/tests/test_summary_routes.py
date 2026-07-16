@@ -10,7 +10,7 @@ def test_generate_cache_hit_returns_done_without_job_id(client, monkeypatch):
            "length_mode": "medium", "overview": "ov", "sections": [], "entities": [],
            "generator": {"degraded": False, "missing": []}}
     monkeypatch.setattr(be_main, "_summary_input_and_hash",
-                        lambda sources, mode: ({"chunks": [1]}, "h" * 64))
+                        lambda sources, length_mode, mode: ({"chunks": [1]}, "h" * 64))
     monkeypatch.setattr(store, "get_by_hash", lambda h: rec if h == "h" * 64 else None)
     r = client.post("/generate-summary", json={"sources": ["a_docx"]})
     assert r.status_code == 200
@@ -24,11 +24,12 @@ def test_generate_force_bypasses_cache_starts_job(client, monkeypatch):
     import app.main as be_main
     from app.domains.summary import store
     monkeypatch.setattr(be_main, "_summary_input_and_hash",
-                        lambda sources, mode: ({"chunks": [1]}, "h" * 64))
+                        lambda sources, length_mode, mode: ({"chunks": [1]}, "h" * 64))
     monkeypatch.setattr(store, "get_by_hash", lambda h: {"id": "s1"})
     started = {}
 
-    def fake_start(sources, mm, h, mode):
+    def fake_start(sources, mm, h, length_mode, mode):
+        started["length_mode"] = length_mode
         started["mode"] = mode
         return "jid"
 
@@ -37,15 +38,16 @@ def test_generate_force_bypasses_cache_starts_job(client, monkeypatch):
                                                "length_mode": "detailed"})
     assert r.status_code == 202
     assert r.get_json()["job_id"] == "jid"
-    assert started["mode"] == "detailed"
+    assert started["length_mode"] == "detailed"
+    assert started["mode"] == "standard"   # không gửi mode → default standard
 
 
 def test_invalid_length_mode_defaults_medium(client, monkeypatch):
     import app.main as be_main
     seen = {}
 
-    def capture(sources, mode):
-        seen["mode"] = mode
+    def capture(sources, length_mode, mode):
+        seen["length_mode"] = length_mode
         return {"chunks": [1]}, "h" * 64
 
     monkeypatch.setattr(be_main, "_summary_input_and_hash", capture)
@@ -54,7 +56,47 @@ def test_invalid_length_mode_defaults_medium(client, monkeypatch):
     monkeypatch.setattr(store, "get_by_hash", lambda h: None)
     r = client.post("/generate-summary", json={"sources": ["a_docx"], "length_mode": "bogus"})
     assert r.status_code == 202
-    assert seen["mode"] == "medium"
+    assert seen["length_mode"] == "medium"
+
+
+def test_mode_defaults_standard_when_missing(client, monkeypatch):
+    import app.main as be_main
+    seen = {}
+
+    def capture(sources, length_mode, mode):
+        seen["mode"] = mode
+        return {"chunks": [1]}, "h" * 64
+
+    monkeypatch.setattr(be_main, "_summary_input_and_hash", capture)
+    monkeypatch.setattr(be_main, "_start_summary_job", lambda *a: "jid")
+    from app.domains.summary import store
+    monkeypatch.setattr(store, "get_by_hash", lambda h: None)
+    r = client.post("/generate-summary", json={"sources": ["a_docx"]})
+    assert r.status_code == 202
+    assert seen["mode"] == "standard"
+
+
+def test_study_mode_threaded_to_input_and_job(client, monkeypatch):
+    import app.main as be_main
+    started = {}
+    monkeypatch.setattr(be_main, "_summary_input_and_hash",
+                        lambda sources, length_mode, mode: ({"chunks": [1]}, "h" * 64))
+
+    def fake_start(sources, mm, h, length_mode, mode):
+        started["mode"] = mode
+        return "jid"
+
+    monkeypatch.setattr(be_main, "_start_summary_job", fake_start)
+    from app.domains.summary import store
+    monkeypatch.setattr(store, "get_by_hash", lambda h: None)
+    r = client.post("/generate-summary", json={"sources": ["a_docx"], "mode": "study"})
+    assert r.status_code == 202
+    assert started["mode"] == "study"
+
+
+def test_invalid_mode_returns_400(client):
+    r = client.post("/generate-summary", json={"sources": ["a_docx"], "mode": "bogus"})
+    assert r.status_code == 400
 
 
 def test_generate_no_sources_400(client):

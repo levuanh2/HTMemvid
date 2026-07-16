@@ -55,8 +55,8 @@ def test_build_record_invalid_mode_falls_back_medium():
 
 # --- Summary v3 facts ledger ---
 
-def test_pipeline_version_bumped_to_v3():
-    assert sm.PIPELINE_VERSION == "summary_sections_v3"
+def test_pipeline_version_bumped_to_v4():
+    assert sm.PIPELINE_VERSION == "summary_sections_v4"
 
 
 def test_sanitize_facts_coerces_strings_and_drops_empty_and_unknown():
@@ -154,3 +154,44 @@ def test_sanitize_sections_without_pointers_omits_key_backcompat():
         {"id": "s1", "title": "M", "summary": "s", "chunk_refs": []},
     ], valid_chunk_ids=set())
     assert "pointers" not in out[0]
+
+
+# --- Summary v3 Phase 3: mode axis (standard | study) ---
+
+def test_content_hash_includes_mode():
+    base = sm.content_hash(["a"], ["t"], ["h"], "medium")            # default standard
+    assert sm.content_hash(["a"], ["t"], ["h"], "medium", "standard") == base
+    assert sm.content_hash(["a"], ["t"], ["h"], "medium", "study") != base
+
+
+def test_build_record_defaults_mode_standard_and_no_study_block():
+    rec = sm.build_record(title="T", sources=[], length_mode="medium", overview="",
+                          sections=[], entities=[], content_hash_value="h",
+                          model="m", elapsed_sec=0, degraded_missing=[])
+    assert rec["mode"] == "standard"      # thiếu mode → standard
+    assert "study" not in rec             # standard → không có block study
+
+
+def test_build_record_invalid_mode_falls_back_standard():
+    rec = sm.build_record(title="T", sources=[], length_mode="medium", overview="",
+                          sections=[], entities=[], content_hash_value="h",
+                          model="m", elapsed_sec=0, degraded_missing=[], mode="bogus")
+    assert rec["mode"] == "standard"
+
+
+def test_build_record_study_mode_includes_study_block():
+    rec = sm.build_record(title="T", sources=[], length_mode="medium", overview="",
+                          sections=[], entities=[], content_hash_value="h",
+                          model="m", elapsed_sec=0, degraded_missing=[],
+                          mode="study", study={"key_concepts": ["A"], "self_check": []})
+    assert rec["mode"] == "study"
+    assert rec["study"] == {"key_concepts": ["A"], "self_check": []}
+
+
+def test_build_record_study_none_omits_block_even_in_study_mode():
+    rec = sm.build_record(title="T", sources=[], length_mode="medium", overview="",
+                          sections=[], entities=[], content_hash_value="h",
+                          model="m", elapsed_sec=0, degraded_missing=[],
+                          mode="study", study=None)
+    assert rec["mode"] == "study"
+    assert "study" not in rec

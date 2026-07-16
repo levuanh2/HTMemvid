@@ -60,6 +60,42 @@ def test_real_graph_compiles_and_produces_v2_record(tmp_path):
     assert done_updates[0].get("result", {}).get("id") == rec["id"]
 
 
+def test_standard_mode_has_no_study_block(tmp_path):
+    g = _build(tmp_path)
+    out = g.invoke({"job_id": "sjm0", "source_names": ["a_docx"], "length_mode": "medium",
+                    "progress": 0, "current_node": "", "error": None},
+                   config={"configurable": {"thread_id": "sjm0"}})
+    rec = out["result"]
+    assert rec["mode"] == "standard"     # mode thiếu trong state → standard
+    assert "study" not in rec
+
+
+def test_study_mode_builds_study_block_from_facts_and_pointers(tmp_path):
+    class FactsPipeline:
+        def sections(self, mm):
+            return [{"id": "s1", "title": "A", "chunk_refs": ["0"], "order": 0}], "headings"
+
+        def summarize(self, mm, sections, length_mode="medium", progress_cb=None, cancel_cb=None):
+            # study mode + facts present → section mang facts (mô phỏng SUMMARY_FACTS ON)
+            return ([{**s, "summary": "tóm tắt", "key_points": ["ý"],
+                      "facts": {"definitions": ["def A"], "important_terms": ["A"]}}
+                     for s in sections], [])
+
+        def synthesize(self, sections, doc_title="", length_mode="medium"):
+            return {"title": doc_title, "overview": "ov", "entities": []}, False
+
+    g = _build(tmp_path, pipeline=FactsPipeline())
+    out = g.invoke({"job_id": "sjm1", "source_names": ["a_docx"], "length_mode": "medium",
+                    "mode": "study", "progress": 0, "current_node": "", "error": None},
+                   config={"configurable": {"thread_id": "sjm1"}})
+    rec = out["result"]
+    assert rec["mode"] == "study"
+    assert rec["study"]["key_concepts"] == ["A"]
+    assert rec["study"]["definitions"] == ["def A"]
+    # pointer suy từ chunk_refs (chunk "0" có heading "1. A" trong collect_input) → review có mục
+    assert rec["study"]["recommended_review"][0]["chunk_id"] == "0"
+
+
 def test_cancel_before_summarize_stops_without_persist(tmp_path, monkeypatch):
     from app.domains.jobs import jobs_store as js
     monkeypatch.setenv("DATA_DIR", str(tmp_path))

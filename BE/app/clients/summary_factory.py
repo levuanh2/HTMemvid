@@ -20,11 +20,13 @@ class LocalSummaryPipeline:
 
     def summarize(self, mm_input, sections, *, length_mode="medium",
                   progress_cb=None, cancel_cb=None):
+        from shared.config import get_settings
         from services.summary.pipeline.summarize import summarize_sections
         return summarize_sections(
             mm_input, sections, model=None, length_mode=length_mode,
             timeout_sec=self._timeout(),
             max_workers=int(os.getenv("SUMMARY_PARALLEL", "2")),
+            with_facts=get_settings().summary_facts,
             progress_cb=progress_cb, cancel_cb=cancel_cb)
 
     def synthesize(self, sections, *, doc_title, length_mode="medium"):

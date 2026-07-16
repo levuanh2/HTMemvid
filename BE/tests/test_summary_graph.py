@@ -96,6 +96,31 @@ def test_study_mode_builds_study_block_from_facts_and_pointers(tmp_path):
     assert rec["study"]["recommended_review"][0]["chunk_id"] == "0"
 
 
+def test_dedup_removes_repeated_keypoints_and_facts_in_record(tmp_path):
+    class DupPipeline:
+        def sections(self, mm):
+            return [{"id": "s1", "title": "A", "chunk_refs": ["0"], "order": 0}], "headings"
+
+        def summarize(self, mm, sections, length_mode="medium", progress_cb=None, cancel_cb=None):
+            # key_points + facts lặp (mô phỏng LLM trả trùng) → dedup phải tỉa
+            return ([{**s, "summary": "tóm tắt", "key_points": ["ý chính", "ý chính"],
+                      "facts": {"definitions": ["D", "d"], "important_terms": ["A", "a"]}}
+                     for s in sections], [])
+
+        def synthesize(self, sections, doc_title="", length_mode="medium"):
+            return {"title": doc_title, "overview": "ov", "entities": []}, False
+
+    g = _build(tmp_path, pipeline=DupPipeline())
+    out = g.invoke({"job_id": "sjd1", "source_names": ["a_docx"], "length_mode": "medium",
+                    "mode": "study", "progress": 0, "current_node": "", "error": None},
+                   config={"configurable": {"thread_id": "sjd1"}})
+    rec = out["result"]
+    assert rec["sections"][0]["key_points"] == ["ý chính"]        # trùng tỉa
+    assert rec["sections"][0]["facts"]["definitions"] == ["D"]
+    assert rec["study"]["definitions"] == ["D"]                   # study cũng dedup
+    assert rec["study"]["key_concepts"] == ["A"]
+
+
 def test_cancel_before_summarize_stops_without_persist(tmp_path, monkeypatch):
     from app.domains.jobs import jobs_store as js
     monkeypatch.setenv("DATA_DIR", str(tmp_path))

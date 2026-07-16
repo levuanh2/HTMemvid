@@ -134,6 +134,10 @@ def build_summary_graph(*, data_dir: Path, index_meta_path: Path,
             degraded_missing=state.get("degraded_missing") or [],
             skeleton_method=state.get("skeleton_method") or "",
             study=study)
+        # Phase 4: dedup/polish THUẦN (0 LLM) — bỏ ý lặp trong sections/study TRƯỚC persist.
+        # Không đổi cancel/error/done-atomic; chỉ tỉa nội dung record đã build.
+        from services.summary.pipeline.dedup import dedupe_record
+        record = dedupe_record(record)
         # Phase D: bind the record owner (None when unprotected → today's behavior).
         persist_record(record, user_id=state.get("user_id"))
         # done PHẢI đi cùng result trong MỘT update (bài học race 2026-07-06)

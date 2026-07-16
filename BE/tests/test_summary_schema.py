@@ -55,8 +55,8 @@ def test_build_record_invalid_mode_falls_back_medium():
 
 # --- Summary v3 facts ledger ---
 
-def test_pipeline_version_bumped_to_v4():
-    assert sm.PIPELINE_VERSION == "summary_sections_v4"
+def test_pipeline_version_bumped_to_v5():
+    assert sm.PIPELINE_VERSION == "summary_sections_v5"
 
 
 def test_sanitize_facts_coerces_strings_and_drops_empty_and_unknown():

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   apiFetch,
   _appError,
+  generateSummary,
   isUnauthorizedError,
   isForbiddenError,
   isNotFoundOrForbiddenError,
@@ -74,6 +75,19 @@ describe("apiFetch 401 handling", () => {
     mockStatus(404);
     await apiFetch("/mindmaps/x", { method: "DELETE" });
     expect(dispatchedTypes()).not.toContain("auth:unauthorized");
+  });
+});
+
+describe("generateSummary body", () => {
+  it("gửi length_mode + mode (mặc định standard khi thiếu)", async () => {
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ job_id: "j" }) }));
+    await generateSummary(["a"], { lengthMode: "short", mode: "study" });
+    const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
+    expect(body.length_mode).toBe("short");
+    expect(body.mode).toBe("study");
+    await generateSummary(["a"]);
+    const body2 = JSON.parse(globalThis.fetch.mock.calls[1][1].body);
+    expect(body2.mode).toBe("standard");
   });
 });
 

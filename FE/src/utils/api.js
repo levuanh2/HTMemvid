@@ -169,11 +169,11 @@ export const updateMindmap = async (id, record) => {
 
 // ── Summary v2: generate / cancel (mirror mindmap; poll qua /summary-status) ──
 // Caller branch theo `status` ("done" cache-hit — KHÔNG có job_id — vs "started").
-export const generateSummary = async (sources, { lengthMode = "medium", force = false } = {}) => {
+export const generateSummary = async (sources, { lengthMode = "medium", mode = "standard", force = false } = {}) => {
   const res = await apiFetch(`/generate-summary`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sources, length_mode: lengthMode, force: Boolean(force) }),
+    body: JSON.stringify({ sources, length_mode: lengthMode, mode, force: Boolean(force) }),
   });
   if (!res.ok) throw await _appError(res);
   return res.json();

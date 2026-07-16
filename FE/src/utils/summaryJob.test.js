@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stageLabel, normalizeSummaryRecord, LENGTH_MODES } from "./summaryJob";
+import { stageLabel, normalizeSummaryRecord, LENGTH_MODES, SUMMARY_MODES } from "./summaryJob";
 
 describe("stageLabel (summary)", () => {
   it("map node pipeline sang label Việt", () => {
@@ -18,6 +18,12 @@ describe("LENGTH_MODES", () => {
   });
 });
 
+describe("SUMMARY_MODES", () => {
+  it("khớp contract BE (standard/study)", () => {
+    expect(SUMMARY_MODES.map((m) => m.value)).toEqual(["standard", "study"]);
+  });
+});
+
 describe("normalizeSummaryRecord", () => {
   it("record v2 giữ sections, không set legacyMd", () => {
     const rec = normalizeSummaryRecord({
@@ -30,6 +36,27 @@ describe("normalizeSummaryRecord", () => {
     expect(rec.legacyMd).toBe("");
     expect(rec.lengthMode).toBe("short");
     expect(rec.generator.degraded).toBe(true);
+  });
+
+  it("mode thiếu (record cũ) → standard, study → null", () => {
+    const rec = normalizeSummaryRecord({ id: "s1", sections: [{ id: "x", title: "M" }] });
+    expect(rec.mode).toBe("standard");
+    expect(rec.study).toBeNull();
+  });
+
+  it("mode=study giữ mode + block study", () => {
+    const rec = normalizeSummaryRecord({
+      id: "s1", mode: "study", sections: [{ id: "x", title: "M" }],
+      study: { key_concepts: ["A"], self_check: [{ q: "?", a_hint: "h" }] },
+    });
+    expect(rec.mode).toBe("study");
+    expect(rec.study.key_concepts).toEqual(["A"]);
+  });
+
+  it("mode lạ → standard; study không phải object → null", () => {
+    const rec = normalizeSummaryRecord({ id: "s1", mode: "bogus", study: "nope", sections: [{ id: "x" }] });
+    expect(rec.mode).toBe("standard");
+    expect(rec.study).toBeNull();
   });
 
   it("record legacy (migrate summaries.json) rơi về summary_md / data.summary", () => {

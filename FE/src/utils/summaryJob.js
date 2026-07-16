@@ -7,6 +7,12 @@ export const LENGTH_MODES = [
   { value: "detailed", label: "Chi tiết" },
 ];
 
+// mode = mục đích (trực giao độ dài). standard giữ render cũ; study thêm block ôn tập.
+export const SUMMARY_MODES = [
+  { value: "standard", label: "Tóm tắt thường" },
+  { value: "study", label: "Ôn tập" },
+];
+
 export const stageLabel = (status = {}) => {
   const node = String(status.current_node || "");
   // progress_cb của BE đẩy thẳng label Việt ("Đang tóm tắt mục i/n...") vào
@@ -40,9 +46,13 @@ export const normalizeSummaryRecord = (record) => {
     sources: Array.isArray(record.sources) ? record.sources : [],
     createdAt: record.created_at || record.createdAt || "",
     lengthMode: record.length_mode || "",
+    // mode thiếu (record cũ trước Phase 3) → "standard" để render y hệt cũ.
+    mode: record.mode === "study" ? "study" : "standard",
     overview: record.overview || "",
     sections: Array.isArray(record.sections) ? record.sections : [],
     entities: Array.isArray(record.entities) ? record.entities : [],
+    // Block study chỉ có khi mode=study; record khác → null (SummaryModal null-safe).
+    study: record.study && typeof record.study === "object" ? record.study : null,
     generator: record.generator || null,
     legacyMd: Array.isArray(record.sections) && record.sections.length ? "" : String(legacyMd || ""),
   };

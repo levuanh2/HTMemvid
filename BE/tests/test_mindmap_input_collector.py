@@ -52,6 +52,26 @@ def test_title_single_vs_multi(tmp_path, monkeypatch):
     assert out["title"].startswith("Tổng hợp:")
 
 
+def test_collects_pointer_metadata_when_present_additive(tmp_path, monkeypatch):
+    # Summary v3 Phase 2: page/source_id/chunk_index propagate KHI CÓ; vắng khi thiếu.
+    # Field mindmap (heading_path/chunk_keys/text) KHÔNG đổi → skeleton vẫn build được.
+    monkeypatch.setattr(chunk_text_store, "get_text", lambda cid: f"t{cid}")
+    meta = {
+        "0": {"source_stem": "a_docx", "video": "a.mp4", "heading_path": "1. A",
+              "source_id": "src-a", "page": 3, "chunk_index": 12},
+        "1": {"source_stem": "a_docx", "heading_path": "2. B"},   # thiếu page/source_id/chunk_index
+    }
+    out = ic.collect_mindmap_input(_write_meta(tmp_path, meta), ["a_docx"])
+    by_key = {c["key"]: c for c in out["chunks"]}
+    c0 = by_key["0"]
+    assert c0["source_stem"] == "a_docx" and c0["source_id"] == "src-a"
+    assert c0["page"] == 3 and c0["chunk_index"] == 12
+    assert c0["heading_path"] == "1. A" and c0["chunk_keys"] == ["0"]   # mindmap fields intact
+    c1 = by_key["1"]
+    assert "page" not in c1 and "source_id" not in c1 and "chunk_index" not in c1  # additive
+    assert c1["source_stem"] == "a_docx"
+
+
 def test_orphan_subgroup_becomes_own_chunk_excluding_empty(tmp_path, monkeypatch):
     # parent "99" KHÔNG có trong meta → sub-group mồ côi; sub 21 rỗng text phải bị loại khỏi chunk_keys
     monkeypatch.setattr(chunk_text_store, "get_text", lambda cid: "" if cid == 21 else f"t{cid}")

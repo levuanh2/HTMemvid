@@ -55,8 +55,8 @@ def test_build_record_invalid_mode_falls_back_medium():
 
 # --- Summary v3 facts ledger ---
 
-def test_pipeline_version_bumped_to_v2():
-    assert sm.PIPELINE_VERSION == "summary_sections_v2"
+def test_pipeline_version_bumped_to_v3():
+    assert sm.PIPELINE_VERSION == "summary_sections_v3"
 
 
 def test_sanitize_facts_coerces_strings_and_drops_empty_and_unknown():
@@ -107,3 +107,50 @@ def test_build_record_includes_section_facts_when_present():
                           entities=[], content_hash_value="h", model="m",
                           elapsed_sec=0, degraded_missing=[])
     assert rec["sections"][0]["facts"] == {"key_points": ["kp"]}
+
+
+# --- Summary v3 Phase 2: source pointers ---
+
+def test_sanitize_pointers_keeps_known_keys_dedupes_and_drops_no_id():
+    out = sm.sanitize_pointers([
+        {"chunk_id": "0", "source_id": "doc-a", "source_stem": "doc_a", "page": 3,
+         "heading_path": ["Ch 1", "1. Intro"], "chunk_index": 12, "junk": "x"},
+        {"chunk_id": "0", "page": 9},   # trùng chunk_id → bỏ
+        {"page": 5},                    # thiếu chunk_id → bỏ
+    ])
+    assert len(out) == 1
+    p = out[0]
+    assert set(p.keys()) == set(sm.POINTER_KEYS)   # field "junk" bị bỏ
+    assert p["section_title"] == "1. Intro"        # mục cuối heading_path
+    assert p["heading_path"] == ["Ch 1", "1. Intro"]
+    assert p["page"] == 3 and p["chunk_index"] == 12
+    assert p["source_id"] == "doc-a" and p["source_stem"] == "doc_a"
+
+
+def test_sanitize_pointers_missing_metadata_is_none_safe():
+    out = sm.sanitize_pointers([{"chunk_id": "5"}])
+    assert out == [{"chunk_id": "5", "source_id": None, "source_stem": None, "page": None,
+                    "section_title": None, "heading_path": [], "chunk_index": None}]
+
+
+def test_sanitize_pointers_non_list_returns_empty():
+    assert sm.sanitize_pointers(None) == []
+    assert sm.sanitize_pointers({"chunk_id": "0"}) == []
+
+
+def test_sanitize_sections_preserves_pointers_and_keeps_chunk_refs():
+    out = sm.sanitize_sections([
+        {"id": "s1", "title": "M", "summary": "s", "chunk_refs": ["0", "999"],
+         "pointers": [{"chunk_id": "0", "page": 2, "heading_path": ["A", "B"]}]},
+    ], valid_chunk_ids={"0"})
+    assert out[0]["chunk_refs"] == ["0"]           # chunk_refs vẫn lọc id thật (không đổi)
+    assert out[0]["pointers"][0]["chunk_id"] == "0"
+    assert out[0]["pointers"][0]["page"] == 2
+    assert out[0]["pointers"][0]["section_title"] == "B"
+
+
+def test_sanitize_sections_without_pointers_omits_key_backcompat():
+    out = sm.sanitize_sections([
+        {"id": "s1", "title": "M", "summary": "s", "chunk_refs": []},
+    ], valid_chunk_ids=set())
+    assert "pointers" not in out[0]

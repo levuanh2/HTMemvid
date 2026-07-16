@@ -5,7 +5,10 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 
-PIPELINE_VERSION = "summary_sections_v2"
+# v3: record thêm section "pointers" (source pointer, Phase 2) → đổi SHAPE output →
+# bump để cache cũ (v2, thiếu pointers) miss + tái sinh có pointers (bài học: cache key
+# phản ánh mọi thay đổi output, dù pointers là suy diễn deterministic).
+PIPELINE_VERSION = "summary_sections_v3"
 LENGTH_MODES = ("short", "medium", "detailed")
 MAX_SECTIONS = 30
 MAX_KEY_POINTS = 8
@@ -15,6 +18,42 @@ MAX_KEY_POINTS = 8
 FACTS_KEYS = ("key_points", "definitions", "formulas", "examples",
               "important_terms", "common_mistakes", "open_questions")
 MAX_FACT_ITEMS = 12
+
+# Source pointer (Phase 2) — bộ field cố định; field lạ bị bỏ ở sanitize_pointers.
+POINTER_KEYS = ("chunk_id", "source_id", "source_stem", "page",
+                "section_title", "heading_path", "chunk_index")
+
+
+def sanitize_pointers(raw: object) -> list[dict]:
+    """Chuẩn hoá list pointer: chỉ giữ POINTER_KEYS, cần chunk_id, dedupe theo chunk_id,
+    heading_path ép list[str], section_title fallback = mục cuối heading_path. Field lạ bỏ.
+    Không phải list → []. Pointer do build_pointers sinh vốn đã sạch; hàm này idempotent +
+    phòng khi section đến kèm pointers (pass-through/legacy)."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    if not isinstance(raw, list):
+        return out
+    for p in raw:
+        if not isinstance(p, dict) or p.get("chunk_id") in (None, ""):
+            continue
+        cid = str(p["chunk_id"])
+        if cid in seen:
+            continue
+        seen.add(cid)
+        hp = p.get("heading_path")
+        hp_list = [str(x).strip() for x in hp if str(x).strip()] if isinstance(hp, list) else []
+        st = p.get("section_title")
+        st = str(st).strip() if st not in (None, "") else (hp_list[-1] if hp_list else None)
+        out.append({
+            "chunk_id": cid,
+            "source_id": str(p["source_id"]) if p.get("source_id") not in (None, "") else None,
+            "source_stem": str(p["source_stem"]) if p.get("source_stem") not in (None, "") else None,
+            "page": p.get("page"),
+            "section_title": st or None,
+            "heading_path": hp_list,
+            "chunk_index": p.get("chunk_index"),
+        })
+    return out
 
 
 def sanitize_facts(raw: object) -> dict:
@@ -81,6 +120,11 @@ def sanitize_sections(sections: list[dict], valid_chunk_ids: set[str]) -> list[d
         facts = sanitize_facts(s.get("facts"))
         if facts:
             item["facts"] = facts
+        # Source pointers (Phase 2): giữ khi có, bỏ key nếu rỗng (nhất quán với facts).
+        # Độc lập cờ SUMMARY_FACTS — pointer suy từ chunk_refs, hoạt động cả summary chuẩn.
+        pointers = sanitize_pointers(s.get("pointers"))
+        if pointers:
+            item["pointers"] = pointers
         out.append(item)
         if len(out) >= MAX_SECTIONS:
             break

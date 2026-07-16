@@ -2421,10 +2421,14 @@ def query_stream(job_id: str):
 def _summary_input_and_hash(source_names: list[str], length_mode: str,
                             mode: str = "standard") -> tuple[dict, str]:
     mm = collect_mindmap_input(INDEX_META_JSON_PATH, source_names)
+    # Phase 5: coverage flag goes into the cache key so a no-coverage record cached earlier is
+    # not served once SUMMARY_COVERAGE=1 (and vice-versa). collect_node mirrors this.
+    from shared.config import get_settings as _get_settings
+    cov_on = _get_settings().summary_coverage
     h = summary_schema.content_hash(mm.get("sources") or [],
                                     [c["text"] for c in mm.get("chunks") or []],
                                     [c.get("heading_path", "") for c in mm.get("chunks") or []],
-                                    length_mode, mode)
+                                    length_mode, mode, cov_on)
     return mm, h
 
 

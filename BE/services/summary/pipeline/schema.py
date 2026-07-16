@@ -5,10 +5,32 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 
-PIPELINE_VERSION = "summary_sections_v1"
+PIPELINE_VERSION = "summary_sections_v2"
 LENGTH_MODES = ("short", "medium", "detailed")
 MAX_SECTIONS = 30
 MAX_KEY_POINTS = 8
+
+# Summary v3 facts ledger — canonical intermediate. Free-text lists (KHÔNG phải id
+# chunk nên không lọc theo allowed_set như chunk_refs), chỉ coerce str + bỏ rỗng + cap.
+FACTS_KEYS = ("key_points", "definitions", "formulas", "examples",
+              "important_terms", "common_mistakes", "open_questions")
+MAX_FACT_ITEMS = 12
+
+
+def sanitize_facts(raw: object) -> dict:
+    """Chuẩn hoá facts ledger: chỉ giữ FACTS_KEYS, ép list[str], bỏ mục rỗng, cap.
+    Danh sách rỗng → bỏ hẳn key (không lưu key rỗng, không bịa). Trả {} nếu không có gì."""
+    facts: dict[str, list[str]] = {}
+    if not isinstance(raw, dict):
+        return facts
+    for k in FACTS_KEYS:
+        vals = raw.get(k)
+        if not isinstance(vals, list):
+            continue
+        cleaned = [str(v).strip() for v in vals if str(v).strip()][:MAX_FACT_ITEMS]
+        if cleaned:
+            facts[k] = cleaned
+    return facts
 
 
 def content_hash(source_stems: list[str], chunk_texts: list[str],
@@ -45,7 +67,7 @@ def sanitize_sections(sections: list[dict], valid_chunk_ids: set[str]) -> list[d
             k = str(k)
             if k in valid_chunk_ids and k not in refs:
                 refs.append(k)
-        out.append({
+        item = {
             "id": sid,
             "title": title,
             "summary": (s.get("summary") or "").strip(),
@@ -53,7 +75,13 @@ def sanitize_sections(sections: list[dict], valid_chunk_ids: set[str]) -> list[d
                            if str(p).strip()],
             "chunk_refs": refs,
             "order": int(s.get("order", i)),
-        })
+        }
+        # Facts ledger (Summary v3): giữ khi có, bỏ hẳn key nếu rỗng → section v2
+        # (không facts) vẫn hợp lệ, back-compat hoàn toàn.
+        facts = sanitize_facts(s.get("facts"))
+        if facts:
+            item["facts"] = facts
+        out.append(item)
         if len(out) >= MAX_SECTIONS:
             break
     return out

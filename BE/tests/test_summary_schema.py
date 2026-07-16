@@ -51,3 +51,59 @@ def test_build_record_invalid_mode_falls_back_medium():
                           sections=[], entities=[], content_hash_value="h",
                           model="m", elapsed_sec=0, degraded_missing=[])
     assert rec["length_mode"] == "medium"
+
+
+# --- Summary v3 facts ledger ---
+
+def test_pipeline_version_bumped_to_v2():
+    assert sm.PIPELINE_VERSION == "summary_sections_v2"
+
+
+def test_sanitize_facts_coerces_strings_and_drops_empty_and_unknown():
+    facts = sm.sanitize_facts({
+        "key_points": ["a", "", "  b  ", 3],   # coerce str + strip + drop empty
+        "definitions": [],                     # rỗng → bỏ key
+        "formulas": "not-a-list",              # không phải list → bỏ
+        "junk_key": ["x"],                     # ngoài FACTS_KEYS → bỏ
+    })
+    assert facts["key_points"] == ["a", "b", "3"]
+    assert "definitions" not in facts
+    assert "formulas" not in facts
+    assert "junk_key" not in facts
+
+
+def test_sanitize_facts_non_dict_returns_empty():
+    assert sm.sanitize_facts(None) == {}
+    assert sm.sanitize_facts(["a"]) == {}
+    assert sm.sanitize_facts("x") == {}
+
+
+def test_sanitize_facts_caps_items():
+    facts = sm.sanitize_facts({"key_points": [str(i) for i in range(50)]})
+    assert len(facts["key_points"]) == sm.MAX_FACT_ITEMS
+
+
+def test_sanitize_sections_preserves_valid_facts():
+    out = sm.sanitize_sections([
+        {"id": "s1", "title": "M", "summary": "s", "chunk_refs": ["0"],
+         "facts": {"definitions": ["D1"], "formulas": [], "important_terms": ["T1", ""]}},
+    ], valid_chunk_ids={"0"})
+    assert out[0]["facts"] == {"definitions": ["D1"], "important_terms": ["T1"]}
+
+
+def test_sanitize_sections_without_facts_omits_key_backcompat():
+    # section v2 (không facts) đi qua sanitize vẫn hợp lệ, không sinh key rỗng
+    out = sm.sanitize_sections([
+        {"id": "s1", "title": "M", "summary": "s", "chunk_refs": []},
+    ], valid_chunk_ids=set())
+    assert "facts" not in out[0]
+
+
+def test_build_record_includes_section_facts_when_present():
+    rec = sm.build_record(title="T", sources=["a"], length_mode="medium", overview="ov",
+                          sections=[{"id": "s1", "title": "M", "summary": "s", "key_points": [],
+                                     "chunk_refs": [], "order": 0,
+                                     "facts": {"key_points": ["kp"]}}],
+                          entities=[], content_hash_value="h", model="m",
+                          elapsed_sec=0, degraded_missing=[])
+    assert rec["sections"][0]["facts"] == {"key_points": ["kp"]}

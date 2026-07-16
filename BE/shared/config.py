@@ -147,6 +147,11 @@ class Settings:
     hypo_qa: bool = False                   # sinh câu hỏi giả định (tốn LLM/chunk)
     doc_category: str = "general"
 
+    # --- Summary v3 ---
+    # Mặc định OFF → tóm tắt hành xử y hệt Summary v2 (không có facts). Khi bật:
+    # mỗi section trả thêm "facts" ledger (canonical IR), summary suy từ facts.
+    summary_facts: bool = False
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
@@ -204,6 +209,7 @@ class Settings:
             contextual_embeddings=_flag("CONTEXTUAL_EMBEDDINGS", "0"),
             hypo_qa=_flag("HYPO_QA", "0"),
             doc_category=os.getenv("DOC_CATEGORY", "general"),
+            summary_facts=_flag("SUMMARY_FACTS", "0"),
         )
 
 

@@ -96,3 +96,97 @@ def test_length_mode_changes_prompt_rule(monkeypatch):
     assert "2-3 câu" in seen["system"]
     sz.summarize_sections(_MM, _SECTIONS[:1], length_mode="detailed", timeout_sec=5)
     assert "2-3 đoạn" in seen["system"]
+
+
+# --- Summary v3 facts ledger (with_facts=True) ---
+
+def _facts_payload(refs, facts=None):
+    return json.dumps({
+        "facts": facts if facts is not None else {
+            "key_points": ["kp"], "definitions": ["def A"], "formulas": ["E=mc^2"],
+            "examples": ["vd 1"], "important_terms": ["T"], "common_mistakes": ["nhầm X"],
+            "open_questions": ["còn gì?"]},
+        "summary": "tóm tắt", "key_points": ["ý 1"], "chunk_keys": refs})
+
+
+def test_with_facts_parses_all_seven_keys(monkeypatch):
+    monkeypatch.setattr(sz, "ask_ai", lambda *a, **k: _facts_payload(["0"]))
+    out, missing = sz.summarize_sections(_MM, _SECTIONS[:1], with_facts=True,
+                                         timeout_sec=5, max_workers=1)
+    assert missing == []
+    assert set(out[0]["facts"].keys()) == set(sz._FACTS_KEYS)
+    assert out[0]["facts"]["formulas"] == ["E=mc^2"]
+
+
+def test_with_facts_false_omits_facts_and_keeps_old_shape(monkeypatch):
+    monkeypatch.setattr(sz, "ask_ai", lambda *a, **k: _facts_payload(["0"]))
+    out, _ = sz.summarize_sections(_MM, _SECTIONS[:1], with_facts=False,
+                                   timeout_sec=5, max_workers=1)
+    assert "facts" not in out[0]
+    assert out[0]["summary"] == "tóm tắt"
+    assert out[0]["key_points"] == ["ý 1"]
+
+
+def test_with_facts_coerces_and_drops_empty(monkeypatch):
+    payload = _facts_payload(["0"], facts={"key_points": ["a", "", 7], "definitions": [],
+                                           "junk": ["z"]})
+    monkeypatch.setattr(sz, "ask_ai", lambda *a, **k: payload)
+    out, _ = sz.summarize_sections(_MM, _SECTIONS[:1], with_facts=True,
+                                   timeout_sec=5, max_workers=1)
+    assert out[0]["facts"] == {"key_points": ["a", "7"]}
+
+
+def test_with_facts_hallucinated_chunk_keys_filtered(monkeypatch):
+    monkeypatch.setattr(sz, "ask_ai", lambda *a, **k: _facts_payload(["999"]))
+    out, _ = sz.summarize_sections(_MM, _SECTIONS[:1], with_facts=True,
+                                   timeout_sec=5, max_workers=1)
+    assert out[0]["chunk_refs"] == ["0"]   # bogus filtered → skeleton ref giữ nguyên
+
+
+def test_with_facts_malformed_then_valid_retries_once(monkeypatch):
+    calls = {"n": 0}
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        return "{broken" if calls["n"] == 1 else _facts_payload(["0"])
+
+    monkeypatch.setattr(sz, "ask_ai", flaky)
+    out, missing = sz.summarize_sections(_MM, _SECTIONS[:1], with_facts=True,
+                                         timeout_sec=5, max_workers=1)
+    assert missing == []
+    assert calls["n"] == 2
+    assert out[0]["facts"]["key_points"] == ["kp"]
+
+
+def test_with_facts_persistent_failure_degrades_without_fabricating(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("llm down")
+
+    monkeypatch.setattr(sz, "ask_ai", boom)
+    out, missing = sz.summarize_sections(_MM, _SECTIONS[:1], with_facts=True,
+                                         timeout_sec=5, max_workers=1)
+    assert missing == ["section:A"]
+    assert out[0]["summary"] == ""
+    assert "facts" not in out[0]   # lỗi → không bịa facts
+
+
+def test_two_pass_seam_raises_not_implemented(monkeypatch):
+    monkeypatch.setattr(sz, "ask_ai", lambda *a, **k: _facts_payload(["0"]))
+    with pytest.raises(NotImplementedError):
+        sz._summarize_one(_MM, _SECTIONS[0], None, 5, "medium",
+                          with_facts=True, two_pass=True)
+
+
+def test_facts_prompt_contains_seven_keys_and_length_rule(monkeypatch):
+    seen = {}
+
+    def capture(prompt, system_prompt=None, **k):
+        seen["system"] = system_prompt
+        return _facts_payload(["0"])
+
+    monkeypatch.setattr(sz, "ask_ai", capture)
+    sz.summarize_sections(_MM, _SECTIONS[:1], with_facts=True, length_mode="short",
+                          timeout_sec=5, max_workers=1)
+    for key in sz._FACTS_KEYS:
+        assert key in seen["system"]
+    assert "2-3 câu" in seen["system"]

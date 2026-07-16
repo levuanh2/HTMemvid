@@ -7,6 +7,11 @@
 .me-hide-arrows g[id^="a-"] { display: none; }
 .me-hide-arrows .svg-label[data-type="arrow"] { display: none; }
 
+/* Fill the sized wrapper. mind-elixir sets el.style.position="relative" inline,
+   defeating any `absolute inset-0` (inline > class); explicit 100%/100% makes the
+   ref target fill its parent so .map-container{height:100%} resolves to the real
+   viewport instead of collapsing to content height. */
+.me-container { width: 100%; height: 100%; min-height: 0; }
 .me-container { outline: none; }
 .me-container :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 

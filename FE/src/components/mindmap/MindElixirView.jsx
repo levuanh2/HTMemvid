@@ -347,8 +347,12 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
       )}
       {/* Map + legend (legend là sibling — cleanup xoá innerHTML của container
           nên không được đặt con React bên trong div ref) */}
-      <div className="relative flex-1 min-h-0">
-        <div ref={containerRef} className={`absolute inset-0 me-container${showRelations ? "" : " me-hide-arrows"}`} />
+      <div className="relative flex-1 min-h-0 overflow-hidden">
+        {/* Ref target owns h/w-full (normal flow) — mind-elixir sets el.style.position
+            = "relative" inline (verified dist), which defeats `absolute inset-0` (inline
+            beats class) and collapses the container to content height, breaking scaleFit
+            and leaving dead pan area. w/h-full fills the sized wrapper instead. */}
+        <div ref={containerRef} className={`h-full w-full min-h-0 me-container${showRelations ? "" : " me-hide-arrows"}`} />
         <div className="mm-legend" aria-hidden="true">
           <span><span className="swatch" style={{ background: "var(--text-primary)" }} />chủ đề</span>
           <span><span className="swatch" style={{ background: "var(--bg-card)", border: "1px solid var(--border-strong)" }} />mục</span>

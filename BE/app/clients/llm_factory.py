@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
 from collections import OrderedDict
+from contextlib import contextmanager
 from typing import Any, Iterator, Optional
 
 import numpy as np
@@ -53,6 +55,64 @@ _GRPC_EMB_CACHE: dict = {}
 
 def _gateway_addr() -> str:
     return (os.getenv("LLM_GATEWAY_ADDR") or "").strip()
+
+
+# === PR#4: in-process LLM concurrency cap ===
+# Khi KHÔNG có llm-gateway (LLM_GATEWAY_ADDR unset — monolith-only), không có gì
+# chặn N pipeline cùng dội generation lên một Ollama CPU. Cap tại chokepoint
+# ask_ai (mọi batch pipeline + memory-tree + fallback đi qua đây; cache hit thì
+# không). Cùng env với gateway: MAX_CONCURRENT_LLM_CALLS / LLM_QUEUE_WAIT_TIMEOUT_SECONDS.
+# Quá hạn chờ → RuntimeError → rơi vào đúng error-path degraded sẵn có của caller.
+# Nhánh gateway KHÔNG đi qua gate này (gateway tự cap ở server).
+_inproc_gate_lock = threading.Lock()
+
+
+def _inproc_enabled() -> bool:
+    return (os.getenv("LLM_INPROCESS_CAP_ENABLED", "1") or "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _load_inproc_gate() -> tuple[threading.BoundedSemaphore, int, float]:
+    try:
+        max_calls = max(1, int((os.getenv("MAX_CONCURRENT_LLM_CALLS") or "").strip() or 2))
+    except ValueError:
+        max_calls = 2
+    try:
+        wait = max(0.0, float((os.getenv("LLM_QUEUE_WAIT_TIMEOUT_SECONDS") or "").strip() or 30.0))
+    except ValueError:
+        wait = 30.0
+    return threading.BoundedSemaphore(max_calls), max_calls, wait
+
+
+_inproc_semaphore, _INPROC_MAX, _INPROC_WAIT = _load_inproc_gate()
+
+
+def configure_inproc_gate(max_calls: int | None = None, wait_timeout: float | None = None) -> None:
+    """Rebuild in-process gate từ env (hook cho test/ops — không gọi per request)."""
+    global _inproc_semaphore, _INPROC_MAX, _INPROC_WAIT
+    if max_calls is not None:
+        os.environ["MAX_CONCURRENT_LLM_CALLS"] = str(max_calls)
+    if wait_timeout is not None:
+        os.environ["LLM_QUEUE_WAIT_TIMEOUT_SECONDS"] = str(wait_timeout)
+    with _inproc_gate_lock:
+        _inproc_semaphore, _INPROC_MAX, _INPROC_WAIT = _load_inproc_gate()
+
+
+@contextmanager
+def _inproc_slot():
+    """Một slot generation in-process (bounded wait). Tắt qua LLM_INPROCESS_CAP_ENABLED=0."""
+    if not _inproc_enabled():
+        yield
+        return
+    if not _inproc_semaphore.acquire(timeout=_INPROC_WAIT):
+        raise RuntimeError(
+            f"LLM busy (in-process): all {_INPROC_MAX} slots in use, waited {_INPROC_WAIT}s"
+        )
+    try:
+        yield
+    finally:
+        _inproc_semaphore.release()
 
 
 def _grpc_llm_provider(addr: str):
@@ -498,22 +558,25 @@ def ask_ai(
     # Nếu không truyền model cụ thể, tự động chọn theo feature
     effective_model = model or _model_map(feature)
 
-    for provider in PROVIDERS:
-        try:
-            if provider == "ollama":
-                llm = _ollama_chat_llm(effective_model, feature, options)
-                return _invoke_chat(llm, prompt, system_prompt, timeout=timeout)
+    # PR#4: một slot cho TOÀN BỘ vòng fallback provider (retry không bypass cap,
+    # mirror gateway). Quá hạn chờ → RuntimeError → error-path degraded sẵn có.
+    with _inproc_slot():
+        for provider in PROVIDERS:
+            try:
+                if provider == "ollama":
+                    llm = _ollama_chat_llm(effective_model, feature, options)
+                    return _invoke_chat(llm, prompt, system_prompt, timeout=timeout)
 
-            if provider == "gemini":
-                llm = _gemini_chat_llm(feature, options)
-                return _invoke_chat(llm, prompt, system_prompt, timeout=timeout)
+                if provider == "gemini":
+                    llm = _gemini_chat_llm(feature, options)
+                    return _invoke_chat(llm, prompt, system_prompt, timeout=timeout)
 
-            if provider == "groq":
-                llm = _groq_chat_llm(feature, options)
-                return _invoke_chat(llm, prompt, system_prompt, timeout=timeout)
-        except Exception as e:
-            last_error = e
-            continue
+                if provider == "groq":
+                    llm = _groq_chat_llm(feature, options)
+                    return _invoke_chat(llm, prompt, system_prompt, timeout=timeout)
+            except Exception as e:
+                last_error = e
+                continue
 
     if not PROVIDERS:
         raise RuntimeError(

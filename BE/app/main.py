@@ -338,6 +338,9 @@ _SF_METRICS: Dict[str, int] = _MirroredCounter("sf", {
     "leader": 0, "follower": 0, "follower_hit": 0, "timeout": 0,
     "fail_open": 0, "bypass_unsafe": 0, "bypass_followup": 0, "bypass_disabled": 0,
     "redis_error_fail_open": 0, "dup_avoided": 0, "release_ok": 0, "release_fail": 0,
+    # PR#4: follower nhả admission slot khi ngủ chờ leader / bị từ chối re-admit
+    # lúc fail-open (slot đã bị request khác lấy trong lúc chờ).
+    "follower_slot_released": 0, "follower_readmit_rejected": 0,
 })
 
 
@@ -412,12 +415,18 @@ def _finalize_from_cache(jid: str, session_id: str, question: str, cached: dict,
 def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
                        category: Optional[str], language: Optional[str],
                        session_id: str, *, user_id: Optional[str] = None,
-                       enforce_owner: bool = False, cache_scope: str = "public") -> dict:
+                       enforce_owner: bool = False, cache_scope: str = "public",
+                       release_for_wait=None) -> dict:
     """Decide leader/follower/bypass for one query job. Returns:
       {"served": True}                    -> follower finalized from cache (skip graph)
       {"served": False, "lock": (k, tok)} -> leader (run graph, release lock after)
       {"served": False, "lock": None}     -> bypass or fail-open (run graph, no lock)
     Fail-open on ANY Redis/lock issue — never raises into the answer path.
+
+    PR#4: release_for_wait (optional callable) được gọi ĐÚNG MỘT LẦN ngay trước
+    khi follower vào vòng ngủ chờ leader — caller dùng để nhả query-admission
+    slot (follower ngủ không được đốt slot của query thật). Leader/bypass/warm-hit
+    KHÔNG gọi (các đường đó hoặc chạy graph ngay hoặc trả kết quả ngay).
     """
     if not _sf_enabled():
         _SF_METRICS["bypass_disabled"] += 1
@@ -484,6 +493,11 @@ def _single_flight_try(jid: str, question: str, sources: list, use_mem: bool,
     # Follower: poll for the leader's cached answer.
     _SF_METRICS["follower"] += 1
     _sf_log("singleflight_follower_waiting", key=sf_key[-24:])
+    if release_for_wait is not None:
+        try:
+            release_for_wait()  # nhả admission slot TRƯỚC khi ngủ (PR#4)
+        except Exception:
+            pass
     poll = max(0.05, _sf_num("SINGLE_FLIGHT_POLL_INTERVAL_SECONDS", 0.5))
     deadline = time.time() + _sf_num("SINGLE_FLIGHT_WAIT_SECONDS", 120)
     while time.time() < deadline:
@@ -2210,6 +2224,19 @@ def query():
     def process_query_job(jid: str, question: str, sources: list, use_mem: bool, category: str | None = None, language: str | None = None) -> None:
         start_ts = time.time()
         sf_lock = None  # (key, token) if we became the single-flight leader
+        # PR#4: follower ngủ chờ leader không được giữ admission slot. Cờ này là
+        # NGUỒN SỰ THẬT duy nhất về slot — mọi release đi qua _release_for_wait /
+        # finally, mỗi acquire đúng một release (Semaphore thường, double-release
+        # sẽ phình capacity vĩnh viễn).
+        holds_admission = True  # route đã acquire trước khi start thread
+
+        def _release_for_wait() -> None:
+            nonlocal holds_admission
+            if holds_admission:
+                holds_admission = False
+                _query_semaphore.release()
+                _SF_METRICS["follower_slot_released"] += 1
+                _sf_log("singleflight_follower_slot_released", job=jid[:8])
         # Phase 0 observability: counter LLM call per-query (cache hit = 0 call).
         from app.graphs.logger import begin_llm_count, flush_llm_count
         _llm_counter = begin_llm_count()
@@ -2227,12 +2254,33 @@ def query():
             # flag because A and B get different single-flight + bucket keys, so they never
             # share a leader or an answer. Same user + same resolved sources still coalesce.
             try:
-                _sf = _single_flight_try(jid, question, sources, use_mem, category, language, session_id, user_id=req_user_id, enforce_owner=conv_enforce, cache_scope=cache_scope)
+                _sf = _single_flight_try(jid, question, sources, use_mem, category, language, session_id, user_id=req_user_id, enforce_owner=conv_enforce, cache_scope=cache_scope, release_for_wait=_release_for_wait)
             except Exception:
                 _sf = {"served": False, "lock": None}  # single-flight must never break the answer path
             if _sf.get("served"):
                 return  # follower finalized from the leader's cached answer
             sf_lock = _sf.get("lock")
+
+            # PR#4: follower fail-open (đã nhả slot lúc ngủ) giờ phải chạy graph
+            # → xin lại admission. Bị từ chối (slot đã bị query thật lấy) → job
+            # error có cấu trúc, KHÔNG chạy graph lậu vượt capacity.
+            if not holds_admission:
+                if _query_semaphore.acquire(blocking=False):
+                    holds_admission = True
+                else:
+                    _SF_METRICS["follower_readmit_rejected"] += 1
+                    _sf_log("singleflight_follower_readmit_rejected", job=jid[:8])
+                    busy_msg = "Hệ thống đang bận (quá nhiều truy vấn đồng thời). Vui lòng thử lại."
+                    with query_jobs_lock:
+                        if jid in query_jobs:
+                            query_jobs[jid]["status"] = "error"
+                            query_jobs[jid]["error"] = busy_msg
+                    if _jobs_update_job:
+                        try:
+                            _jobs_update_job(jid, status="error", error_text=busy_msg)
+                        except Exception:
+                            pass
+                    return
 
             try:
                 from app.domains.jobs.jobs_store import clear_token_buffer as _js_tb_clear
@@ -2353,7 +2401,11 @@ def query():
             elapsed = time.time() - start_ts
             if elapsed > QUERY_JOB_TIMEOUT_SEC:
                 print(f"[QUERY_JOB] job_id={jid} exceeded timeout={QUERY_JOB_TIMEOUT_SEC}s (elapsed={elapsed:.1f}s)")
-            _query_semaphore.release()
+            # PR#4: chỉ release khi còn giữ (follower đã nhả lúc ngủ thì thôi —
+            # double release trên Semaphore thường phình capacity vĩnh viễn).
+            if holds_admission:
+                holds_admission = False
+                _query_semaphore.release()
 
     thread = threading.Thread(
         target=process_query_job,

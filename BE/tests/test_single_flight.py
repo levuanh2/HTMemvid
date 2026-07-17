@@ -198,3 +198,60 @@ def test_two_leaders_for_two_documents(sf_env):
     r2 = main._single_flight_try("jb", "nội dung là gì", ["doc_b"], True, None, None, "s2")
     assert r1["lock"] and r2["lock"]
     assert r1["lock"][0] != r2["lock"][0]  # no cross-document coalescing: both lead
+
+
+# ------------------------------------------------- PR#4: admission slot release
+# Follower ngủ chờ leader phải nhả query-admission slot: release_for_wait được
+# gọi ĐÚNG MỘT LẦN ngay trước vòng poll — leader/bypass/warm-hit KHÔNG gọi.
+
+def test_leader_does_not_release_admission(sf_env):
+    sf_env["monkeypatch"].setattr(main, "_get_cached_query", _CacheStub([None]))
+    calls = []
+    r = main._single_flight_try("jr1", "nội dung là gì", [], True, None, None, "s1",
+                                release_for_wait=lambda: calls.append(1))
+    assert r["lock"] is not None
+    assert calls == []  # leader chạy graph ngay — giữ slot
+
+
+def test_warm_hit_follower_does_not_release_admission(sf_env):
+    sf_env["monkeypatch"].setattr(main, "_get_cached_query", _CacheStub([_GOOD]))
+    calls = []
+    r = main._single_flight_try("jr2", "nội dung là gì", [], True, None, None, "s1",
+                                release_for_wait=lambda: calls.append(1))
+    assert r["served"] is True
+    assert calls == []  # trả ngay từ cache — không có đoạn ngủ
+
+
+def test_waiting_follower_releases_admission_once(sf_env):
+    key = llm_cache.single_flight_key("nội dung là gì", [], use_memory_tree=True)
+    sf_env["fake"].store[key] = "leader-token"
+    sf_env["monkeypatch"].setattr(main, "_get_cached_query", _CacheStub([None, None, _GOOD]))
+    calls = []
+    r = main._single_flight_try("jr3", "nội dung là gì", [], True, None, None, "s1",
+                                release_for_wait=lambda: calls.append(1))
+    assert r["served"] is True
+    assert calls == [1]  # nhả đúng một lần trước khi ngủ
+
+
+def test_fail_open_follower_released_admission(sf_env):
+    key = llm_cache.single_flight_key("nội dung là gì", [], use_memory_tree=True)
+    sf_env["fake"].store[key] = "leader-token"  # leader treo, cache không bao giờ có
+    sf_env["monkeypatch"].setattr(main, "_get_cached_query", _CacheStub([None]))
+    calls = []
+    r = main._single_flight_try("jr4", "nội dung là gì", [], True, None, None, "s1",
+                                release_for_wait=lambda: calls.append(1))
+    assert r == {"served": False, "lock": None}  # fail-open → caller phải re-admit
+    assert calls == [1]
+
+
+def test_release_callback_error_does_not_break_decision(sf_env):
+    key = llm_cache.single_flight_key("nội dung là gì", [], use_memory_tree=True)
+    sf_env["fake"].store[key] = "leader-token"
+    sf_env["monkeypatch"].setattr(main, "_get_cached_query", _CacheStub([None, _GOOD]))
+
+    def boom():
+        raise RuntimeError("release failed")
+
+    r = main._single_flight_try("jr5", "nội dung là gì", [], True, None, None, "s1",
+                                release_for_wait=boom)
+    assert r["served"] is True  # callback lỗi bị nuốt — không phá answer path

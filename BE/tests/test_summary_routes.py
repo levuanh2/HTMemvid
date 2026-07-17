@@ -121,11 +121,56 @@ def test_status_rejects_other_job_type(client, monkeypatch):
 
 
 def test_cancel_endpoint_sets_flag(client, monkeypatch):
+    # Cancel giờ 404 job lạ (cùng contract /summary-status) → job phải tồn tại.
+    monkeypatch.setenv("AUTH_PROTECT_APP_APIS", "0")
     from app.domains.jobs import jobs_store as js
     called = {}
+    monkeypatch.setattr(js, "get_job", lambda jid: {"job_type": "summary", "status": "running"})
     monkeypatch.setattr(js, "request_cancel", lambda jid: called.setdefault("jid", jid))
     r = client.post("/summary-cancel/abc")
     assert r.status_code == 200 and called["jid"] == "abc"
+    assert r.get_json()["status"] == "running"  # running → cooperative, trả status hiện tại
+
+
+def test_cancel_unknown_job_returns_404(client, monkeypatch):
+    monkeypatch.setenv("AUTH_PROTECT_APP_APIS", "0")
+    from app.domains.jobs import jobs_store as js
+    monkeypatch.setattr(js, "get_job", lambda jid: None)
+    assert client.post("/summary-cancel/nope").status_code == 404
+
+
+def test_cancel_rejects_other_job_type(client, monkeypatch):
+    monkeypatch.setenv("AUTH_PROTECT_APP_APIS", "0")
+    from app.domains.jobs import jobs_store as js
+    monkeypatch.setattr(js, "get_job", lambda jid: {"job_type": "mindmap", "status": "running"})
+    assert client.post("/summary-cancel/x").status_code == 404
+
+
+def test_cancel_interrupted_job_returns_cancelled(client, monkeypatch, tmp_path):
+    # Job mồ côi sau restart: cancel phải trả terminal "cancelled" NGAY —
+    # regression cho UI kẹt "Đang huỷ… (36%)" (không executor nào ack cờ).
+    monkeypatch.setenv("AUTH_PROTECT_APP_APIS", "0")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from app.domains.jobs import jobs_store as js
+    js.create_job("sjint", job_type="summary", status="running", progress=36)
+    js.mark_interrupted_jobs()
+    r = client.post("/summary-cancel/sjint")
+    assert r.status_code == 200
+    assert r.get_json()["status"] == "cancelled"
+    assert js.get_job("sjint")["status"] == "cancelled"
+
+
+def test_cancel_done_job_is_safe_noop(client, monkeypatch, tmp_path):
+    # Idempotent: cancel job đã xong không phá status/result.
+    monkeypatch.setenv("AUTH_PROTECT_APP_APIS", "0")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from app.domains.jobs import jobs_store as js
+    js.create_job("sjdone", job_type="summary", status="running")
+    js.update_job("sjdone", status="done", progress=100, result={"id": "r1"})
+    r = client.post("/summary-cancel/sjdone")
+    assert r.status_code == 200
+    assert r.get_json()["status"] == "done"
+    assert js.get_job("sjdone")["result"] == {"id": "r1"}
 
 
 def test_list_and_delete_use_store(client, monkeypatch):

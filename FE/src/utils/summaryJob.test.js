@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { stageLabel, normalizeSummaryRecord, LENGTH_MODES, SUMMARY_MODES } from "./summaryJob";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { stageLabel, normalizeSummaryRecord, createSummaryPoller, LENGTH_MODES, SUMMARY_MODES } from "./summaryJob";
 
 describe("stageLabel (summary)", () => {
   it("map node pipeline sang label Việt", () => {
@@ -21,6 +21,49 @@ describe("LENGTH_MODES", () => {
 describe("SUMMARY_MODES", () => {
   it("khớp contract BE (standard/study)", () => {
     expect(SUMMARY_MODES.map((m) => m.value)).toEqual(["standard", "study"]);
+  });
+});
+
+describe("createSummaryPoller — terminal cancel/interrupted (UI không kẹt 'Đang huỷ…')", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const mk = (statuses, cbs = {}) => {
+    let i = 0;
+    const fetchStatus = vi.fn(async () => statuses[Math.min(i++, statuses.length - 1)]);
+    const events = { done: [], errors: [], cancelled: 0 };
+    const poller = createSummaryPoller({
+      fetchStatus,
+      onDone: (r) => events.done.push(r),
+      onError: (e) => events.errors.push(e),
+      onCancelled: () => events.cancelled++,
+      ...cbs,
+    });
+    return { poller, events, fetchStatus };
+  };
+
+  it("cancelled là terminal → onCancelled, dừng poll", async () => {
+    const { poller, events, fetchStatus } = mk([
+      { status: "running", progress: 36, current_node: "Đang tóm tắt mục 1/7..." },
+      { status: "cancelled", progress: 0 },
+    ]);
+    poller.start("sj1");
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(events.cancelled).toBe(1);
+    const calls = fetchStatus.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchStatus.mock.calls.length).toBe(calls); // đã dừng hẳn
+  });
+
+  it("interrupted (job mồ côi sau BE restart) là terminal → onError, KHÔNG poll vô hạn", async () => {
+    const { poller, events, fetchStatus } = mk([
+      { status: "interrupted", progress: 36, current_node: "Đang tóm tắt mục 1/7..." },
+    ]);
+    poller.start("sj-orphan");
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(events.errors).toHaveLength(1);
+    expect(events.errors[0].message).toContain("gián đoạn");
+    expect(fetchStatus).toHaveBeenCalledTimes(1);
   });
 });
 

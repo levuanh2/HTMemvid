@@ -1,5 +1,36 @@
 # Known Issues
 
+## (ĐÃ SỬA 2026-07-17) Huỷ tóm tắt kẹt "Đang huỷ… (36%)" mãi — cancel job không còn executor + FE poller không biết "interrupted"
+
+- **Triệu chứng:** Đang tạo tóm tắt, bấm Huỷ → chip kẹt "Đang huỷ… (36%)" vĩnh viễn, %
+  đứng yên, không bao giờ thoát trạng thái huỷ. (Huỷ khi executor còn sống hoạt động đúng —
+  đã chứng minh bằng repro graph thật.)
+- **Root cause (2 tầng, đo bằng repro trực tiếp):**
+  1. BE: `jobs_store.request_cancel` CHỈ set cờ `cancel_requested=1` và trông chờ executor
+     đang sống ack giữa các node. Job KHÔNG còn executor — `pending` trong queue, hoặc
+     `interrupted` (BE restart → `mark_interrupted_jobs` đánh dấu job mồ côi, GIỮ progress 36)
+     — thì không ai ack cờ → status không bao giờ terminal.
+  2. FE: `jobPoller.js` chỉ coi done/error/timeout/cancelled là terminal — "interrupted"
+     KHÔNG có trong tập (queryPolling.js CÓ, jobPoller quên) → poll vô hạn, label bị khoá
+     "Đang huỷ…" (cancelRequestedRef) + progress đóng băng đúng như user thấy.
+- **Fix:** (1) `request_cancel` chuyển THẲNG `pending`/`interrupted` → `cancelled` trong cùng
+  UPDATE (running/processing giữ cooperative; terminal giữ nguyên → idempotent). Sửa MỘT chỗ
+  ở store → summary LẪN mindmap cancel hưởng chung. (2) `/summary-cancel` 404 job lạ (cùng
+  contract `/summary-status`), trả `status` sau cancel. (3) `summary_graph.assemble_node`
+  thêm 2 cancel checkpoint: trước coverage judge (LLM dài) + trước persist — cancel đến sau
+  entry-guard vẫn KHÔNG persist/done (done-with-result vẫn atomic). (4) FE `jobPoller` coi
+  "interrupted" là terminal (onError, message riêng qua `messages.interrupted`).
+- **Regression:** BE `test_jobs_cancel.py` (running cooperative / pending+interrupted →
+  cancelled ngay / terminal idempotent), `test_summary_graph.py::test_cancel_mid_summarize_
+  reaches_terminal_cancelled` + `test_cancel_during_coverage_judge_does_not_persist_or_done`,
+  `test_summary_routes.py` (cancel 404 job lạ/khác type, interrupted → "cancelled", done →
+  safe no-op). FE `summaryJob.test.js` (cancelled → onCancelled dừng hẳn; interrupted →
+  onError, không poll vô hạn).
+- **Prevention:** Cancel theo cờ cooperative PHẢI có đường terminal cho job không còn
+  executor — endpoint cancel không được chỉ "ghi cờ rồi hy vọng". FE poller: tập status
+  terminal phải khớp ĐỦ tập status BE có thể ghi (interrupted sinh ra ở startup-reconcile,
+  không chỉ trong flow chạy bình thường); thêm status mới phía BE → rà mọi poller.
+
 ## (ĐÃ SỬA 2026-07-06) Cache hit trả "Không có phản hồi." — race job done-trước-result + 4 lỗ contract
 
 - **Triệu chứng:** Câu hỏi bị cache HIT (nhanh <1s) → FE hiện "Không có phản hồi." dù Redis

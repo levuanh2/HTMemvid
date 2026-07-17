@@ -13,6 +13,7 @@ const DEFAULT_MESSAGES = {
   notFound: "Không tìm thấy job trên server (có thể đã bị dọn). Hãy tạo lại.",
   lost: (n) => `Mất liên lạc với server sau ${n} lần thử. Hãy tạo lại.`,
   error: "Lỗi khi chạy job.",
+  interrupted: "Job bị gián đoạn trên server (có thể do khởi động lại). Hãy tạo lại.",
 };
 
 export function createJobPoller({
@@ -70,6 +71,11 @@ export function createJobPoller({
       stopped = true; onError?.(new Error(status.error || msgs.error)); return;
     }
     if (status.status === "cancelled") { stopped = true; onCancelled?.(); return; }
+    // "interrupted" = job mồ côi sau khi BE restart (mark_interrupted_jobs) — không
+    // executor nào chạy tiếp, poll thêm là vô hạn → terminal như error, kèm hướng dẫn.
+    if (status.status === "interrupted") {
+      stopped = true; onError?.(new Error(msgs.interrupted)); return;
+    }
     schedule(jobId);
   };
 

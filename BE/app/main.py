@@ -2639,9 +2639,15 @@ def summary_cancel(job_id: str):
     # Owner check BEFORE cancel — never let User B cancel User A's job.
     if _auth_protect_enabled() and _derived_job_owner_ok(job_id, uid, ("summary", None)) is not True:
         return jsonify({"error": "Job not found"}), 404
-    from app.domains.jobs.jobs_store import request_cancel
+    from app.domains.jobs.jobs_store import get_job as _js_get, request_cancel
+    j = _js_get(job_id)
+    if not j or j.get("job_type") not in ("summary", None):
+        return jsonify({"error": "Job not found"}), 404  # cùng contract với /summary-status
     request_cancel(job_id)
-    return jsonify({"ok": True}), 200
+    # Idempotent: done/error/cancelled giữ nguyên; pending/interrupted → cancelled NGAY
+    # (không còn executor để ack cờ); running → cờ cooperative, graph dừng ở checkpoint kế.
+    j2 = _js_get(job_id) or {}
+    return jsonify({"ok": True, "status": j2.get("status")}), 200
 
 
 @app.route('/summaries', methods=['OPTIONS'])

@@ -1451,36 +1451,70 @@ def _get_session_history_safe(session_id: str, limit: int) -> list:
         return []
 
 
-def _warmup_ollama_background() -> None:
+def _warmup_model_names() -> list[str]:
+    """Model Ollama cần warm = ĐÚNG model runtime sẽ resolve theo feature
+    (một nguồn sự thật `_model_map` — hết stale default kiểu qwen3.5:9b hardcode
+    riêng ở warmup trong khi compose chạy model khác). Dedupe giữ thứ tự,
+    chat/query warm trước (interactive nhạy cold-start nhất)."""
+    from app.clients.llm_factory import _model_map
+    out: list[str] = []
+    for feature in ("chat", "summary", "mindmap"):
+        m = (_model_map(feature) or "").strip()
+        if m and m not in out:
+            out.append(m)
+    return out
+
+
+def _warmup_ollama_background() -> list[str]:
+    """Warm mọi model đã cấu hình, nền + fail-open tuyệt đối (warmup lỗi không
+    được chặn request nào). Trả về list model đã lên lịch ([] khi tắt/không host)
+    — để test quan sát được mà không cần Ollama thật."""
     if (os.getenv("OLLAMA_WARMUP", "1") or "").strip().lower() in ("0", "false", "no", "off"):
-        return
+        return []
     host = (os.getenv("OLLAMA_HOST") or "").strip().rstrip("/")
     if not host:
-        return
-    model = os.getenv("SLM_MODEL_CHAT", os.getenv("OLLAMA_MODEL", "qwen3.5:9b"))
+        return []
+    models = _warmup_model_names()
+    try:
+        timeout = float((os.getenv("MODEL_WARMUP_TIMEOUT_SECONDS") or "").strip() or 120)
+    except ValueError:
+        timeout = 120.0
 
     def _run():
-        try:
-            import requests
+        import requests
 
-            r = requests.post(
-                f"{host}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": "Hi",
-                    "stream": False,
-                    "options": {"num_predict": 1, "temperature": 0},
-                },
-                timeout=120,
-            )
-            if r.status_code == 200:
-                print(f"[warmup] Ollama model {model!r} ready")
-            else:
-                print(f"[warmup] Ollama HTTP {r.status_code}")
-        except Exception as e:
-            print(f"[warmup] Ollama warmup failed: {e}")
+        # Tuần tự — warm song song trên Ollama CPU chỉ thrash lẫn nhau.
+        for model in models:
+            try:
+                r = requests.post(
+                    f"{host}/api/generate",
+                    json={
+                        "model": model,
+                        "prompt": "Hi",
+                        "stream": False,
+                        "options": {"num_predict": 1, "temperature": 0},
+                    },
+                    timeout=timeout,
+                )
+                if r.status_code == 200:
+                    print(f"[warmup] Ollama model {model!r} ready")
+                else:
+                    print(f"[warmup] Ollama model {model!r} HTTP {r.status_code}")
+            except Exception as e:
+                print(f"[warmup] Ollama model {model!r} failed: {e}")
+
+        # Embedding warmup OPT-IN: bge-m3 ~2GB nạp RAM MỖI gunicorn worker →
+        # mặc định OFF; bật ở deploy muốn trả giá RAM để first-query nhanh.
+        if (os.getenv("EMBEDDING_WARMUP_ENABLED", "0") or "").strip().lower() in ("1", "true", "yes", "on"):
+            try:
+                from app.clients.llm_factory import get_embeddings
+                get_embeddings().embed_query("warmup")
+                print("[warmup] embedding model ready")
+            except Exception as e:
+                print(f"[warmup] embedding warmup failed: {e}")
 
     threading.Thread(target=_run, daemon=True).start()
+    return models
 
 
 _warmup_ollama_background()

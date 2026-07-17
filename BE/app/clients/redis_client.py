@@ -88,3 +88,63 @@ def reset_for_tests(client: Optional[Any] = None) -> None:
     _injected = client is not None
     _unavailable_until = 0.0
     _warned_once = False
+
+
+# ---------------------------------------------------------------------------
+# Phase 0 observability — counter mirror cross-worker.
+# Counter per-process (dict/Counter trong main.py, llm_cache) là per-gunicorn-
+# worker nên /stats chỉ thấy một phần. MirroredCounter giữ nguyên hành vi local
+# và mirror mỗi increment dương thành INCRBY metrics:<section>:<key> — Redis
+# vắng/hỏng thì im lặng bỏ qua (fail-open, đúng contract cache).
+# ---------------------------------------------------------------------------
+import collections as _collections
+
+
+class MirroredCounter(_collections.Counter):
+    """Counter thay thế tại chỗ cho các dict metric hiện có.
+
+    `c[key] += n` → local như cũ + INCRBY delta lên Redis khi delta > 0.
+    Mọi lỗi Redis bị nuốt (mark_unavailable mở cửa sổ retry)."""
+
+    def __init__(self, section: str, initial: Optional[dict] = None) -> None:
+        super().__init__(initial or {})
+        self._section = str(section)
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        try:
+            old = super().get(key, 0)
+            if isinstance(value, int) and isinstance(old, int) and value > old:
+                r = get_redis()
+                if r is not None:
+                    r.incrby(f"metrics:{self._section}:{key}", value - old)
+        except AttributeError:
+            pass  # client fake/partial (test) thiếu incrby — KHÔNG mở cửa sổ unavailable
+        except Exception:
+            try:
+                mark_unavailable()
+            except Exception:
+                pass
+        super().__setitem__(key, value)
+
+
+def metric_totals(sections: dict[str, Any]) -> Optional[dict]:
+    """Đọc tổng cross-worker: {section: [key, ...]} → {section: {key: total}}.
+    Redis vắng/lỗi → None (caller rơi về counter local, không bao giờ raise)."""
+    try:
+        r = get_redis()
+        if r is None:
+            return None
+        out: dict[str, dict] = {}
+        for section, keys in sections.items():
+            ks = list(keys)
+            vals = r.mget([f"metrics:{section}:{k}" for k in ks])
+            out[section] = {k: int(v or 0) for k, v in zip(ks, vals)}
+        return out
+    except AttributeError:
+        return None  # client fake/partial (test) thiếu mget — không đụng cửa sổ
+    except Exception:
+        try:
+            mark_unavailable()
+        except Exception:
+            pass
+        return None

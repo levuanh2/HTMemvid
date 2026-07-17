@@ -12,7 +12,7 @@ from typing import Any, Callable, List, Optional, Tuple
 
 from langgraph.graph import END, StateGraph
 
-from app.graphs.logger import _Timer, log_node_event
+from app.graphs.logger import _Timer, ctx_submit, log_node_event
 from app.graphs.sqlite_checkpointer import sqlite_saver_from_path
 from app.graphs.state import QueryState
 from app.domains.cache import llm_cache
@@ -200,7 +200,7 @@ def build_query_graph(
             mem_result = None
             try:
                 with ThreadPoolExecutor(max_workers=1) as ex:
-                    fut = ex.submit(_query_mem)
+                    fut = ctx_submit(ex, _query_mem)  # Phase 0: propagate LLM counter
                     mem_result = fut.result(timeout=MEMORY_TREE_TIMEOUT)
             except TimeoutError:
                 log_node_event(state["job_id"], "RetrieveMemory", "timeout", t.ms(), {"timeout_sec": MEMORY_TREE_TIMEOUT})
@@ -497,7 +497,8 @@ def build_query_graph(
 
     def _call_llm_with_timeout(fn: Callable[[], str]) -> str:
         with ThreadPoolExecutor(max_workers=1) as ex:
-            fut = ex.submit(fn)
+            # Phase 0: propagate LLM counter contextvar vào pool thread.
+            fut = ctx_submit(ex, fn)
             return fut.result(timeout=AI_TIMEOUT)
 
     def generate_answer_node(state: dict) -> dict:

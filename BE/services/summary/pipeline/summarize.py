@@ -12,6 +12,7 @@ from concurrent.futures import TimeoutError as FuturesTimeoutError
 from typing import Callable, Optional
 
 from app.clients.llm_factory import ask_ai
+from app.graphs.logger import ctx_submit  # Phase 0: propagate LLM counter qua pool
 from services.mindmap.jsonrepair import repair_json_text
 from services.summary.pipeline.schema import FACTS_KEYS as _FACTS_KEYS
 from services.summary.pipeline.schema import sanitize_facts as _coerce_facts
@@ -69,8 +70,8 @@ def _ask_json(user: str, system: str, model: str | None, timeout_sec: float) -> 
     for _attempt in range(2):
         ex = ThreadPoolExecutor(max_workers=1)
         try:
-            fut = ex.submit(ask_ai, user, system_prompt=system, model=model,
-                            feature="summary", options={"temperature": 0})
+            fut = ctx_submit(ex, ask_ai, user, system_prompt=system, model=model,
+                             feature="summary", options={"temperature": 0})
             raw = fut.result(timeout=timeout_sec)
         finally:
             ex.shutdown(wait=False)      # timeout phải TRẢ NGAY (bài học warmup)
@@ -132,7 +133,7 @@ def summarize_sections(mm_input: dict, sections: list[dict], *, model: str | Non
     by_id = {s["id"]: s for s in out}
     done = 0
     ex = ThreadPoolExecutor(max_workers=max_workers)
-    futs = {ex.submit(_summarize_one, mm_input, s, model, timeout_sec, length_mode, with_facts): s
+    futs = {ctx_submit(ex, _summarize_one, mm_input, s, model, timeout_sec, length_mode, with_facts): s
             for s in sections}
     budget = timeout_sec * ((len(sections) + max_workers - 1) // max_workers) + 15 if sections else 1
     finished: set[str] = set()

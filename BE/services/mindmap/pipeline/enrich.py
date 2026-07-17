@@ -8,6 +8,7 @@ from concurrent.futures import TimeoutError as FuturesTimeoutError
 from typing import Callable, Optional
 
 from app.clients.llm_factory import ask_ai
+from app.graphs.logger import ctx_submit  # Phase 0: propagate LLM counter qua pool
 from services.mindmap.jsonrepair import repair_json_text
 from services.mindmap.pipeline.schema import sanitize_nodes
 
@@ -66,8 +67,8 @@ def _ask_json(user: str, model: str, timeout_sec: float) -> dict:
     for _attempt in range(2):
         ex = ThreadPoolExecutor(max_workers=1)
         try:
-            fut = ex.submit(ask_ai, user, system_prompt=_SYSTEM, model=model,
-                            feature="mindmap", options={"temperature": 0.15})
+            fut = ctx_submit(ex, ask_ai, user, system_prompt=_SYSTEM, model=model,
+                             feature="mindmap", options={"temperature": 0.15})
             raw = fut.result(timeout=timeout_sec)
         finally:
             ex.shutdown(wait=False)      # timeout phải TRẢ NGAY (bài học warmup)
@@ -129,7 +130,7 @@ def enrich_branches(mm_input: dict, skeleton_nodes: list[dict], *, model: str,
         return nodes, degraded      # huỷ trước khi tốn bất kỳ LLM call nào
     done = 0
     ex = ThreadPoolExecutor(max_workers=max_workers)
-    futs = {ex.submit(_run, b): b for b in branches}
+    futs = {ctx_submit(ex, _run, b): b for b in branches}
     # ngân sách tổng: các đợt max_workers chạy tuần tự trong pool
     budget = timeout_sec * ((len(branches) + max_workers - 1) // max_workers) + 15 if branches else 1
     try:

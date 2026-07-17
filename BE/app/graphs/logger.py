@@ -171,6 +171,36 @@ def log_node_event(
             conn.close()
 
 
+def cleanup_old_node_logs(retention_days: Optional[int] = None) -> int:
+    """Prune node_logs cũ hơn retention (default env LOG_RETENTION_DAYS=7).
+    Idempotent, fail-open (DB/table vắng hoặc lỗi → 0). <= 0 → tắt."""
+    if retention_days is None:
+        try:
+            retention_days = int((os.environ.get("LOG_RETENTION_DAYS") or "").strip() or 7)
+        except ValueError:
+            retention_days = 7
+    if retention_days <= 0:
+        return 0
+    try:
+        p = log_db_path()
+        if not p.is_file():
+            return 0
+        with _lock:
+            conn = sqlite3.connect(str(p), timeout=5.0)
+            conn.execute("PRAGMA busy_timeout=5000")
+            try:
+                cur = conn.execute(
+                    "DELETE FROM node_logs WHERE ts < datetime('now', ?)",
+                    (f"-{int(retention_days)} days",),
+                )
+                conn.commit()
+                return max(cur.rowcount, 0)
+            finally:
+                conn.close()
+    except Exception:
+        return 0
+
+
 class _Timer:
     def __init__(self) -> None:
         self.t0 = time.time()

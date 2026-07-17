@@ -4,11 +4,17 @@ import json
 import os
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 _lock = threading.Lock()
+
+TERMINAL_STATUSES = ("done", "error", "timeout", "cancelled", "interrupted")
+# token_buffer bị xóa khi job vào các status này (kết quả cuối đã nằm trong
+# result_json). "interrupted" KHÔNG nằm trong tập: HITL/reconcile có thể resume
+# và SSE cần buffer để stream tiếp — retention sẽ dọn record interrupted cũ.
+_CLEAR_BUFFER_STATUSES = ("done", "error", "timeout", "cancelled")
 
 
 def _data_dir() -> Path:
@@ -118,6 +124,12 @@ def update_job(job_id: str, **kwargs: Any) -> None:
     if "result" in kwargs and "result_json" not in kwargs:
         kwargs["result_json"] = json.dumps(kwargs.pop("result"), ensure_ascii=False)
 
+    # Terminal (trừ interrupted — có thể resume): xóa token_buffer TRONG CÙNG UPDATE
+    # với status/result (atomic — buffer không bao giờ mất trước khi result được lưu).
+    # SSE an toàn: FE lấy answer cuối từ result của status event, token chỉ là preview.
+    if kwargs.get("status") in _CLEAR_BUFFER_STATUSES and "token_buffer" not in kwargs:
+        kwargs["token_buffer"] = ""
+
     for k in ("job_type", "status", "progress", "current_node", "result_json", "error_text", "token_buffer"):
         if k in kwargs:
             fields.append(f"{k}=?")
@@ -187,6 +199,8 @@ def request_cancel(job_id: str) -> None:
             conn.execute(
                 """
                 UPDATE jobs SET cancel_requested=1,
+                       token_buffer = CASE WHEN status IN ('pending','interrupted')
+                                     THEN '' ELSE token_buffer END,
                        status = CASE WHEN status IN ('pending','interrupted')
                                      THEN 'cancelled' ELSE status END,
                        current_node = CASE WHEN status IN ('pending','interrupted')
@@ -291,6 +305,100 @@ def list_active_jobs() -> list[tuple[str, str]]:
             return [(row[0], row[1]) for row in cur.fetchall()]
         finally:
             conn.close()
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int((os.environ.get(name) or "").strip() or default)
+    except ValueError:
+        return default
+
+
+def _delete_checkpoints_for_threads(job_ids: list[str]) -> None:
+    """Xóa checkpoint langgraph (thread_id = job_id) của các job đã prune.
+    Best-effort: DB/table vắng → bỏ qua. Chỉ đụng thread đã terminal quá hạn
+    — không có timestamp trong schema checkpoint nên đây là đường xóa an toàn."""
+    if not job_ids:
+        return
+    p = _data_dir() / "checkpoints.sqlite"
+    if not p.is_file():
+        return
+    try:
+        conn = sqlite3.connect(str(p), timeout=5.0)
+        conn.execute("PRAGMA busy_timeout=5000")
+        try:
+            ph = ",".join("?" * len(job_ids))
+            for table in ("checkpoints", "writes"):
+                try:
+                    conn.execute(f"DELETE FROM {table} WHERE thread_id IN ({ph})", job_ids)
+                except sqlite3.OperationalError:
+                    pass  # table vắng (schema langgraph đổi) → bỏ qua
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass  # cleanup không bao giờ được làm hỏng request path
+
+
+def cleanup_terminal_jobs(retention_days: Optional[int] = None) -> int:
+    """Prune job TERMINAL cũ hơn retention (default env JOB_RETENTION_DAYS=7) +
+    checkpoint của chúng. Chỉ đụng terminal — running/pending giữ nguyên dù cũ.
+    Idempotent, fail-open (lỗi → 0). retention_days <= 0 → tắt."""
+    days = retention_days if retention_days is not None else _env_int("JOB_RETENTION_DAYS", 7)
+    if days <= 0:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        init_db()
+        with _lock:
+            conn = get_conn()
+            try:
+                ph = ",".join("?" * len(TERMINAL_STATUSES))
+                cur = conn.execute(
+                    f"SELECT job_id FROM jobs WHERE status IN ({ph}) AND updated_at < ?",
+                    (*TERMINAL_STATUSES, cutoff),
+                )
+                ids = [row[0] for row in cur.fetchall()]
+                if ids:
+                    idph = ",".join("?" * len(ids))
+                    conn.execute(f"DELETE FROM jobs WHERE job_id IN ({idph})", ids)
+                    conn.commit()
+            finally:
+                conn.close()
+        _delete_checkpoints_for_threads(ids)
+        return len(ids)
+    except Exception:
+        return 0
+
+
+def sweep_stuck_jobs(stuck_after_seconds: Optional[int] = None) -> int:
+    """Job running/processing không heartbeat (updated_at — mọi update_job/append_token
+    đều chạm) quá ngưỡng (default env JOB_STUCK_AFTER_SECONDS=900) → 'interrupted'.
+    Pending KHÔNG bị đụng (job queue có thể chờ lâu hợp lệ — reconcile_interrupted
+    lo orphan pending lúc startup). Idempotent; executor còn sống ghi done/error
+    sau đó vẫn thắng (update_job ghi đè). <= 0 → tắt."""
+    secs = stuck_after_seconds if stuck_after_seconds is not None else _env_int("JOB_STUCK_AFTER_SECONDS", 900)
+    if secs <= 0:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=secs)).isoformat()
+    try:
+        init_db()
+        with _lock:
+            conn = get_conn()
+            try:
+                cur = conn.execute(
+                    """
+                    UPDATE jobs SET status='interrupted', current_node='StuckSweep', updated_at=?
+                    WHERE status IN ('running','processing') AND updated_at < ?
+                    """,
+                    (_now(), cutoff),
+                )
+                conn.commit()
+                return max(cur.rowcount, 0)
+            finally:
+                conn.close()
+    except Exception:
+        return 0
 
 
 def migrate_from_dict(jobs_dict: dict, job_type: str = "ingest") -> None:

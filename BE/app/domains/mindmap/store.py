@@ -26,9 +26,11 @@ def db_path() -> Path:
 def get_conn() -> sqlite3.Connection:
     p = db_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(p), check_same_thread=False)
+    conn = sqlite3.connect(str(p), check_same_thread=False, timeout=5.0)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    # busy_timeout: tolerate cross-process/-container writers on the shared DB.
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 

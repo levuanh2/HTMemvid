@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import MindMapModal from "./MindMapModal";
-import SummaryModal from "./SummaryModal";
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from "react";
+// Lazy: hai modal này kéo mind-elixir + snapdom (~nửa bundle) — chỉ tải khi user
+// thật sự mở. fallback=null: modal vốn xuất hiện sau click, không có layout shift.
+const MindMapModal = lazy(() => import("./MindMapModal"));
+const SummaryModal = lazy(() => import("./SummaryModal"));
 import { apiFetch, generateMindmap, cancelMindmap, generateSummary, cancelSummary, isUnauthorizedError, isNotFoundOrForbiddenError, getUserFriendlyApiError } from "../../utils/api";
 
 // Permission-safe toast text: 401/403/404 → friendly line (no raw error/id); else
@@ -701,18 +703,22 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
         </div>
       </div>
 
-      {/* ── MODALS ── */}
+      {/* ── MODALS (lazy chunks — Suspense chờ chunk tải xong mới render) ── */}
       {showModalMap && (
-        <MindMapModal
-          data={modalMapData}
-          initialLayoutType={showModalMap.initialLayoutType || "napkin"}
-          onClose={() => setShowModalMap(null)}
-          onRegenerate={handleRegenerateMindMap}
-          regenerating={mindmapGenerating}
-        />
+        <Suspense fallback={null}>
+          <MindMapModal
+            data={modalMapData}
+            initialLayoutType={showModalMap.initialLayoutType || "napkin"}
+            onClose={() => setShowModalMap(null)}
+            onRegenerate={handleRegenerateMindMap}
+            regenerating={mindmapGenerating}
+          />
+        </Suspense>
       )}
       {showSummaryModal && (
-        <SummaryModal data={showSummaryModal} onClose={() => setShowSummaryModal(null)} />
+        <Suspense fallback={null}>
+          <SummaryModal data={showSummaryModal} onClose={() => setShowSummaryModal(null)} />
+        </Suspense>
       )}
 
       <style>{`@media (min-width: 768px) { .md\\:hidden { display: none !important; } }`}</style>

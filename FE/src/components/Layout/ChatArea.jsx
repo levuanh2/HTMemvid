@@ -5,6 +5,7 @@ import remarkBreaks from "remark-breaks";
 import { apiFetch, apiUrl, clearConversationContext, deleteConversation, _appError, isNotFoundOrForbiddenError, isUnauthorizedError, getUserFriendlyApiError } from "../../utils/api";
 import { newConversationId } from "../../utils/conversation";
 import { pollQueryStatus, shouldPollFallback } from "../../utils/queryPolling";
+import { createPreviewThrottle } from "../../utils/streamPreview";
 import { shouldFocusComposer, shouldRefocusComposer, shouldFocusOnSlash } from "../../utils/chatFocus";
 import { Icon } from "../ui/Icon";
 import { nodeLabel, processCitations, parseCiteHref, normStem } from "../../utils/evidence";
@@ -125,6 +126,9 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
   const cancelledRef = useRef(false);
   const eventSourceRef = useRef(null);
   const streamAccRef = useRef("");
+  // Token gom trong streamAccRef; state chỉ flush qua throttle (tránh ReactMarkdown
+  // re-parse toàn bộ text mỗi token — xem utils/streamPreview.js).
+  const previewThrottleRef = useRef(null);
 
   const mdComponents = useMemo(() => makeMdComponents({ highlight, onHighlight }), [highlight, onHighlight]);
 
@@ -148,6 +152,9 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
       const start = Date.now();
       streamAccRef.current = "";
       setStreamingPreview("");
+      previewThrottleRef.current?.cancel();
+      const throttle = createPreviewThrottle(() => setStreamingPreview(streamAccRef.current));
+      previewThrottleRef.current = throttle;
       if (eventSourceRef.current) { try { eventSourceRef.current.close(); } catch {} }
       const es = new EventSource(apiUrl(`/query-stream/${encodeURIComponent(jobId)}`));
       eventSourceRef.current = es;
@@ -163,7 +170,7 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
       es.onmessage = (e) => {
         try {
           const d = JSON.parse(e.data);
-          if (d.type === "token" && d.content) { streamAccRef.current += d.content; setStreamingPreview(streamAccRef.current); }
+          if (d.type === "token" && d.content) { streamAccRef.current += d.content; throttle.schedule(); }
           const isStatus = d.type === "status" || d.type == null;
           if (isStatus) {
             if (typeof d.progress === "number") setJobProgress(Math.max(0, Math.min(100, d.progress)));
@@ -174,10 +181,12 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
             }
             if (d.status === "done") {
               clearInterval(tick); try { es.close(); } catch {}
+              throttle.cancel();
               const streamed = streamAccRef.current; streamAccRef.current = ""; setStreamingPreview("");
               resolve({ result: d.result, streamed });
             } else if (d.status === "error") {
               clearInterval(tick); try { es.close(); } catch {}
+              throttle.cancel();
               streamAccRef.current = ""; setStreamingPreview("");
               const HARD = "Loi query SSE (status=error). Xem log server.";
               let msg = HARD;
@@ -190,6 +199,7 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
 
       es.onerror = () => {
         clearInterval(tick); try { es.close(); } catch {}
+        throttle.cancel();
         streamAccRef.current = ""; setStreamingPreview("");
         // EventSource gives no status here (opaque). Under protected mode this is the
         // no-Authorization 401; mark it so handleSend can fall back to authed polling.
@@ -210,7 +220,7 @@ export default function ChatArea({ selectedSources, sources = [], onEvidence, hi
       return !sources.some((o) => o.status === "ready" && (stemBaseLoose(o.video_stem || o.video) === b || (o.video_stem || o.video) === key));
     });
 
-  const resetJobState = () => { setJobProgress(0); setJobNode(""); setSeenNodes([]); setStreamingPreview(""); streamAccRef.current = ""; };
+  const resetJobState = () => { setJobProgress(0); setJobNode(""); setSeenNodes([]); previewThrottleRef.current?.cancel(); setStreamingPreview(""); streamAccRef.current = ""; };
 
   const handleCancel = () => {
     cancelledRef.current = true;

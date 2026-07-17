@@ -38,7 +38,15 @@ INDEX_DIR = Path(os.environ.get("INDEX_DIR", str(DATA_ROOT / "index")))
 
 
 def _optional_prefix_embedding_list(text: str) -> Optional[List[float]]:
-    """Embed text[:512] cho meta index.json (mindmap KMeans nhanh); None nếu không có model."""
+    """Embed text[:512] lưu vào meta index.json — LEGACY, mặc định TẮT (PR#6).
+
+    Đây là lần embed THỨ HAI mỗi chunk (vector chính đã vào FAISS) và phình
+    index.json. Consumer duy nhất còn lại là helper legacy
+    services/mindmap/worker.collect_chunks_for_sources (None-safe, chỉ test gọi);
+    pipeline mindmap thật (input_collector + skeleton TF-IDF) không đọc field này.
+    Cần lại hành vi cũ → STORE_PREFIX_EMBEDDINGS=1."""
+    if (os.getenv("STORE_PREFIX_EMBEDDINGS", "0") or "").strip().lower() not in ("1", "true", "yes", "on"):
+        return None
     model = get_embedding_model()
     if model is None:
         return None
@@ -325,8 +333,10 @@ def append_chunks_to_lc_index(
             vs = vs_existing
             vs.add_documents(docs)
 
-    keep = int(os.environ.get("FAISS_BACKUP_KEEP", "3"))
-    _backup_dir_before_write(INDEX_DIR, keep=keep)
+    # PR#6: KHÔNG full-dir backup mỗi append — backup chưa từng có đường restore
+    # tự động, chỉ là snapshot thủ công, mà copytree cả index dir mỗi lần append
+    # là chi phí lớn nhất của ingest. Backup GIỮ ở thao tác phá huỷ
+    # (remove_chunks_*/rebuild_*); recovery còn rebuild_sqlite_from_videos.
     vs.save_local(str(INDEX_DIR))
 
     text_items = []
@@ -589,8 +599,8 @@ def append_to_index(
 
     idx = _load_index(dim)
     idx.add_with_ids(embeds, ids)
-    keep = int(os.environ.get("FAISS_BACKUP_KEEP", "3"))
-    save_index_with_backup(idx, INDEX_DIR, keep=keep)
+    # PR#6: append ghi thẳng, không full-dir backup (xem append_chunks_to_lc_index).
+    faiss.write_index(idx, INDEX_PATH)
 
     now = datetime.now().isoformat()
     text_items = []

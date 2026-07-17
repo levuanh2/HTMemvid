@@ -99,12 +99,32 @@ class HybridRetriever:
 
         self._meta_mtime: float | None = None
         self._chunks: list[RetrievedChunk] = []
+        # PR#7: chunk_id -> chunk, build MỘT lần cùng _chunks — thay next()-scan
+        # O(n) mỗi FAISS hit và dict-build O(n) mỗi query.
+        self._by_id: dict[int, RetrievedChunk] = {}
         self._bm25: BM25Okapi | None = None
         self._bm25_tokens: list[list[str]] = []
+        # PR#7: cache faiss index legacy per-instance, key mtime+size — hết
+        # faiss.read_index từ đĩa mỗi query; append/delete ghi lại file → tự reload.
+        self._faiss_idx = None
+        self._faiss_key: tuple | None = None
+
+    def _load_faiss_index(self):
+        """Đọc index.faiss có cache theo (mtime_ns, size). File đổi → reload;
+        đọc lỗi → raise như cũ (caller đã bọc try/except + log)."""
+        st = self.index_path.stat()
+        key = (st.st_mtime_ns, st.st_size)
+        if self._faiss_idx is not None and self._faiss_key == key:
+            return self._faiss_idx
+        idx = faiss.read_index(str(self.index_path))
+        self._faiss_idx = idx
+        self._faiss_key = key
+        return idx
 
     def _ensure_loaded(self) -> None:
         if not self.meta_path.exists():
             self._chunks = []
+            self._by_id = {}
             self._bm25 = None
             self._bm25_tokens = []
             return
@@ -143,6 +163,7 @@ class HybridRetriever:
         tokens = [_tokenize(c.text) for c in chunks]
 
         self._chunks = chunks
+        self._by_id = {c.chunk_id: c for c in chunks}
         self._bm25_tokens = tokens
         self._bm25 = BM25Okapi(tokens) if chunks else None
         self._meta_mtime = mtime
@@ -191,7 +212,7 @@ class HybridRetriever:
         if _use_lc_vector_store():
             try:
                 from app.domains.vectorstore.store import load_vectorstore
-                if load_vectorstore() is not None:
+                if load_vectorstore(use_cache=True) is not None:
                     ch = self.retrieve_faiss_only(query, selected_sources=selected_sources, top_k=10)
                     faiss_ids = [c.chunk_id for c in ch]
             except Exception as exc:
@@ -206,15 +227,17 @@ class HybridRetriever:
                     qv = model.encode([query], convert_to_numpy=True).astype("float32")
             if qv is not None:
                 try:
-                    idx = faiss.read_index(str(self.index_path))
+                    idx = self._load_faiss_index()
                     _, I = idx.search(qv, 10)
+                    # PR#7: aliases tính MỘT lần ngoài vòng hit; lookup qua _by_id
+                    # thay next()-scan O(n) mỗi hit. Kết quả y hệt.
+                    norms, bases = _selected_stem_aliases(selected_sources) if selected_sources else (set(), set())
                     for iid in I[0].tolist():
                         if iid == -1:
                             continue
                         cid = int(iid)
                         if selected_sources:
-                            norms, bases = _selected_stem_aliases(selected_sources)
-                            found = next((c for c in self._chunks if c.chunk_id == cid), None)
+                            found = self._by_id.get(cid)
                             if found and _chunk_visible_for_sources(found.video_stem, norms, bases):
                                 faiss_ids.append(cid)
                         else:
@@ -224,8 +247,7 @@ class HybridRetriever:
 
         merged_ids = _rrf_merge(faiss_ids, bm25_ids, top_k=top_k)
 
-        by_id = {c.chunk_id: c for c in self._chunks}
-        out = [by_id[cid] for cid in merged_ids if cid in by_id]
+        out = [self._by_id[cid] for cid in merged_ids if cid in self._by_id]
         if category or language:
             out = [c for c in out if _meta_match(c, category, language)]
         return out[:top_k]
@@ -276,12 +298,12 @@ class HybridRetriever:
         if _use_lc_vector_store():
             try:
                 from app.domains.vectorstore.store import load_vectorstore
-                vs = load_vectorstore()
+                vs = load_vectorstore(use_cache=True)
                 if vs is not None:
                     fetch_k = max(30, top_k * 5)
                     pairs = vs.similarity_search_with_score(query, k=fetch_k)
                     norms, bases = _selected_stem_aliases(selected_sources) if selected_sources else (set(), set())
-                    by_id = {c.chunk_id: c for c in self._chunks}
+                    by_id = self._by_id
                     out: list[RetrievedChunk] = []
                     for d, dist in pairs:
                         stem = _norm_stem(d.metadata.get("source_stem") or d.metadata.get("video") or "")
@@ -333,31 +355,31 @@ class HybridRetriever:
             qv = model.encode([query], convert_to_numpy=True).astype("float32")
 
         try:
-            idx = faiss.read_index(str(self.index_path))
+            idx = self._load_faiss_index()
             D, I = idx.search(qv, max(10, top_k * 2))
         except Exception as exc:
             logger.warning("HybridRetriever.retrieve_faiss_only: legacy FAISS read/search failed: %s", exc)
             return []
 
+        # PR#7: aliases một lần + _by_id lookup thay next()-scan — kết quả y hệt.
+        norms, bases = _selected_stem_aliases(selected_sources) if selected_sources else (set(), set())
         raw: list[tuple[float, int]] = []
         for dist, iid in zip(D[0].tolist(), I[0].tolist()):
             if iid == -1:
                 continue
             cid = int(iid)
             if selected_sources:
-                norms, bases = _selected_stem_aliases(selected_sources)
-                found = next((c for c in self._chunks if c.chunk_id == cid), None)
+                found = self._by_id.get(cid)
                 if found and _chunk_visible_for_sources(found.video_stem, norms, bases):
                     raw.append((float(dist), cid))
             else:
                 raw.append((float(dist), cid))
 
-        by_id = {c.chunk_id: c for c in self._chunks}
         out_legacy: list[RetrievedChunk] = []
         for dist, cid in raw:
-            if cid not in by_id:
+            if cid not in self._by_id:
                 continue
-            base = by_id[cid]
+            base = self._by_id[cid]
             out_legacy.append(
                 RetrievedChunk(
                     chunk_id=base.chunk_id,

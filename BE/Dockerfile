@@ -20,8 +20,16 @@ RUN python -m venv /opt/venv
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Tải sẵn model embedding vào /opt/models (tránh download lúc runtime).
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', cache_folder='/opt/models')"
+# KHÔNG pre-bake model embedding vào image nữa:
+# - Bản cũ bake all-MiniLM-L6-v2 (~90MB) — SAI model: runtime (late chunking,
+#   mặc định ON) dùng BAAI/bge-m3. MiniLM baked = dead weight, bge-m3 vẫn phải
+#   tải lúc boot đầu.
+# - Bake bge-m3 (~2.3GB) vào image thì quá nặng (image phình, mỗi rebuild kéo lại).
+# → Chiến lược: HF cache trên volume `hf_cache` (docker-compose mount
+#   /root/.cache/huggingface cho cả backend/llm-gateway/mindmap-service/rq-worker).
+#   bge-m3 tải MỘT lần ở boot đầu rồi tồn tại qua restart/rebuild. Muốn seed
+#   trước (offline env): chạy 1 lần
+#   docker compose run --rm backend python -c "from app.domains.ingest.late_chunk import get_late_chunk_encoder; get_late_chunk_encoder().warmup()"
 
 # =========================================================================
 # Stage 2 — runtime: base slim + chỉ thư viện hệ thống cần khi CHẠY,
@@ -32,8 +40,7 @@ FROM python:3.11-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
-    DATA_DIR=/app \
-    SENTENCE_TRANSFORMERS_HOME=/opt/models
+    DATA_DIR=/app
 
 # Runtime libs: tesseract (OCR), libgl/glib (opencv), ffmpeg (video), curl (healthcheck).
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -47,9 +54,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Lấy môi trường Python đã cài sẵn + model từ builder.
+# Lấy môi trường Python đã cài sẵn từ builder. (Model embedding KHÔNG bake —
+# xem chú thích ở builder stage: bge-m3 sống trên volume hf_cache.)
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder /opt/models /opt/models
 
 WORKDIR /app
 COPY . .

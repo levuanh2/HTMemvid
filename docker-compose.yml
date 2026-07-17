@@ -125,6 +125,12 @@ services:
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # TCP-connect check (python có sẵn trong image, không cần grpc_health_probe).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 50051), 2).close()"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
 
   mindmap-service:
     build:
@@ -165,6 +171,11 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - llm-gateway
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 50052), 2).close()"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
 
   # Phase 5 RQ worker for heavy background jobs (Step 1: ingest). OPTIONAL: gated behind
   # the `worker` profile so a plain `docker compose up` does NOT start it and the backend

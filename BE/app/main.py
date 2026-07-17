@@ -158,6 +158,36 @@ def _reconcile_jobs_safe():
             pass
 
 
+_jobs_maintenance_last = 0.0
+_jobs_maintenance_lock = threading.Lock()
+
+
+def _run_jobs_maintenance(force: bool = False) -> None:
+    """Retention + stuck-job sweep — rate-limited (JOB_SWEEP_INTERVAL_SECONDS=300)
+    để piggyback rẻ trên status endpoint thay vì background thread (pattern
+    _cleanup_old_query_jobs). Best-effort tuyệt đối: không bao giờ raise vào route."""
+    global _jobs_maintenance_last
+    try:
+        interval = int((os.environ.get("JOB_SWEEP_INTERVAL_SECONDS") or "").strip() or 300)
+    except ValueError:
+        interval = 300
+    now = time.time()
+    with _jobs_maintenance_lock:
+        if not force and (now - _jobs_maintenance_last) < interval:
+            return
+        _jobs_maintenance_last = now
+    try:
+        from app.domains.jobs.jobs_store import sweep_stuck_jobs, cleanup_terminal_jobs
+        swept = sweep_stuck_jobs()
+        pruned = cleanup_terminal_jobs()
+        from app.graphs.logger import cleanup_old_node_logs
+        logs = cleanup_old_node_logs()
+        if swept or pruned or logs:
+            print(f"jobs_maintenance swept={swept} pruned={pruned} logs={logs}", flush=True)
+    except Exception:
+        pass
+
+
 def _handle_sigterm(*_args):
     # best-effort: mark orphaned jobs interrupted (queue-aware) để tránh trạng thái mồ côi
     try:
@@ -1491,6 +1521,8 @@ SUMMARY_GRAPH = _graphs.summary
 
 # Phase 5: reconcile orphaned jobs at startup (queue-aware; never kills live worker jobs).
 _reconcile_jobs_safe()
+# Retention + sweep một lần lúc startup; sau đó lazy trên status endpoints.
+_run_jobs_maintenance(force=True)
 
 
 def _langgraph_invoke(graph: Any, state: dict, *, thread_id: str, command: Any = None) -> dict:
@@ -2342,6 +2374,7 @@ def query_status(job_id: str):
     if _auth_protect_enabled() and _query_job_owner_ok(job_id, uid) is not True:
         return jsonify({"error": "Job not found"}), 404  # foreign/unknown → no oracle
     _cleanup_old_query_jobs()
+    _run_jobs_maintenance()
     # Ưu tiên SQLite jobs store nếu bật
     if (os.getenv("USE_SQLITE_JOBS", "1") or "").strip() not in ("0", "false", "False"):
         try:
@@ -2711,6 +2744,7 @@ def summary_status(job_id: str):
     uid, err = _require_app_user()
     if err:
         return err
+    _run_jobs_maintenance()
     from app.domains.jobs.jobs_store import get_job as _js_get
     j = _js_get(job_id)
     if not j or j.get("job_type") not in ("summary", None):
@@ -2986,6 +3020,7 @@ def mindmap_status(job_id: str):
     uid, err = _require_app_user()
     if err:
         return err
+    _run_jobs_maintenance()
     from app.domains.jobs.jobs_store import get_job as _js_get
     j = _js_get(job_id)
     if not j or j.get("job_type") not in ("mindmap", None):

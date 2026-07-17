@@ -30,6 +30,24 @@
   executor — endpoint cancel không được chỉ "ghi cờ rồi hy vọng". FE poller: tập status
   terminal phải khớp ĐỦ tập status BE có thể ghi (interrupted sinh ra ở startup-reconcile,
   không chỉ trong flow chạy bình thường); thêm status mới phía BE → rà mọi poller.
+- **Tái điều tra 2026-07-17 (user báo "vẫn kẹt" SAU commit fix):** code fix ĐÚNG — nguyên nhân
+  còn lại là DEPLOYMENT STALE: stack thật user mở (compose project `memvid_auth_smoke`,
+  FE :3000 / BE :8080, `QUEUE_ENABLED=true` + rq-worker) build từ image 2026-07-14, TRƯỚC
+  commit `0bd4624` 3 ngày. Verify trực tiếp: `docker exec <backend|rq-worker> grep
+  "pending','interrupted'" jobs_store.py` → FIX_ABSENT; FE bundle không có message
+  "gián đoạn trên server". Sau `docker compose -p memvid_auth_smoke --profile worker up -d
+  --build backend rq-worker frontend`: smoke Playwright trên UI thật PASS — cancel lúc
+  running (45%, mục 3/8) → `/summary-cancel` 200 `{ok,status:"running"}` → 8s sau
+  `/summary-status` trả `cancelled`, chip thoát "Đang huỷ…", notice "Đã huỷ tạo tóm tắt.",
+  `summary_active_job` localStorage cleared, không summary nào bị lưu, tạo lại ngay OK.
+  RQ path đã rà: queued-rồi-worker-nhặt được entry-guard chặn (không persist), cancel_cb
+  check sau MỖI section LLM call → trễ tối đa 1 call. Bẫy phụ khi rebuild: root `.env`
+  KHÔNG có `COMPOSE_PROJECT_NAME` → `docker compose` trần build/chạy project `memvid_new`
+  KHÁC stack user đang mở và đụng port 8080 — phải `-p memvid_auth_smoke` (hoặc set
+  COMPOSE_PROJECT_NAME vào .env như .env.example).
+- **Prevention (ops):** "fix rồi mà user vẫn thấy bug" → bước 1 LUÔN so runtime user mở
+  với code: `docker ps` xem project/created-time, `docker exec grep <chuỗi đặc trưng fix>`
+  trong container + FE bundle. Đừng đọc lại code trước khi chứng minh code đó ĐANG chạy.
 
 ## (ĐÃ SỬA 2026-07-06) Cache hit trả "Không có phản hồi." — race job done-trước-result + 4 lỗ contract
 

@@ -92,8 +92,12 @@ def _resolve_threshold() -> float:
 
 THRESHOLD = _resolve_threshold()
 
-# Counter per-process (gunicorn nhiều worker → số liệu per-worker; aggregate xem redis INFO)
-METRICS: collections.Counter = collections.Counter()
+# Counter per-process (gunicorn nhiều worker → số liệu per-worker). Phase 0:
+# MirroredCounter mirror mỗi increment lên Redis INCRBY (fail-open) →
+# /stats["aggregate"] đọc được tổng cross-worker.
+from app.clients.redis_client import MirroredCounter as _MirroredCounter
+
+METRICS: collections.Counter = _MirroredCounter("cache")
 
 # --- Risk classifier -------------------------------------------------------
 # Allowlist tinh thần: chỉ cache low-risk (FAQ / giải thích tài liệu đã ingest).

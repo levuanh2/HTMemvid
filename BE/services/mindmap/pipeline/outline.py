@@ -11,6 +11,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 from app.clients.llm_factory import ask_ai
+from app.graphs.logger import ctx_submit  # Phase 0: propagate LLM counter qua pool
 from services.mindmap.jsonrepair import repair_json_text
 from services.mindmap.pipeline.schema import sanitize_nodes
 
@@ -49,8 +50,8 @@ def build_outline(mm_input: dict, *, model: str, timeout_sec: float = 120.0) -> 
             f"<<<TÀI LIỆU>>>\n" + "\n\n".join(parts) + "\n<<<HẾT>>>")
     ex = ThreadPoolExecutor(max_workers=1)
     try:
-        fut = ex.submit(ask_ai, user, system_prompt=_SYSTEM, model=model,
-                        feature="mindmap", options={"temperature": 0.15})
+        fut = ctx_submit(ex, ask_ai, user, system_prompt=_SYSTEM, model=model,
+                         feature="mindmap", options={"temperature": 0.15})
         raw = fut.result(timeout=timeout_sec)
         data = json.loads(repair_json_text(str(raw)))
     except Exception as e:

@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional
 
 from app.clients.llm_factory import ask_ai
+from app.graphs.logger import ctx_submit  # Phase 0: propagate LLM counter qua pool
 from services.mindmap.jsonrepair import repair_json_text
 from services.mindmap.pipeline.schema import REL_TYPES, validate_relations
 
@@ -31,8 +32,8 @@ def extract_relations(nodes: list[dict], *, model: str, timeout_sec: float = 120
     raw = None
     ex = ThreadPoolExecutor(max_workers=1)
     try:
-        fut = ex.submit(ask_ai, "Các nhánh:\n" + "\n".join(lines), system_prompt=_SYSTEM,
-                        model=model, feature="mindmap", options={"temperature": 0.15})
+        fut = ctx_submit(ex, ask_ai, "Các nhánh:\n" + "\n".join(lines), system_prompt=_SYSTEM,
+                         model=model, feature="mindmap", options={"temperature": 0.15})
         raw = fut.result(timeout=timeout_sec)
         data = json.loads(repair_json_text(str(raw)))
         return validate_relations(data.get("relations") or [], nodes), False

@@ -47,10 +47,11 @@ class LocalSummaryPipeline:
         timeout = self._timeout()
 
         def _ask(prompt):
+            from app.graphs.logger import ctx_submit  # Phase 0: propagate LLM counter
             ex = ThreadPoolExecutor(max_workers=1)
             try:
-                fut = ex.submit(ask_ai, prompt, system_prompt=COVERAGE_SYSTEM,
-                                model=None, feature="summary", options={"temperature": 0})
+                fut = ctx_submit(ex, ask_ai, prompt, system_prompt=COVERAGE_SYSTEM,
+                                 model=None, feature="summary", options={"temperature": 0})
                 return fut.result(timeout=timeout)
             finally:
                 ex.shutdown(wait=False)     # timeout phải trả ngay (bài học warmup)

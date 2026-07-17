@@ -471,6 +471,13 @@ def ask_ai(
     feature='mindmap' -> qwen2.5:14b
     timeout: số giây tối đa cho LLM call (None = không giới hạn)
     """
+    # Phase 0 observability: đếm MỘT lần cho mỗi invocation (cả nhánh gateway lẫn
+    # in-process; cache hit không đi qua ask_ai). Đếm không bao giờ chặn call.
+    try:
+        from app.graphs.logger import note_llm_call
+        note_llm_call()
+    except Exception:
+        pass
     _addr = _gateway_addr()
     if _addr:
         # Định tuyến qua llm-gateway. Temperature resolve theo `feature` ở PHÍA SERVER

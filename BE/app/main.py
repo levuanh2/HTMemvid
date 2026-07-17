@@ -300,11 +300,15 @@ _SF_RELEASE_LUA = (
     "return redis.call('del', KEYS[1]) else return 0 end"
 )
 
-_SF_METRICS: Dict[str, int] = {
+# Phase 0 observability: MirroredCounter = dict như cũ + mirror INCRBY lên Redis
+# (fail-open) để /stats đọc được tổng cross-worker.
+from app.clients.redis_client import MirroredCounter as _MirroredCounter
+
+_SF_METRICS: Dict[str, int] = _MirroredCounter("sf", {
     "leader": 0, "follower": 0, "follower_hit": 0, "timeout": 0,
     "fail_open": 0, "bypass_unsafe": 0, "bypass_followup": 0, "bypass_disabled": 0,
     "redis_error_fail_open": 0, "dup_avoided": 0, "release_ok": 0, "release_fail": 0,
-}
+})
 
 
 def _sf_enabled() -> bool:
@@ -524,10 +528,10 @@ redis.call('EXPIRE',KEYS[1],ttl)
 return {allowed, retry}
 """
 
-_OVERLOAD_METRICS: Dict[str, int] = {
+_OVERLOAD_METRICS: Dict[str, int] = _MirroredCounter("overload", {
     "rate_limit_allowed": 0, "rate_limit_rejected": 0, "rate_limit_redis_error": 0,
     "admission_rejected": 0,
-}
+})
 
 
 def _ovl_log(event: str, **kv: object) -> None:
@@ -835,6 +839,87 @@ def stats():
         },
         # Phase 5 RQ queue depth (fail-open; zeros when QUEUE_ENABLED=false or Redis down).
         "queue": _queue_stats_safe(),
+        # Phase 0 observability: LLM invocations (per-worker; cache hit không đếm).
+        "llm": {"calls_local": _llm_calls_total_safe()},
+        # Cross-worker totals mirrored via Redis INCRBY; None khi Redis vắng/hỏng
+        # (fail-open — client rơi về các counter local per-worker phía trên).
+        "aggregate": _metric_totals_safe(),
+    }), 200
+
+
+def _llm_calls_total_safe() -> int:
+    try:
+        from app.graphs.logger import llm_calls_total
+        return llm_calls_total()
+    except Exception:
+        return 0
+
+
+def _metric_totals_safe():
+    try:
+        from app.clients.redis_client import metric_totals
+        return metric_totals({
+            "sf": list(_SF_METRICS.keys()),
+            "overload": list(_OVERLOAD_METRICS.keys()),
+            "cache": list(llm_cache.METRICS.keys()),
+            "llm": ["calls"],
+        })
+    except Exception:
+        return None
+
+
+@app.get('/jobs/<job_id>/timeline')
+def job_timeline(job_id: str):
+    """Phase 0 observability — timeline read-only cho MỘT job từ logs.sqlite
+    node_logs. Cùng contract auth/owner với /summary-status: job lạ và job của
+    user khác đều 404 (no existence oracle). Logs DB hỏng/vắng → events []."""
+    uid, err = _require_app_user()
+    if err:
+        return err
+    from app.domains.jobs.jobs_store import get_job as _js_get
+    j = _js_get(job_id)
+    if not j:
+        return jsonify({"error": "Job not found"}), 404
+    if _auth_protect_enabled() and j.get("user_id") != uid:
+        return jsonify({"error": "Job not found"}), 404  # foreign job → no oracle
+    from app.graphs.logger import read_job_events
+    events = read_job_events(job_id)
+    total_ms = 0.0
+    llm_calls = None
+    for e in events:
+        try:
+            total_ms += float(e.get("duration_ms") or 0.0)
+        except Exception:
+            pass
+        md = e.get("metadata") or {}
+        if "llm_calls" in md:
+            try:
+                llm_calls = int(md["llm_calls"])
+            except Exception:
+                pass
+    # queue_wait_ms best-effort: created_at (isoformat UTC) → ts event đầu tiên
+    # (sqlite datetime('now'), UTC). Parse lỗi → None, không bao giờ 500.
+    queue_wait_ms = None
+    try:
+        if events and j.get("created_at"):
+            from datetime import datetime, timezone
+            t0 = datetime.fromisoformat(str(j["created_at"]))
+            if t0.tzinfo is None:
+                t0 = t0.replace(tzinfo=timezone.utc)
+            t1 = datetime.strptime(str(events[0]["ts"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            qw = (t1 - t0).total_seconds() * 1000.0
+            if qw >= 0:
+                queue_wait_ms = round(qw, 1)
+    except Exception:
+        pass
+    return jsonify({
+        "job_id": job_id,
+        "job_type": j.get("job_type"),
+        "status": j.get("status"),
+        "progress": j.get("progress", 0),
+        "events": events,
+        "totals": {"total_ms": total_ms, "llm_calls": llm_calls,
+                   "queue_wait_ms": queue_wait_ms},
     }), 200
 
 
@@ -2093,6 +2178,9 @@ def query():
     def process_query_job(jid: str, question: str, sources: list, use_mem: bool, category: str | None = None, language: str | None = None) -> None:
         start_ts = time.time()
         sf_lock = None  # (key, token) if we became the single-flight leader
+        # Phase 0 observability: counter LLM call per-query (cache hit = 0 call).
+        from app.graphs.logger import begin_llm_count, flush_llm_count
+        _llm_counter = begin_llm_count()
         try:
             with query_jobs_lock:
                 if jid in query_jobs:
@@ -2222,6 +2310,7 @@ def query():
                     pass
             logging.exception("[QUERY_JOB] job_id=%s failed: %s", jid, err_txt)
         finally:
+            flush_llm_count(jid, _llm_counter)
             # Release the single-flight lock AFTER finalize (cache already written) so
             # followers read the leader's answer rather than racing an empty cache.
             if sf_lock:
@@ -2461,6 +2550,10 @@ def run_summary_job(job_id: str, source_names: list[str], mm_input: dict,
     done/result write (atomic); this wraps errors -> job error. Cancellation uses the
     existing cooperative flag (summary graph `_guard` checks jobs_store cancel_requested)."""
     print(f"summary_job_running job_id={job_id}", flush=True)
+    # Phase 0 observability: counter LLM call per-job (pipeline pool propagate
+    # qua ctx_submit); flush thành node event "LLMCalls" kể cả khi job lỗi.
+    from app.graphs.logger import begin_llm_count, flush_llm_count
+    _llm_counter = begin_llm_count()
     try:
         from app.domains.jobs.jobs_store import update_job as _uj
         try:
@@ -2480,6 +2573,8 @@ def run_summary_job(job_id: str, source_names: list[str], mm_input: dict,
         from app.domains.jobs.jobs_store import update_job
         update_job(job_id, status="error", error_text=_job_error_text(e))
         print(f"summary_job_failed job_id={job_id} err={str(e)[:80]}", flush=True)
+    finally:
+        flush_llm_count(job_id, _llm_counter)
 
 
 # -------------------------
@@ -2811,6 +2906,8 @@ def run_mindmap_job(job_id: str, source_names: list[str], mm_input: dict, conten
     done/result write (atomic); this wraps errors -> job error. Cancellation uses the
     existing cooperative flag (mindmap graph `_guard` checks jobs_store cancel_requested)."""
     print(f"mindmap_job_running job_id={job_id}", flush=True)
+    from app.graphs.logger import begin_llm_count, flush_llm_count
+    _llm_counter = begin_llm_count()
     try:
         from app.domains.jobs.jobs_store import update_job as _uj
         try:
@@ -2829,6 +2926,8 @@ def run_mindmap_job(job_id: str, source_names: list[str], mm_input: dict, conten
         from app.domains.jobs.jobs_store import update_job
         update_job(job_id, status="error", error_text=_job_error_text(e))
         print(f"mindmap_job_failed job_id={job_id} err={str(e)[:80]}", flush=True)
+    finally:
+        flush_llm_count(job_id, _llm_counter)
 
 
 # -------------------------

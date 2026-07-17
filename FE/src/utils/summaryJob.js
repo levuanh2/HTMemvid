@@ -32,6 +32,7 @@ export const createSummaryPoller = (opts) =>
       notFound: "Không tìm thấy job trên server (có thể đã bị dọn). Hãy tạo lại tóm tắt.",
       lost: (n) => `Mất liên lạc với server sau ${n} lần thử. Hãy tạo lại tóm tắt.`,
       error: "Lỗi khi tạo tóm tắt.",
+      interrupted: "Tạo tóm tắt bị gián đoạn trên server (có thể do khởi động lại). Hãy tạo lại tóm tắt.",
     },
   });
 

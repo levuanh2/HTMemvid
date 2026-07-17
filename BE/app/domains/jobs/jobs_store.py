@@ -175,12 +175,25 @@ def get_job(job_id: str) -> Optional[dict]:
 
 
 def request_cancel(job_id: str) -> None:
+    """Cancel hợp tác: set cờ cho executor đang sống ack giữa các node. Job KHÔNG còn
+    executor (pending trong queue, hoặc interrupted sau restart) chuyển THẲNG sang
+    'cancelled' — không ai ack cờ, FE sẽ poll vô hạn ("Đang huỷ…" kẹt mãi).
+    Trạng thái terminal (done/error/cancelled) giữ nguyên → idempotent, cancel job đã
+    xong là no-op an toàn."""
     init_db()
     with _lock:
         conn = get_conn()
         try:
             conn.execute(
-                "UPDATE jobs SET cancel_requested=1, updated_at=? WHERE job_id=?",
+                """
+                UPDATE jobs SET cancel_requested=1,
+                       status = CASE WHEN status IN ('pending','interrupted')
+                                     THEN 'cancelled' ELSE status END,
+                       current_node = CASE WHEN status IN ('pending','interrupted')
+                                     THEN 'Cancelled' ELSE current_node END,
+                       updated_at=?
+                WHERE job_id=?
+                """,
                 (_now(), job_id),
             )
             conn.commit()

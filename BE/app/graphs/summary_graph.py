@@ -144,6 +144,10 @@ def build_summary_graph(*, data_dir: Path, index_meta_path: Path,
         # persist. pipeline.coverage returns None when SUMMARY_COVERAGE=0 or the judge fails —
         # never rewrites the summary, never repairs. Double-guarded: judge already swallows its
         # own errors, and this try keeps a judge fault from failing the summary job.
+        # Cancel checkpoint TRƯỚC judge (LLM call dài): cancel đến sau entry-guard của
+        # node này vẫn phải dừng — không tốn judge call cho job đã bị huỷ.
+        if _cancelled(state["job_id"]):
+            return {**state, "cancelled": True, "current_node": "AssemblePersist"}
         cov_fn = getattr(pipeline, "coverage", None)
         if cov_fn is not None:
             try:
@@ -152,6 +156,10 @@ def build_summary_graph(*, data_dir: Path, index_meta_path: Path,
                 cov = None
             if cov:
                 record["coverage"] = cov
+        # Cancel checkpoint TRƯỚC persist: cancel đã yêu cầu → KHÔNG persist bản nháp,
+        # KHÔNG set done — route sang Cancelled. (done-with-result vẫn atomic bên dưới.)
+        if _cancelled(state["job_id"]):
+            return {**state, "cancelled": True, "current_node": "AssemblePersist"}
         # Phase D: bind the record owner (None when unprotected → today's behavior).
         persist_record(record, user_id=state.get("user_id"))
         # done PHẢI đi cùng result trong MỘT update (bài học race 2026-07-06)

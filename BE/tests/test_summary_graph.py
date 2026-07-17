@@ -204,6 +204,62 @@ def test_cancel_before_summarize_stops_without_persist(tmp_path, monkeypatch):
     assert saved == []
 
 
+def test_cancel_mid_summarize_reaches_terminal_cancelled(tmp_path, monkeypatch):
+    # Cancel đến GIỮA SummarizeSections (user bấm Huỷ lúc 36%) → job PHẢI kết thúc
+    # status="cancelled", không persist, không done — UI thoát "Đang huỷ…".
+    from app.domains.jobs import jobs_store as js
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    js.create_job("sj5", job_type="summary", status="running")
+
+    class MidCancelPipeline:
+        def sections(self, mm):
+            return [{"id": "s1", "title": "A", "chunk_refs": ["0"], "order": 0}], "headings"
+
+        def summarize(self, mm, sections, length_mode="medium", progress_cb=None, cancel_cb=None):
+            if progress_cb:
+                progress_cb(36, "Đang tóm tắt mục 1/7...")
+            js.request_cancel("sj5")            # user bấm Huỷ ngay lúc này
+            assert cancel_cb and cancel_cb() is True
+            # early-return đúng như summarize_sections làm khi cancel
+            return ([dict(s, summary="", key_points=[]) for s in sections], [])
+
+        def synthesize(self, sections, doc_title="", length_mode="medium"):
+            raise AssertionError("synthesize không được chạy sau cancel")
+
+    saved, updates = [], []
+    g = _build(tmp_path, pipeline=MidCancelPipeline(), persist=saved.append, jobs_updates=updates)
+    out = g.invoke({"job_id": "sj5", "source_names": ["a_docx"], "progress": 0,
+                    "current_node": "", "error": None},
+                   config={"configurable": {"thread_id": "sj5"}})
+    assert out.get("cancelled") is True
+    assert saved == []
+    assert any(u.get("status") == "cancelled" for u in updates)
+    assert not any(u.get("status") == "done" for u in updates)
+
+
+def test_cancel_during_coverage_judge_does_not_persist_or_done(tmp_path, monkeypatch):
+    # Cancel đến trong lúc judge chạy (LLM dài, sau entry-guard của AssemblePersist)
+    # → checkpoint trước persist phải chặn: không persist, không done.
+    from app.domains.jobs import jobs_store as js
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    js.create_job("sj6", job_type="summary", status="running")
+
+    class CancelDuringJudge(_BasePipeline):
+        def coverage(self, record):
+            js.request_cancel("sj6")            # user bấm Huỷ khi judge đang chấm
+            return {"covered": [], "missing": [], "unsupported": [], "vague": False, "notes": []}
+
+    saved, updates = [], []
+    g = _build(tmp_path, pipeline=CancelDuringJudge(), persist=saved.append, jobs_updates=updates)
+    out = g.invoke({"job_id": "sj6", "source_names": ["a_docx"], "progress": 0,
+                    "current_node": "", "error": None},
+                   config={"configurable": {"thread_id": "sj6"}})
+    assert out.get("cancelled") is True
+    assert saved == []                                   # bản nháp không được lưu
+    assert any(u.get("status") == "cancelled" for u in updates)
+    assert not any(u.get("status") == "done" for u in updates)
+
+
 def test_degraded_stages_flow_to_generator_missing(tmp_path):
     class DegradedPipeline:
         def sections(self, mm):

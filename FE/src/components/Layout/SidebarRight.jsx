@@ -15,6 +15,7 @@ import { createMindmapPoller, stageLabel } from "../../utils/mindmapJob";
 import { createSummaryPoller, stageLabel as summaryStageLabel, LENGTH_MODES, SUMMARY_MODES } from "../../utils/summaryJob";
 import { saveActiveMindmapJob, loadActiveMindmapJob, clearActiveMindmapJob } from "../../utils/activeMindmapJob";
 import { saveActiveSummaryJob, loadActiveSummaryJob, clearActiveSummaryJob } from "../../utils/activeSummaryJob";
+import { confirmRegenerateIfDirty, stallBannerVisible, canRetry } from "../../utils/jobRecovery";
 import { toast } from "../ui/Toaster";
 import { Icon } from "../ui/Icon";
 import Spinner from "../ui/Spinner";
@@ -89,8 +90,20 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   // opens the overlay while the job runs, so it stays false for that path.
   const [mindmapGenerating, setMindmapGenerating] = useState(false);
   const [mindmapCancelNotice, setMindmapCancelNotice] = useState(false);
+  // PR#8 retry: context của lần chạy hỏng gần nhất ({sources, ...params}) —
+  // null = không có lỗi cần retry. Set ở onError, clear khi chạy job mới.
+  const [mindmapRetry, setMindmapRetry] = useState(null);
+  const [summaryRetry, setSummaryRetry] = useState(null);
+  // PR#8 stall banner snooze ("Chờ tiếp"): timestamp lần dismiss gần nhất.
+  const [stallDismissedAt, setStallDismissedAt] = useState({ mindmap: 0, summary: 0 });
 
   const frameRefs = useRef(new Map());
+  // PR#8: dirty state của viewer mindmap (thread từ MindElixirView.onDirtyChange)
+  // — dùng để confirm trước khi "Tạo lại" thay thế bản đang sửa.
+  const mindmapDirtyRef = useRef(false);
+  // Params của lần chạy gần nhất — nguồn context cho retry (kể cả job resume).
+  const lastMindmapRunRef = useRef(null);
+  const lastSummaryRunRef = useRef(null);
 
   // ── Mindmap job refs ───────────────────────────────
   const pollerRef = useRef(null); // fresh createMindmapPoller() instance per run
@@ -189,6 +202,8 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     if (isRegenerate) setMindmapGenerating(false);
     console.error("Mind Map Error:", err);
     toast(err?.message ? `Không tạo được sơ đồ: ${err.message}` : "Không tạo được sơ đồ, kiểm tra console!", { type: "error" });
+    // PR#8: giữ context để hiện "Thử lại" — chỉ khi biết sources của lần chạy hỏng.
+    setMindmapRetry(lastMindmapRunRef.current);
   }, []);
 
   // Starts a fresh poller instance (Task 1's createMindmapPoller has no hard
@@ -253,10 +268,17 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   useEffect(() => {
     const active = loadActiveMindmapJob();
     if (active?.jobId) {
+      // PR#8: job resume cũng cần retry-context nếu nó hỏng sau này.
+      lastMindmapRunRef.current = { sources: active.sources || [], force: false };
       startMindmapPoller(active.jobId, active.sources, { resumed: true, isRegenerate: false });
     }
     const activeSummary = loadActiveSummaryJob();
     if (activeSummary?.jobId) {
+      lastSummaryRunRef.current = {
+        sources: activeSummary.sources || [],
+        lengthMode: activeSummary.extra?.lengthMode || "medium",
+        mode: activeSummary.extra?.mode || "standard",
+      };
       startSummaryPoller(activeSummary.jobId, { resumed: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -269,6 +291,9 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   // mindmap viewer's degraded-banner "Tạo lại" (force=true, bypasses cache).
   const runMindmapGeneration = async (sourceList, { force = false } = {}) => {
     if (!sourceList?.length) { toast("Vui lòng chọn ít nhất một tài liệu để tạo Sơ đồ!", { type: "error" }); return; }
+    // PR#8: chạy job mới = hết trạng thái lỗi cũ; nhớ params cho retry lần sau.
+    lastMindmapRunRef.current = { sources: sourceList, force };
+    setMindmapRetry(null);
     setLoading(true);
     setMindmapCancelNotice(false);
     cancelNoticeShownRef.current = false;
@@ -307,6 +332,9 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   // the sources it was built from (falls back to the sidebar selection if the
   // record doesn't carry its own).
   const handleRegenerateMindMap = () => {
+    // PR#8: bản đang mở có chỉnh sửa chưa lưu → confirm trước khi thay thế
+    // (fix thật của known-issue "Tạo lại xong ghi đè chỉnh sửa chưa lưu").
+    if (!confirmRegenerateIfDirty(mindmapDirtyRef.current, window.confirm)) return;
     const sources = showModalMap?.sources?.length ? showModalMap.sources : selectedSources;
     return runMindmapGeneration(sources, { force: true });
   };
@@ -375,6 +403,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     clearActiveSummaryJob();
     console.error("Summary Error:", err);
     toast(_errText(err, "Không tạo được tóm tắt", "Không tạo được tóm tắt, kiểm tra console!"), { type: "error" });
+    setSummaryRetry(lastSummaryRunRef.current); // PR#8: context cho nút "Thử lại"
   }, []);
 
   const startSummaryPoller = useCallback((jobId, { resumed = false } = {}) => {
@@ -425,12 +454,16 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     poller.start(jobId);
   }, [handleSummaryDone, handleSummaryError]);
 
-  const handleGenerateSummary = async () => {
-    if (!selectedSources?.length) { toast("Vui lòng chọn ít nhất một tài liệu để tóm tắt!", { type: "error" }); return; }
+  // PR#8: tách runner nhận params tường minh — "Tạo tóm tắt" dùng state hiện tại,
+  // "Thử lại" dùng đúng params của lần chạy hỏng (không lệ thuộc selection đã đổi).
+  const runSummaryGeneration = async (sourceList, { lengthMode, mode }) => {
+    if (!sourceList?.length) { toast("Vui lòng chọn ít nhất một tài liệu để tóm tắt!", { type: "error" }); return; }
+    lastSummaryRunRef.current = { sources: sourceList, lengthMode, mode };
+    setSummaryRetry(null);
     setSummaryLoading(true);
     setSummaryCancelNotice(false);
     try {
-      const startData = await generateSummary(selectedSources, { lengthMode: summaryLength, mode: summaryMode });
+      const startData = await generateSummary(sourceList, { lengthMode, mode });
       if (startData.error) throw new Error(startData.error);
 
       if (startData.status === "done" && startData.result) {
@@ -440,7 +473,7 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
       }
 
       if (!startData.job_id) throw new Error("Server không trả job_id.");
-      saveActiveSummaryJob({ jobId: startData.job_id, sources: selectedSources, startedAt: Date.now(), extra: { lengthMode: summaryLength, mode: summaryMode } });
+      saveActiveSummaryJob({ jobId: startData.job_id, sources: sourceList, startedAt: Date.now(), extra: { lengthMode, mode } });
       startSummaryPoller(startData.job_id, { resumed: false });
     } catch (err) {
       handleSummaryError(err);
@@ -448,6 +481,9 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
       setSummaryLoading(false);
     }
   };
+
+  const handleGenerateSummary = () =>
+    runSummaryGeneration(selectedSources, { lengthMode: summaryLength, mode: summaryMode });
 
   // Cancel thật (mirror mindmap): gửi cờ rồi TIẾP TỤC poll tới terminal —
   // LLM call đang bay không dừng được, job có thể vẫn kịp xong.
@@ -492,6 +528,26 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
   const onCancelJob = artifactTab === "mindmap" ? handleCancelMindMap : handleCancelSummary;
   const cancelNotice = artifactTab === "mindmap" ? mindmapCancelNotice : summaryCancelNotice;
   const cancelNoticeText = artifactTab === "mindmap" ? "Đã huỷ tạo sơ đồ." : "Đã huỷ tạo tóm tắt.";
+  // PR#8: retry theo tab — chỉ hiện khi có context và không có job đang chạy.
+  const retryCtx = artifactTab === "mindmap" ? mindmapRetry : summaryRetry;
+  const showRetry = !isGenerating && canRetry(retryCtx);
+  const handleRetry = () => {
+    if (!canRetry(retryCtx)) return;
+    if (artifactTab === "mindmap") {
+      runMindmapGeneration(retryCtx.sources, { force: Boolean(retryCtx.force) });
+    } else {
+      runSummaryGeneration(retryCtx.sources, {
+        lengthMode: retryCtx.lengthMode || "medium",
+        mode: retryCtx.mode || "standard",
+      });
+    }
+  };
+  // PR#8: stall banner có snooze — "Chờ tiếp" ẩn cảnh báo thêm một cửa sổ nữa,
+  // poller vẫn poll (KHÔNG auto-cancel, KHÔNG hard-timeout).
+  const stallShown = jobUi.running && stallBannerVisible(
+    jobUi.stalled, stallDismissedAt[artifactTab], Date.now());
+  const dismissStall = () =>
+    setStallDismissedAt((prev) => ({ ...prev, [artifactTab]: Date.now() }));
 
   // MindMapModal forwards `data` to MindmapView verbatim, so this is how
   // generating/progress/cancel/ask-about reach it without widening that
@@ -504,6 +560,9 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
     onCancel: handleCancelMindMap,
     onAskAbout: handleAskAbout,
     onSaved: handleMindmapSaved,
+    // PR#8: viewer báo dirty lên đây — handleRegenerateMindMap đọc ref này để
+    // confirm trước khi "Tạo lại" thay thế bản đang sửa.
+    onDirtyChange: (d) => { mindmapDirtyRef.current = Boolean(d); },
   } : null), [showModalMap, mindmapGenerating, mindmapJobUi.progress, handleCancelMindMap, handleAskAbout, handleMindmapSaved]);
 
   // ── Render ────────────────────────────────────────
@@ -655,19 +714,38 @@ export default function SidebarRight({ selectedSources, evidence, highlight, onH
             (jobUi/onCancelJob đã switch theo artifactTab ở phần Derived). */}
         {jobUi.running && (
           <div className="mx-3 mb-2 flex items-center gap-2 rounded-[8px] border px-2.5 py-2 text-[12px]"
-            style={{ borderColor: jobUi.stalled ? "var(--warn)" : "var(--border-strong)", background: "var(--bg-elevated)" }}>
+            style={{ borderColor: stallShown ? "var(--warn)" : "var(--border-strong)", background: "var(--bg-elevated)" }}>
             <span className="animate-spin inline-block w-3.5 h-3.5 rounded-full border-2 border-t-transparent"
               style={{ borderColor: "var(--accent)", borderTopColor: "transparent" }} aria-hidden />
             <span className="flex-1 truncate text-text-secondary">
-              {jobUi.stalled ? "Có vẻ kẹt — vẫn đang chờ máy chủ…" : jobUi.label}
+              {stallShown ? "Job có thể đang kẹt hoặc máy chủ đang bận." : jobUi.label}
               {typeof jobUi.progress === "number" ? ` (${jobUi.progress}%)` : ""}
             </span>
+            {/* PR#8: stall → chọn Chờ tiếp (snooze cảnh báo, vẫn poll) hoặc Huỷ.
+                KHÔNG auto-cancel, KHÔNG hard-timeout — job nền dài là bình thường. */}
+            {stallShown && (
+              <button onClick={dismissStall} className="text-[12px] underline text-text-muted hover:text-accent">Chờ tiếp</button>
+            )}
             <button onClick={onCancelJob} className="text-[12px] underline text-text-muted hover:text-accent">Huỷ</button>
           </div>
         )}
         {!jobUi.running && cancelNotice && (
           <div className="mt-2 flex items-center gap-1.5 text-[12px] text-text-muted">
             <Icon name="Ban" size={12} /> {cancelNoticeText}
+          </div>
+        )}
+        {/* PR#8: job hỏng → đường phục hồi một-bấm với đúng params lần chạy trước.
+            Không có context (chưa chạy lần nào trong phiên) → nút Tạo thường ở trên. */}
+        {showRetry && (
+          <div className="mx-3 mb-2 flex items-center gap-2 rounded-[8px] border px-2.5 py-2 text-[12px]"
+            style={{ borderColor: "var(--warn)", background: "var(--bg-elevated)" }}>
+            <Icon name="TriangleAlert" size={13} className="text-text-muted" aria-hidden />
+            <span className="flex-1 truncate text-text-secondary">
+              {artifactTab === "mindmap" ? "Tạo sơ đồ không thành công." : "Tạo tóm tắt không thành công."}
+            </span>
+            <button onClick={handleRetry} className="text-[12px] underline text-text-muted hover:text-accent inline-flex items-center gap-1">
+              <Icon name="RotateCcw" size={12} aria-hidden /> Thử lại
+            </button>
           </div>
         )}
 

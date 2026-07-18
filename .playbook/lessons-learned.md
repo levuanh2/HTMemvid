@@ -1,5 +1,220 @@
 # Lessons Learned
 
+## Summary v3 Phase 5 (2026-07-16): coverage judge — JUDGE-ONLY, flag-gated, cache key gồm chế độ coverage
+
+- **Root cause / bối cảnh:** bản tóm tắt không có chẩn đoán chất lượng có cấu trúc cho nội dung
+  thiếu (missing) / không được nguồn hậu thuẫn (unsupported) / mơ hồ (vague). Cần một tầng CHẤM
+  điểm mà KHÔNG viết lại, KHÔNG auto-repair.
+- **Thiết kế (đã làm):** cờ `SUMMARY_COVERAGE` (mặc định OFF). Module thuần
+  `services/summary/pipeline/coverage.py`: `build_coverage_payload` (trích artifact source-backed:
+  overview + section title/summary/key_points/facts + study.key_concepts — KHÔNG gửi raw chunk,
+  KHÔNG gửi pointer/id để model không bịa trang/nguồn), `build_coverage_prompt` (luật JSON keys +
+  "do not rewrite"), `sanitize_coverage` (list ép str + cap, vague ép bool, chỉ giữ COVERAGE_KEYS,
+  non-dict→None), `judge_coverage(record, *, ask_fn, enabled)` (inject ask_fn → test được bằng fake
+  LLM; nuốt MỌI lỗi/JSON hỏng → None). Adapter `LocalSummaryPipeline.coverage` resolve cờ + bọc
+  ask_ai (threadpool+timeout, temp 0). Graph `assemble_node` gọi `getattr(pipeline,"coverage",None)`
+  SAU dedupe_record, TRƯỚC persist — pipeline không có method thì bỏ qua (back-compat stub cũ).
+- **Prevention / bài học:**
+  1. Coverage đổi output khi bật → **PHẢI vào content_hash** (thêm param `coverage`), KHÔNG chỉ bump
+     PIPELINE_VERSION. Bump v5→v6 vô hiệu cache cũ chung; nhưng cùng version, coverage ON vs OFF là
+     HAI output khác nhau → nếu không hash cờ coverage, bản cache lúc OFF bị trả về khi bật ON
+     (stale no-coverage). Cả route (`_summary_input_and_hash`) LẪN `collect_node` phải mirror cờ.
+  2. Judge phải là JUDGE-ONLY tuyệt đối: 2 lớp guard (judge tự nuốt lỗi + graph bọc try) để judge
+     lỗi KHÔNG BAO GIỜ chặn job tóm tắt. Test chứng minh: fake LLM raise / JSON hỏng → record vẫn
+     done, chỉ thiếu key `coverage`.
+  3. Inject `ask_fn` (không gọi thẳng ask_ai trong hàm judge) → test pure với fake LLM, không cần
+     model/monkeypatch. Adapter mới lo model/timeout/threadpool.
+  4. Coverage ADDITIVE: OFF → record omit key `coverage` byte-for-byte như cũ. Không đụng
+     overview/sections/study — test chứng minh text không đổi sau judge.
+- **Regression:** `test_summary_coverage.py` (17: sanitize valid/coerce/cap/vague/non-dict/unknown-
+  keys/item-len, payload source-backed + no pointer leak, prompt JSON keys + no-rewrite, judge
+  disabled/valid/malformed/raises/no-mutate), `test_summary_schema.py` (v6, content_hash gồm coverage,
+  build_record omit/include coverage), `test_summary_graph.py` (skip khi None, include khi judge trả
+  diag + overview/sections/study không đổi + persist atomic, judge failure không fail job). 107 non-route
+  summary pass. KHÔNG đụng FE.
+
+## Summary v3 Phase 4 (2026-07-16): dedup THUẦN sau assembly — khớp CHÍNH XÁC chuẩn hoá, không gộp mờ
+
+- **Root cause / bối cảnh:** tóm tắt nhiều mục có thể lặp cùng fact/key_point (mục con nhắc lại mục
+  cha; study gom facts các section). Cần tỉa lặp mà KHÔNG viết lại, KHÔNG bịa, KHÔNG mất fact duy nhất.
+- **Thiết kế (đã làm):** module thuần `services/summary/pipeline/dedup.py` — `normalize_text` (lower +
+  strip + gộp khoảng trắng + bỏ dấu câu nhẹ, GIỮ diacritics), `dedupe_strings` (khớp CHÍNH XÁC theo
+  normalize; trùng → giữ bản DÀI hơn, bằng → giữ bản đầu; giữ thứ tự), `dedupe_facts/sections/study/
+  record`. Gọi 1 chỗ: `summary_graph.assemble_node` SAU `build_record`, TRƯỚC persist (không node mới,
+  không đổi cancel/error/done-atomic). Dedup: section.key_points + facts.*; study.* lists; self_check
+  theo câu hỏi chuẩn hoá; recommended_review theo key `(chunk_id, section_title, reason)`. KHÔNG đụng
+  summary/overview/chunk_refs/pointers.
+- **Prevention / bài học:**
+  1. Dedup văn bản người dùng thấy → CHỈ khớp CHÍNH XÁC bản chuẩn hoá (case/space/dấu câu). KHÔNG
+     containment/fuzzy: "Đệ quy" là substring của "Đệ quy tuyến tính" nhưng KHÁC nghĩa — gộp = mất
+     fact/gộp ý không liên quan. Bảo thủ thắng thông minh ở đây.
+  2. GIỮ diacritics khi chuẩn hoá (đừng NFKD bỏ dấu): "bàn" ≠ "bán". Bỏ dấu = gộp nhầm homograph.
+  3. Tie-break "giữ bản dài hơn" CHỈ kích hoạt khi normalize BẰNG nhau (khác dấu câu/hoa-thường);
+     biến thể thêm TỪ mới normalize KHÁC → giữ cả hai (đúng: không mất chi tiết). (Test ban đầu sai kỳ
+     vọng — tưởng "Đệ quy" gộp vào "Đệ quy: hàm gọi..." nhưng chúng normalize khác nên đều giữ.)
+  4. Đổi NỘI DUNG output (dù thuần, deterministic) → bump PIPELINE_VERSION v4→v5, cache cũ chưa-dedup
+     miss + tái sinh. schema_version GIỮ 2 (shape không đổi).
+- **Regression:** `test_summary_dedup.py` (13: normalize, exact-dup, keep-longest, giữ thứ tự,
+  conservative-không-gộp-na-ná, giữ-fact-thêm-từ, facts/sections/study/self_check/review dedup, pointer
+  không mất, record null-safe), `test_summary_graph.py::test_dedup_removes_repeated_keypoints_and_facts`,
+  `test_summary_schema.py` version v5. 85 non-route summary pass. KHÔNG đụng FE.
+
+## Summary v3 Phase 3 (2026-07-16): study là trục `mode` (mục đích), KHÔNG phải length_mode (độ dài)
+
+- **Root cause / bối cảnh:** "study/ôn tập" từng dễ bị mô hình hoá như một giá trị length_mode thứ 4.
+  Sai: độ dài (short/medium/detailed) và mục đích (standard/study) là HAI trục độc lập — gộp thì mất
+  tổ hợp short+study, medium+study...
+- **Thiết kế (đã làm):** thêm trục `mode = standard|study` TRỰC GIAO length_mode. Thread qua route
+  `/generate-summary` (thiếu→standard; sai→400 rõ ràng, KHÁC length_mode âm thầm rơi về medium) →
+  content_hash (mode trong hash, standard/study khác cache) → job state → graph → record `mode` +
+  block `study`. Block `study` DETERMINISTIC (0 LLM) `services/summary/pipeline/study.py::build_study`:
+  gom facts (Phase 1) + pointers (Phase 2) các section → key_concepts/definitions/formulas/examples/
+  common_mistakes + self_check (suy từ open_questions/important_terms, fallback key_points) +
+  recommended_review (CHỈ từ pointer thật). FE: picker standard/study + render block study null-safe.
+- **Prevention / bài học:**
+  1. Phân biệt "độ dài" vs "mục đích/định dạng" = trục riêng. Đừng nhồi option mới vào enum sẵn có
+     chỉ vì rẻ — mất tính tổ hợp + ngữ nghĩa lẫn lộn.
+  2. mode SAI → 400 (người dùng gửi rác cần biết); length_mode sai → rơi default (độ dài chỉ là gợi ý).
+     Hai policy validate khác nhau CÓ CHỦ ĐÍCH — ghi rõ.
+  3. study block THUẦN từ facts/pointers đã có → 0 LLM, 0 bịa, test được. self_check suy từ facts
+     (không hỏi model sinh câu ngoài tài liệu). recommended_review chỉ từ pointer thật (không bịa trang).
+  4. mode ĐỘC LẬP cờ SUMMARY_FACTS: facts vắng (flag OFF) → study degrade an toàn (key_concepts/
+     self_check fallback key_points, block facts rỗng, review vẫn có từ pointers). Không ép facts.
+  5. Đổi shape output (thêm mode/study) → bump PIPELINE_VERSION v3→v4. schema_version GIỮ 2 (additive);
+     record cũ thiếu mode → FE default standard, thiếu study → không render.
+- **Regression:** `test_summary_study.py` (7: aggregate+dedupe, self_check open_q→terms→fallback,
+  không bịa quá facts, review chỉ từ pointer thật, degrade rỗng), `test_summary_schema.py` (mode trong
+  hash, build_record default/invalid/study/none, version v4), `test_summary_graph.py` (standard→no study,
+  study→block từ facts+pointers). FE `summaryJob.test.js` (SUMMARY_MODES, normalize mode/study),
+  `api.test.js` (generateSummary gửi mode). BE 72 non-route pass; FE 129 pass + build.
+- **Lưu ý env:** `test_summary_routes.py` giờ 11 fail — TẤT CẢ là `401 UNAUTHORIZED` (test client không
+  auth; AUTH_PROTECT bật). Pre-existing (baseline cũng 401), gồm cả test invalid-mode-400 (401 chặn
+  trước khi tới handler). Không sửa auth env (ngoài phạm vi). Mock route đã cập nhật đúng chữ ký mới
+  (`_summary_input_and_hash(sources, length_mode, mode)`, `_start_summary_job(..., length_mode, mode)`).
+
+## Summary v3 Phase 2 (2026-07-16): source pointer suy DETERMINISTIC từ metadata chunk, KHÔNG từ LLM
+
+- **Root cause / bối cảnh:** summary section chỉ có `chunk_refs` (id) — không đủ metadata để FE
+  "quay lại đúng trang/mục" review. page/source/heading ĐÃ có ở ingest nhưng
+  `collect_mindmap_input` DROP (chỉ giữ key/text/heading_path/chunk_keys).
+- **Thiết kế (đã làm):** (1) `input_collector` propagate ADDITIVE `source_stem/source_id/page/
+  chunk_index` per chunk (chỉ khi có; mindmap bỏ qua field lạ — guard test). (2) module thuần
+  `services/summary/pipeline/pointers.py::build_pointers(mm_input, chunk_ids)` map id→pointer
+  {chunk_id, source_id, source_stem, page, section_title, heading_path, chunk_index} — theo thứ tự
+  chunk_ids, dedupe, BỎ id lạ (không bịa). (3) `attach_pointers` gắn `section["pointers"]` từ
+  chunk_refs, gọi trong `summary_graph.assemble_node` TRƯỚC `sanitize_sections`. (4) schema
+  `sanitize_pointers` chuẩn hoá (giữ POINTER_KEYS, cần chunk_id, dedupe, field lạ bỏ).
+- **Prevention / bài học:**
+  1. Metadata điều hướng nguồn (page/section) phải suy DETERMINISTIC từ chunk metadata, TUYỆT ĐỐI
+     không nhờ LLM sinh (LLM bịa số trang/tên mục). Pointer 0 LLM, thuần, test được.
+  2. `heading_path` trong mm_input là CHUỖI (' > ' join) — mindmap skeleton còn `.split(' > ')`.
+     KHÔNG đổi sang list ở mm_input (vỡ mindmap); pointer tách list Ở TẦNG POINTER, giữ chuỗi ở mm.
+  3. Field đi qua collector DÙNG CHUNG (mindmap+summary) → ADDITIVE, guard test "mindmap fields
+     intact + build được" (bài học input_collector chung).
+  4. Output shape đổi (thêm `pointers`) → vẫn **bump PIPELINE_VERSION** (v2→v3) dù pointers là suy
+     diễn deterministic: cache cũ thiếu pointers phải miss + tái sinh. schema_version GIỮ 2 (additive).
+  5. Pointer ĐỘC LẬP cờ SUMMARY_FACTS — suy từ chunk_refs, chạy cả summary chuẩn (facts OFF).
+- **Regression:** `test_summary_pointers.py` (9: map metadata, section_title=mục cuối heading, sub-key→
+  parent meta, missing→None, unknown id bỏ, dedupe giữ thứ tự, no-heading→None, attach per-section);
+  `test_summary_schema.py` (sanitize_pointers keep/dedupe/drop-no-id, missing safe, non-list, sanitize_sections
+  giữ pointers + chunk_refs không đổi, omit khi rỗng, version=v3); `test_mindmap_input_collector.py`
+  (metadata additive + mindmap fields intact). 58 non-route summary + 14 mindmap pass.
+
+## Summary v3 Phase 1 (2026-07-16): facts ledger là IR chuẩn, flag-gated, cache vô hiệu qua PIPELINE_VERSION
+
+- **Root cause / bối cảnh:** tóm tắt v2 sinh `summary` thẳng từ chunk, KHÔNG có tầng trung gian có
+  cấu trúc → khó suy ra study-mode/pointer/coverage sau này, và summary dễ trôi khỏi nội dung nguồn.
+- **Thiết kế (đã làm):** thêm `facts` ledger per-section (7 key: key_points/definitions/formulas/
+  examples/important_terms/common_mistakes/open_questions) sau cờ `SUMMARY_FACTS` (mặc định OFF).
+  MỘT LLM call/section trả cả facts LẪN summary; prompt bắt "trích facts trước, viết summary CHỈ từ
+  facts". `_summarize_one(..., with_facts=False, two_pass=False)` — `two_pass=True` raise
+  NotImplementedError (seam tương lai, KHÔNG cài). `summarize_sections(with_facts=None)` resolve từ
+  `get_settings().summary_facts`. Nguồn sự thật FACTS_KEYS + `sanitize_facts` ở `schema.py`, import
+  vào summarize (DRY, một hành vi coerce/cap). `sanitize_sections` giữ facts khi có, BỎ key nếu rỗng.
+- **Prevention / bài học:**
+  1. Thêm field output ảnh hưởng cache → **bump `PIPELINE_VERSION`** (`summary_sections_v1`→`v2`);
+     content_hash tự vô hiệu cache cũ, không migrate.
+  2. Cờ tính năng OFF phải bảo toàn shape cũ BYTE-FOR-BYTE (trừ version): section không facts → KHÔNG
+     có key `facts` (không sinh key rỗng). Test `test_with_facts_false_omits_facts_and_keeps_old_shape`.
+  3. facts là free-text → chỉ coerce str + strip + drop-empty + cap (MAX_FACT_ITEMS), KHÔNG lọc theo
+     allowed_set như `chunk_keys` (id). `chunk_keys` vẫn lọc id thật (chống bịa, bài học enrich).
+  4. Lỗi LLM/degraded → KHÔNG bịa facts (section giữ skeleton, không key facts). Trung thực degraded.
+- **Regression:** `test_summary_schema.py` (version bump, sanitize_facts coerce/drop/cap, sanitize_sections
+  giữ/bỏ facts, build_record pass-through), `test_summary_summarize.py` (parse 7 key, coerce, hallucinated
+  chunk_keys lọc, retry-once, degraded không bịa, two_pass raise, prompt chứa 7 key + length rule).
+  44 passed (schema/summarize/sections/synthesize/graph-THẬT/store).
+- **Lưu ý env:** `test_summary_routes.py` có 8 fail TỪ TRƯỚC (xác nhận bằng stash: fail y hệt trên
+  origin/main sạch) — do redis/ollama warmup trong route test, KHÔNG liên quan facts.
+
+## Container mind-elixir (2026-07-16): `absolute inset-0` bị chính thư viện ghi đè → canvas sụp chiều cao
+
+- **Bối cảnh:** phần tử truyền vào `new MindElixir({ el })` trong `MindElixirView.jsx` mang class
+  Tailwind `absolute inset-0`. mind-elixir constructor set `el.style.position = "relative"` INLINE
+  (verified dist: `C.style.position = "relative"` với `C = this.el`). Inline THẮNG class → `absolute`
+  vô hiệu, `inset-0` không còn tác dụng (inset chỉ áp cho positioned-absolute/fixed). `el` rơi về
+  normal-flow không chiều cao rõ ràng.
+- **Root cause (đo trực tiếp qua Playwright A/B trên bundle thật):** `.map-container{height:100%}`
+  (CSS của mind-elixir) resolve theo chiều cao của `el`; `el` sụp về chiều cao NỘI DUNG → cả canvas
+  sụp. Đo: `el`/`.map-container`/`me-nodes` = **363px** trong slot **800px** (khớp triệu chứng báo
+  cáo ~307/747). Hệ quả: vùng dưới là dead space (kéo/click không ăn), `scaleFit()` tính theo container
+  nhỏ nên "Vừa khung" căn sai khung nhìn.
+- **Cách xử lý:** `el` sang normal-flow lấp đầy cha đã-định-cỡ: wrapper giữ `relative flex-1 min-h-0
+  overflow-hidden`, ref target đổi `absolute inset-0` → `h-full w-full min-h-0`; thêm backstop CSS
+  `.me-container{ width:100%; height:100%; min-height:0 }` (không phụ thuộc Tailwind class sống sót
+  qua purge). Sau fix đo lại: `el`/`.map-container` = **800px** = slot, `elementFromPoint` ở đáy =
+  `.map-container` (live canvas, hết dead space). Không đụng pan/zoom (unchanged PR #8).
+- **Prevention:**
+  1. Phần tử giao cho thư viện render (mind-elixir, và mọi lib tự set inline style) → ĐỪNG dựa vào
+     positioning class (`absolute inset-0`) mà lib có thể ghi đè bằng inline `position`. Cho nó
+     normal-flow `w/h-full` dưới một cha đã định-cỡ, hoặc set width/height 100% trực tiếp.
+  2. Verify layout bằng SỐ ĐO thật (Playwright đo `getBoundingClientRect` A/B before/after trên
+     CHÍNH bundle đã build + lib thật), đừng tin "build xanh" — cùng họ bài học mind-elixir/style.
+  3. `elementFromPoint(x, đáy)` là cách rẻ + trung thực để chứng minh "hết dead space" mà không phải
+     tổng hợp sự kiện pointer (pan của mind-elixir bám pointer-capture, khó tái tạo bằng synthetic
+     event ngoài app thật → dùng làm tín hiệu phụ, đừng gate).
+
+## Viewport sơ đồ (2026-07-15): pan/zoom ĐÃ CÓ SẴN — thiếu là chrome, không phải tính năng
+
+- **Bối cảnh:** user báo "sơ đồ lớn khó di chuyển". Đọc `node_modules/mind-elixir/dist/MindElixir.js`
+  TRƯỚC khi viết code: thư viện đã tự lo TOÀN BỘ pan/zoom — wheel = pan, shift+wheel = pan ngang,
+  ctrl/cmd+wheel = zoom bám con trỏ, kéo-trái nền = pan (nhờ `mouseSelectionButton: 2` viewer đã set),
+  touch/pointer pan, Space+kéo, và cả keymap `Ctrl/Cmd + =/-/0`. Không thiếu một gesture nào.
+  Thiếu là **khả năng khám phá**: không có readout, không fit, không reset, nền không có con trỏ grab
+  (thư viện chỉ đặt grab khi `.space-pressed`), dòng gợi ý "kéo nền" lại bị `display:none` dưới 640px —
+  tức là ẩn đúng chỗ cảm ứng cần nhất. Viết pan/zoom custom sẽ là đập đi làm lại thứ đã chạy tốt,
+  và còn phải đánh nhau với chính transform thư viện ghi lên `.map-canvas`.
+- **Bug thật tìm ra khi đọc dist (không phải từ report):** `zoomBy` cũ kẹp `Math.min(2, Math.max(0.4, …))`
+  trong khi mặc định thư viện là `scaleMin = 0.2` / `scaleMax = 1.4`, VÀ guard trong `scale()` là
+  **REJECT chứ không phải clamp**: `if (e < this.scaleMin && e < this.scaleVal || e > this.scaleMax && e > this.scaleVal) return`.
+  ⇒ Nút "Phóng to" **chết im lặng ở 1.4** (bấm tiếp không làm gì, không lỗi, không log). Sửa: đọc
+  `mind.scaleMin`/`mind.scaleMax` từ CHÍNH instance rồi kẹp trước khi gọi — scale() luôn nhận.
+- **Prevention:**
+  1. Trước khi xây tính năng viewport/tương tác trên một thư viện render: **grep dist của nó** tìm
+     `wheel`/`scale`/`move`/keymap handler. Ở đây `scaleFit()`, bus event `scale`, `scaleMin/Max` đều
+     có sẵn và không hề dùng — build custom là thêm nợ, không thêm giá trị.
+  2. Hằng số giới hạn của thư viện phải ĐỌC TỪ INSTANCE, đừng hardcode ở FE. Hardcode lệch với thật =
+     control chết im lặng (loại lỗi không có exception, không test nào bắt, chỉ user thấy).
+  3. Đọc kỹ guard là *reject* hay *clamp*. Reject + giá trị ngoài range = no-op câm; clamp thì tự sửa.
+  4. `scaleFit()` gọi `Ce(this, !0)` — tham số `true` ÉP nhánh căn-theo-nodes **bất kể** option
+     `alignment`. Nên KHÔNG cần truyền `alignment: "nodes"` (doc thư viện gợi ý "better with") →
+     tránh được rủi ro đổi `transformOrigin` của `toCenter()` mặc định. Đọc code thắng đọc doc.
+  5. `toCenter()` GIỮ NGUYÊN `scaleVal` (`pn` vẽ lại transform với `scale(${this.scaleVal})`) → "đặt lại
+     khung nhìn" phải gọi CẢ `scale(1)` LẪN `toCenter()`; chỉ một cái là nửa vời.
+- **Regression:** `FE/src/utils/mindmapViewport.test.js` (17 test, THUẦN — không import React/mind-elixir,
+  chạy được ở env `node` mặc định vì repo chưa có jsdom). Cover: clamp min/max, `nextScale` kẹp trần/sàn,
+  `formatZoom` làm tròn, keymap `+ = - _ 0 f/F`, null khi đang gõ, null khi có ctrl/meta/alt
+  (nhường keymap `Ctrl/Cmd +/-/0` sẵn có của thư viện — kiểm tra bảng keymap trong dist trước khi
+  bind phím mới, đừng đoán). Suite FE: 104 passed (19 file).
+- **Guard non-finite (không phải phòng xa vu vơ):** `scaleFit()` tính
+  `this.nodes.offsetHeight / this.container.offsetHeight` — container ẩn/chưa layout cho `0/0 = NaN` →
+  `scaleVal = NaN` → `transform: scale(NaN)` vỡ map + readout in "NaN%". `clampScale`/`formatZoom` chặn
+  tại tầng thuần.
+- **CSS:** đặc tả cố ý — `.me-container{cursor:grab}` = (0,1,0) THUA `.map-container me-parent{cursor:pointer}`
+  = (0,1,1) của thư viện nên node giữ pointer, chỉ nền grab; thêm `me-parent:active` (0,2,1) để bấm node
+  không nháy grabbing. Verify rule vào bundle bằng `grep` `dist/assets/*.css` (đúng bài học
+  "đừng tin build xanh" của mind-elixir/style) — lưu ý grep class arbitrary Tailwind phải tính ký tự
+  escape (`min-w-\[46px\]`), grep thô sẽ tưởng nhầm là bị rớt.
+
 ## Summary v2 (2026-07-06): thay pipeline 6-technique bằng section-first mirror mindmap
 
 - **Bối cảnh:** tóm tắt cũ (`summarize_advanced.py` FROST/CoD/DANCER/extract/fact-check)

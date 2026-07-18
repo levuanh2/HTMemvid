@@ -1,5 +1,90 @@
 # Lessons Learned
 
+## 2026-07-18 — Optimization wave PR#1–PR#8/#9 lessons
+
+Đợt tối ưu 8 PR (observability → SQLite reliability → FE delivery → LLM lanes →
+warmup → ingest/index → retrieval hot-path → UX recovery). Toàn bộ merged,
+smoke-verified trên stack `memvid_auth_smoke` rebuild từ code mới.
+
+### Observability trước, tối ưu sau
+
+- PR#1 đi đầu có chủ đích: timeline per-job, đếm LLM call, cache hit/miss metrics
+  và smoke số đo thật PHẢI có trước khi tối ưu — không đo thì "tối ưu" là đoán.
+- Metric per-process đánh lừa dưới nhiều gunicorn worker — phải mirror/aggregate
+  (Redis INCRBY, `/stats["aggregate"]`); `llm_calls_local=0` trên worker này trong
+  khi worker kia đếm là hành vi bình thường, đọc aggregate.
+- Mọi instrumentation fail-open tuyệt đối: Redis chết thì đếm local vẫn chạy,
+  đường sản phẩm không bao giờ hỏng vì đo đạc.
+
+### SQLite/job reliability
+
+- Retention + stuck-job sweep chỉ đụng status TERMINAL và phải idempotent;
+  pending không bao giờ bị sweep (queue backlog chờ lâu là hợp lệ).
+- `token_buffer` chỉ được xoá TRONG CÙNG UPDATE với terminal status + result
+  (atomic — không bao giờ mất buffer trước khi result an toàn).
+- `interrupted` là ngoại lệ: HITL/query-resume còn cần buffer → không xoá,
+  để retention dọn record cũ.
+
+### FE delivery
+
+- `import * as Lucide` + lookup động giết tree-shaking → cả ~600 icon (~550KB)
+  vào bundle chính. Registry tường minh + guard-test quét source là fix đúng.
+- Lazy modal + manualChunks cắt 60% initial payload (374→148KB gzip) mà không
+  đụng backend — quick win rẻ nhất của cả đợt.
+- Streaming markdown re-parse TOÀN BỘ text mỗi token = O(n²); throttle flush
+  (150ms) giữ preview mượt mà chi phí phẳng.
+
+### LLM throughput
+
+- Gateway lanes chặn batch chiếm hết slot; lane suy được từ `AskRequest.feature`
+  CÓ SẴN — không cần proto change, mindmap-service ngoài process hưởng free.
+- **Phát hiện kiến trúc quan trọng:** đường answer chính của `/query` (LC qa_chain
+  → `get_llm` → ChatOllama trực tiếp) KHÔNG đi qua gateway — lanes chỉ bảo vệ
+  gián tiếp qua hàng đợi Ollama. Đưa qa_chain qua gateway = PR tương lai.
+- Single-flight follower ngủ chờ leader không được giữ admission slot; kế toán
+  release phải qua MỘT cờ (`holds_admission`) — `threading.Semaphore` thường
+  double-release là phình capacity VĨNH VIỄN, không có exception nào báo.
+
+### Warmup + môi trường Docker
+
+- Warmup phải lấy model từ chính `_model_map` runtime — default hardcode riêng
+  ở warmup ("qwen3.5:9b") trôi khỏi config thật mà không test nào bắt.
+- Bake SAI model vào image tệ hơn không bake: MiniLM ~90MB nằm chết trong image
+  trong khi bge-m3 vẫn tải lúc boot. Model to (bge-m3 ~2.3GB) → HF cache volume,
+  không nhét image.
+- Trong container, `OLLAMA_HOST=http://localhost:11434` trỏ vào CHÍNH container
+  → connection refused; compose stack phải dùng `http://host.docker.internal:11434`.
+  Warmup fail-open che lỗi này khỏi health — phải đọc log `[warmup]` khi smoke.
+
+### Ingest/index
+
+- Full-dir backup mỗi append là chi phí lớn nhất của ingest mà KHÔNG có đường
+  restore tự động — backup chỉ giữ cho thao tác phá huỷ (delete/rebuild),
+  append dựa vào atomic write (tmp+replace) là đủ.
+- Prefix-embedding legacy (embed lần 2 mỗi chunk vào index.json) không consumer
+  thật nào đọc → gate flag OFF; kiểm consumer bằng grep TRƯỚC khi tin comment.
+
+### Retrieval hot path
+
+- Cache state đã load theo freshness key `(mtime_ns, size)` — mọi write path đều
+  ghi lại file nên staleness window = 0, per-process là đủ.
+- Writer PHẢI load fresh (mặc định), chỉ read-only path opt-in cache — writer
+  mutate instance trước save, mutate bản cache query đang search là race.
+- `chunk_id -> chunk` dict build một lần thay next()-scan O(n) mỗi hit —
+  cùng kết quả, đo được bằng test equivalence.
+
+### UX recovery + release readiness
+
+- Regenerate phá huỷ phải confirm khi dirty; dirty state phải THREAD lên parent
+  (`onDirtyChange`) — parent không tự biết viewer đang sửa dở.
+- Retry phải dùng params ĐÃ CHỤP của lần chạy hỏng (ref), không phải selection
+  hiện tại của UI — user đã đổi selection thì retry sai tài liệu.
+- Stall UX: chỉ cảnh báo + Chờ tiếp/Huỷ, KHÔNG BAO GIỜ auto-cancel hay
+  hard-timeout phía client (bài học cũ FE 180s bỏ cuộc giữa chừng vẫn đúng).
+- Smoke checklist phải có bước "chứng minh container chạy code MỚI" (grep chuỗi
+  đặc trưng commit trong container) — smoke này bắt được stack 11h stale thật;
+  và cấm `down -v` mặc định để không mất hf_cache/data user.
+
 ## Summary v3 Phase 5 (2026-07-16): coverage judge — JUDGE-ONLY, flag-gated, cache key gồm chế độ coverage
 
 - **Root cause / bối cảnh:** bản tóm tắt không có chẩn đoán chất lượng có cấu trúc cho nội dung

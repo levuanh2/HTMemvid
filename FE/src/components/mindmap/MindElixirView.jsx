@@ -120,6 +120,10 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
     });
     mind.bus.addListener("operation", () => setDirty(true));
 
+    // PR#8: record mới swap vào (data.id đổi) = phiên chỉnh sửa cũ kết thúc —
+    // reset dirty để trạng thái không rò sang map mới.
+    setDirty(false);
+
     return () => {
       // mind-elixir's own destroy() unregisters the bus listeners above AND the
       // container keydown handler it wires internally (init() -> On()); without
@@ -131,6 +135,14 @@ export default function MindElixirView({ data, onClose, onRegenerate, regenerati
       containerRef.current && (containerRef.current.innerHTML = "");
     };
   }, [data?.id]);
+
+  // PR#8: thread dirty lên SidebarRight (data.onDirtyChange) — parent cần biết
+  // để confirm TRƯỚC khi "Tạo lại" thay thế bản đang sửa (fix thật của known-issue
+  // "Tạo lại xong ghi đè chỉnh sửa chưa lưu"). Unmount → báo false (hết phiên sửa).
+  useEffect(() => {
+    data?.onDirtyChange?.(dirty);
+  }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { data?.onDirtyChange?.(false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Task 8: explicit Save → PUT /mindmaps/<id>. Only reachable when the button
   // is rendered (data.id real + not "preview" + not generating — see JSX

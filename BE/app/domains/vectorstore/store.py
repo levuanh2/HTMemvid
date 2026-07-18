@@ -261,7 +261,24 @@ def _backup_dir_before_write(index_dir: Path, keep: int = 3) -> None:
     cleanup_old_backups(index_dir, max_keep=keep)
 
 
-def load_vectorstore() -> Optional[FAISS]:
+# PR#7: cache LC vectorstore per-process cho HOT PATH retrieval — FAISS.load_local
+# deserialize toàn bộ docstore pickle MỖI query. Key = mtime+size của index.faiss
+# + index.pkl → append/delete/rebuild (đều save_local ghi lại file) tự vô hiệu ở
+# lần đọc kế. Writer (append/remove) PHẢI load fresh (use_cache=False, mặc định):
+# họ mutate instance rồi save — mutate bản cache đang được query dùng là race.
+_VS_CACHE: dict = {"key": None, "vs": None}
+
+
+def _vs_cache_key() -> Optional[tuple]:
+    try:
+        f = (INDEX_DIR / "index.faiss").stat()
+        p = (INDEX_DIR / "index.pkl").stat()
+        return (f.st_mtime_ns, f.st_size, p.st_mtime_ns, p.st_size)
+    except OSError:
+        return None
+
+
+def load_vectorstore(use_cache: bool = False) -> Optional[FAISS]:
     if _skip_faiss_in_ci():
         return None
     faiss_file = INDEX_DIR / "index.faiss"
@@ -270,10 +287,17 @@ def load_vectorstore() -> Optional[FAISS]:
     pkl = INDEX_DIR / "index.pkl"
     if not pkl.exists():
         return None
+    key = _vs_cache_key() if use_cache else None
+    if use_cache and key is not None and _VS_CACHE["key"] == key and _VS_CACHE["vs"] is not None:
+        return _VS_CACHE["vs"]
     try:
-        return FAISS.load_local(str(INDEX_DIR), get_embeddings(), allow_dangerous_deserialization=True)
+        vs = FAISS.load_local(str(INDEX_DIR), get_embeddings(), allow_dangerous_deserialization=True)
     except Exception:
         return None
+    if use_cache and key is not None:
+        _VS_CACHE["key"] = key
+        _VS_CACHE["vs"] = vs
+    return vs
 
 
 def append_chunks_to_lc_index(
@@ -460,7 +484,7 @@ def rebuild_lc_index_from_meta(meta: Dict[str, Any]) -> None:
 
 
 def similarity_search_lc(query: str, k: int = 5) -> List[str]:
-    vs = load_vectorstore()
+    vs = load_vectorstore(use_cache=True)  # hot path đọc-only → dùng cache
     if vs is None:
         return []
     docs = vs.similarity_search(query, k=k)
@@ -652,7 +676,7 @@ def search_index(query: str, k: int = 5) -> List[str]:
 
     if _use_lc_vector_store():
         try:
-            if load_vectorstore() is not None:
+            if load_vectorstore(use_cache=True) is not None:
                 return similarity_search_lc(query, k)
         except Exception as exc:
             print(f"[vector_store] LC search failed, fallback legacy: {exc}")
